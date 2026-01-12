@@ -266,9 +266,6 @@ contract ParaswapParser is ICalldataParser {
                 // beneficiary is 7th field - mask to 160 bits
                 recipient := and(calldataload(add(swapDataOffset, 192)), ADDRESS_MASK)
             }
-            if (recipient == address(0)) {
-                recipient = defaultRecipient;
-            }
         } else if (selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR || selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR) {
             // Bounds check
             if (data.length < MIN_UNISWAP_SWAP_LENGTH) revert InvalidCalldata();
@@ -277,9 +274,6 @@ contract ParaswapParser is ICalldataParser {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
                 // beneficiary is 7th field - mask to 160 bits
                 recipient := and(calldataload(add(swapDataOffset, 192)), ADDRESS_MASK)
-            }
-            if (recipient == address(0)) {
-                recipient = defaultRecipient;
             }
         } else if (selector == SIMPLE_SWAP_SELECTOR) {
             // Bounds check
@@ -290,9 +284,6 @@ contract ParaswapParser is ICalldataParser {
                 // beneficiary is 10th field - mask to 160 bits
                 recipient := and(calldataload(add(dataOffset, 288)), ADDRESS_MASK)
             }
-            if (recipient == address(0)) {
-                recipient = defaultRecipient;
-            }
         } else if (selector == MULTI_SWAP_SELECTOR || selector == MEGA_SWAP_SELECTOR) {
             // Bounds check
             if (data.length < MIN_MULTI_SWAP_LENGTH) revert InvalidCalldata();
@@ -302,9 +293,6 @@ contract ParaswapParser is ICalldataParser {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
                 // beneficiary is 5th field - mask to 160 bits
                 recipient := and(calldataload(add(dataOffset, 128)), ADDRESS_MASK)
-            }
-            if (recipient == address(0)) {
-                recipient = defaultRecipient;
             }
         } else {
             revert UnsupportedSelector();

@@ -151,11 +151,6 @@ contract MorphoBlueParser is ICalldataParser {
             // BORROW_SELECTOR intentionally not supported - reverts here
             revert UnsupportedSelector();
         }
-
-        // If recipient is zero, use default (Safe address)
-        if (recipient == address(0)) {
-            recipient = defaultRecipient;
-        }
     }
 
     /// @inheritdoc ICalldataParser

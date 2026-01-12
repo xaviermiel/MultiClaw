@@ -285,8 +285,8 @@ contract UniswapV4Parser is ICalldataParser {
             }
         }
 
-        // No explicit recipient found, use default (Safe address)
-        return defaultRecipient;
+        // No explicit recipient found
+        return address(0);
     }
 
     /// @inheritdoc ICalldataParser

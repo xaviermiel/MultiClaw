@@ -280,7 +280,7 @@ contract UniversalRouterParser is ICalldataParser {
         }
 
         // No explicit final recipient found, use default (Safe address)
-        return defaultRecipient;
+        return address(0);
     }
 
     /// @notice Resolve special Universal Router address constants

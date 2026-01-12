@@ -187,9 +187,6 @@ contract KyberSwapParser is ICalldataParser {
                 // dstReceiver at slot 6 (offset 192) - mask to 160 bits
                 recipient := and(calldataload(add(descOffset, 192)), ADDRESS_MASK)
             }
-            if (recipient == address(0)) {
-                recipient = defaultRecipient;
-            }
         } else if (selector == SWAP_SIMPLE_MODE_SELECTOR) {
             // Bounds check for SWAP_SIMPLE_MODE calldata
             if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
@@ -197,9 +194,6 @@ contract KyberSwapParser is ICalldataParser {
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
                 recipient := and(calldataload(add(descOffset, 192)), ADDRESS_MASK)
-            }
-            if (recipient == address(0)) {
-                recipient = defaultRecipient;
             }
         } else {
             revert UnsupportedSelector();

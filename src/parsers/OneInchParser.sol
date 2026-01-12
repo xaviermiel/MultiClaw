@@ -225,10 +225,6 @@ contract OneInchParser is ICalldataParser {
                 // dstReceiver is 4th field = offset 96 (3 * 32) - mask to 160 bits
                 recipient := and(calldataload(add(structOffset, 96)), ADDRESS_MASK)
             }
-            // If dstReceiver is address(0), use default
-            if (recipient == address(0)) {
-                recipient = defaultRecipient;
-            }
         } else if (selector == UNOSWAP_TO_SELECTOR) {
             // unoswapTo(address to, ...)
             (recipient,,,,) = abi.decode(data[4:], (address, address, uint256, uint256, uint256[]));
