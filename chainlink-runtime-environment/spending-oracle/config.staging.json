@@ -1,5 +1,6 @@
 {
   "moduleAddress": "0xDFF3cBa01F63152446E442133B664baE5A42bf39",
+  "registryAddress": "",
   "chainSelectorName": "ethereum-testnet-sepolia",
   "gasLimit": "500000",
   "proxyAddress": "0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C",

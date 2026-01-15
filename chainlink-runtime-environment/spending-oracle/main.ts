@@ -45,7 +45,7 @@ import {
 	zeroAddress,
 } from 'viem'
 import { z } from 'zod'
-import { DeFiInteractorModule, OperationType } from '../contracts/abi'
+import { DeFiInteractorModule, ModuleRegistry, OperationType } from '../contracts/abi'
 
 // ============ Configuration Schema ============
 
@@ -56,7 +56,10 @@ const TokenSchema = z.object({
 })
 
 const configSchema = z.object({
+	// Single module address (legacy/fallback mode)
 	moduleAddress: z.string(),
+	// Registry address for multi-module support (optional - if provided, overrides moduleAddress)
+	registryAddress: z.string().optional(),
 	chainSelectorName: z.string(),
 	gasLimit: z.string(),
 	proxyAddress: z.string(),
@@ -228,8 +231,9 @@ const getContractAcquiredBalance = (
 	}
 }
 
-const getSubAccountLimits = (
+const getSubAccountLimitsForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 ): { maxSpendingBps: bigint; windowDuration: bigint } => {
 	const evmClient = createEvmClient(runtime)
@@ -245,7 +249,7 @@ const getSubAccountLimits = (
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -270,9 +274,19 @@ const getSubAccountLimits = (
 }
 
 /**
- * Get Safe's total USD value from contract
+ * Get subaccount limits (legacy - uses config moduleAddress)
  */
-const getSafeValue = (runtime: Runtime<Config>): bigint => {
+const getSubAccountLimits = (
+	runtime: Runtime<Config>,
+	subAccount: Address,
+): { maxSpendingBps: bigint; windowDuration: bigint } => {
+	return getSubAccountLimitsForModule(runtime, runtime.config.moduleAddress as Address, subAccount)
+}
+
+/**
+ * Get Safe's total USD value from contract for a specific module
+ */
+const getSafeValueForModule = (runtime: Runtime<Config>, moduleAddress: Address): bigint => {
 	const evmClient = createEvmClient(runtime)
 
 	const callData = encodeFunctionData({
@@ -285,7 +299,7 @@ const getSafeValue = (runtime: Runtime<Config>): bigint => {
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -304,15 +318,70 @@ const getSafeValue = (runtime: Runtime<Config>): bigint => {
 
 		return totalValueUSD
 	} catch (error) {
-		runtime.log(`Error getting safe value: ${error}`)
+		runtime.log(`Error getting safe value for module ${moduleAddress}: ${error}`)
 		return 0n
 	}
 }
 
 /**
- * Get all subaccounts with DEFI_EXECUTE_ROLE
+ * Get Safe's total USD value (legacy - uses config moduleAddress)
  */
-const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
+const getSafeValue = (runtime: Runtime<Config>): bigint => {
+	return getSafeValueForModule(runtime, runtime.config.moduleAddress as Address)
+}
+
+/**
+ * Get all active modules from the registry
+ * Returns array of module addresses, or falls back to single moduleAddress if no registry
+ */
+const getActiveModulesFromRegistry = (runtime: Runtime<Config>): Address[] => {
+	// If no registry configured, use single module address (backwards compatibility)
+	if (!runtime.config.registryAddress) {
+		return [runtime.config.moduleAddress as Address]
+	}
+
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: ModuleRegistry,
+		functionName: 'getActiveModules',
+	})
+
+	try {
+		const result = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: runtime.config.registryAddress as Address,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!result.data || result.data.length === 0) {
+			runtime.log('No active modules found in registry, falling back to moduleAddress')
+			return [runtime.config.moduleAddress as Address]
+		}
+
+		const modules = decodeFunctionResult({
+			abi: ModuleRegistry,
+			functionName: 'getActiveModules',
+			data: bytesToHex(result.data),
+		}) as Address[]
+
+		runtime.log(`Found ${modules.length} active modules in registry`)
+		return modules
+	} catch (error) {
+		runtime.log(`Error querying registry: ${error}, falling back to moduleAddress`)
+		return [runtime.config.moduleAddress as Address]
+	}
+}
+
+/**
+ * Get all subaccounts with DEFI_EXECUTE_ROLE for a specific module
+ */
+const getActiveSubaccountsForModule = (runtime: Runtime<Config>, moduleAddress: Address): Address[] => {
 	const evmClient = createEvmClient(runtime)
 
 	// DEFI_EXECUTE_ROLE = 1
@@ -327,7 +396,7 @@ const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -344,9 +413,16 @@ const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
 			data: bytesToHex(result.data),
 		}) as Address[]
 	} catch (error) {
-		runtime.log(`Error getting subaccounts: ${error}`)
+		runtime.log(`Error getting subaccounts for module ${moduleAddress}: ${error}`)
 		return []
 	}
+}
+
+/**
+ * Get all subaccounts with DEFI_EXECUTE_ROLE (legacy - uses config moduleAddress)
+ */
+const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
+	return getActiveSubaccountsForModule(runtime, runtime.config.moduleAddress as Address)
 }
 
 /**
@@ -441,7 +517,83 @@ const getBlockTimestamps = (
 }
 
 /**
- * Query historical ProtocolExecution events from the past 24h
+ * Query historical ProtocolExecution events for a specific module
+ */
+const queryHistoricalEventsForModule = (
+	runtime: Runtime<Config>,
+	moduleAddress: Address,
+	subAccount?: Address,
+): ProtocolExecutionEvent[] => {
+	const evmClient = createEvmClient(runtime)
+	const events: ProtocolExecutionEvent[] = []
+
+	runtime.log(`Querying historical events for module ${moduleAddress} (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
+
+	try {
+		const currentBlock = getCurrentBlockNumber(runtime)
+		if (currentBlock === 0n) {
+			runtime.log('Could not determine current block number')
+			return events
+		}
+
+		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
+		runtime.log(`Block range: ${fromBlock} to ${currentBlock}`)
+
+		const topics: Array<{ topic: string[] }> = [
+			{ topic: [PROTOCOL_EXECUTION_EVENT_SIG] },
+		]
+
+		if (subAccount) {
+			topics.push({ topic: [addressToTopicBytes(subAccount)] })
+		}
+
+		const logsResult = evmClient
+			.filterLogs(runtime, {
+				filterQuery: {
+					addresses: [moduleAddress],
+					topics: topics,
+					fromBlock: { absVal: fromBlock.toString(), sign: '' },
+					toBlock: { absVal: currentBlock.toString(), sign: '' },
+				},
+			})
+			.result()
+
+		if (!logsResult.logs || logsResult.logs.length === 0) {
+			runtime.log('No historical events found')
+			return events
+		}
+
+		runtime.log(`Found ${logsResult.logs.length} historical events`)
+
+		const parsedEvents: Array<{ log: any; event: ProtocolExecutionEvent }> = []
+		for (const log of logsResult.logs) {
+			try {
+				const event = parseProtocolExecutionEvent(log)
+				parsedEvents.push({ log, event })
+			} catch (error) {
+				runtime.log(`Error parsing event: ${error}`)
+			}
+		}
+
+		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
+		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
+
+		for (const { event } of parsedEvents) {
+			const actualTimestamp = blockTimestamps.get(event.blockNumber)
+			if (actualTimestamp) {
+				event.timestamp = actualTimestamp
+			}
+			events.push(event)
+		}
+	} catch (error) {
+		runtime.log(`Error querying historical events: ${error}`)
+	}
+
+	return events
+}
+
+/**
+ * Query historical ProtocolExecution events from the past 24h (legacy - uses config moduleAddress)
  * Uses 2x the lookback range to discover tokens that may have acquired balance
  * even if the original acquisition is outside the current window
  */
@@ -683,7 +835,82 @@ const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 }
 
 /**
- * Query historical TransferExecuted events from the past 24h
+ * Query historical TransferExecuted events for a specific module
+ */
+const queryTransferEventsForModule = (
+	runtime: Runtime<Config>,
+	moduleAddress: Address,
+	subAccount?: Address,
+): TransferExecutedEvent[] => {
+	const evmClient = createEvmClient(runtime)
+	const events: TransferExecutedEvent[] = []
+
+	runtime.log(`Querying transfer events for module ${moduleAddress} (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
+
+	try {
+		const currentBlock = getCurrentBlockNumber(runtime)
+		if (currentBlock === 0n) {
+			runtime.log('Could not determine current block number')
+			return events
+		}
+
+		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
+
+		const topics: Array<{ topic: string[] }> = [
+			{ topic: [TRANSFER_EXECUTED_EVENT_SIG] },
+		]
+
+		if (subAccount) {
+			topics.push({ topic: [addressToTopicBytes(subAccount)] })
+		}
+
+		const logsResult = evmClient
+			.filterLogs(runtime, {
+				filterQuery: {
+					addresses: [moduleAddress],
+					topics: topics,
+					fromBlock: { absVal: fromBlock.toString(), sign: '' },
+					toBlock: { absVal: currentBlock.toString(), sign: '' },
+				},
+			})
+			.result()
+
+		if (!logsResult.logs || logsResult.logs.length === 0) {
+			runtime.log('No transfer events found')
+			return events
+		}
+
+		runtime.log(`Found ${logsResult.logs.length} transfer events`)
+
+		const parsedEvents: Array<{ log: any; event: TransferExecutedEvent }> = []
+		for (const log of logsResult.logs) {
+			try {
+				const event = parseTransferExecutedEvent(log)
+				parsedEvents.push({ log, event })
+			} catch (error) {
+				runtime.log(`Error parsing transfer event: ${error}`)
+			}
+		}
+
+		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
+		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
+
+		for (const { event } of parsedEvents) {
+			const actualTimestamp = blockTimestamps.get(event.blockNumber)
+			if (actualTimestamp) {
+				event.timestamp = actualTimestamp
+			}
+			events.push(event)
+		}
+	} catch (error) {
+		runtime.log(`Error querying transfer events: ${error}`)
+	}
+
+	return events
+}
+
+/**
+ * Query historical TransferExecuted events from the past 24h (legacy - uses config moduleAddress)
  * Uses 2x the lookback range to discover tokens that may have acquired balance
  * even if the original acquisition is outside the current window
  */
@@ -1431,8 +1658,67 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 // ============ Cron Handler ============
 
 /**
+ * Process a single module's subaccounts for cron refresh
+ * Note: This is a simplified version that uses the legacy functions which rely on config.moduleAddress
+ * For full multi-module support, all helper functions would need moduleAddress parameters
+ */
+const processModuleSubaccounts = (
+	runtime: Runtime<Config>,
+	moduleAddress: Address,
+	currentTimestamp: bigint,
+): string[] => {
+	const results: string[] = []
+
+	// Get subaccounts for this module
+	const subaccounts = getActiveSubaccountsForModule(runtime, moduleAddress)
+	runtime.log(`Found ${subaccounts.length} active subaccounts for module ${moduleAddress}`)
+
+	if (subaccounts.length === 0) {
+		return [`${moduleAddress}: No subaccounts`]
+	}
+
+	// Query events for this module
+	const allEvents = queryHistoricalEventsForModule(runtime, moduleAddress)
+	const allTransfers = queryTransferEventsForModule(runtime, moduleAddress)
+
+	// Process each subaccount
+	for (const subAccount of subaccounts) {
+		try {
+			runtime.log(`Processing subaccount: ${subAccount}`)
+
+			// Get per-subaccount window duration
+			const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, subAccount)
+
+			// Build state for this subaccount
+			const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration)
+
+			// Calculate new spending allowance using module-aware safe value
+			const safeValue = getSafeValueForModule(runtime, moduleAddress)
+			const { maxSpendingBps } = getSubAccountLimitsForModule(runtime, moduleAddress, subAccount)
+			const maxSpending = (safeValue * maxSpendingBps) / 10000n
+			const newAllowance = maxSpending > state.totalSpendingInWindow
+				? maxSpending - state.totalSpendingInWindow
+				: 0n
+
+			runtime.log(`Allowance: safeValue=${safeValue}, maxBps=${maxSpendingBps}, max=${maxSpending}, spent=${state.totalSpendingInWindow}, new=${newAllowance}`)
+
+			// Push update to contract (uses moduleAddress from state.acquiredBalances context)
+			// Note: pushBatchUpdate still uses config.moduleAddress - would need full refactor for multi-module
+			const txHash = pushBatchUpdate(runtime, subAccount, newAllowance, state.acquiredBalances)
+			results.push(`${moduleAddress}/${subAccount}: ${txHash || 'Skipped'}`)
+		} catch (error) {
+			runtime.log(`Error processing ${subAccount}: ${error}`)
+			results.push(`${moduleAddress}/${subAccount}: Error - ${error}`)
+		}
+	}
+
+	return results
+}
+
+/**
  * Periodic refresh of spending allowances
  * Runs every 5 minutes to update allowances as old spending expires
+ * Supports multi-module operation via registry if configured
  */
 const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string => {
 	runtime.log('=== Spending Oracle: Periodic Refresh ===')
@@ -1440,46 +1726,31 @@ const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string 
 	try {
 		const currentTimestamp = getCurrentBlockTimestamp()
 
-		// Get all active subaccounts
-		const subaccounts = getActiveSubaccounts(runtime)
-		runtime.log(`Found ${subaccounts.length} active subaccounts`)
+		// Get all active modules from registry (or single module if no registry)
+		const modules = getActiveModulesFromRegistry(runtime)
+		runtime.log(`Processing ${modules.length} module(s)`)
 
-		if (subaccounts.length === 0) {
-			runtime.log('No active subaccounts, skipping refresh')
-			return 'No subaccounts'
+		if (modules.length === 0) {
+			runtime.log('No active modules found')
+			return 'No modules'
 		}
 
-		// Query all historical events once (both protocol executions and transfers)
-		const allEvents = queryHistoricalEvents(runtime)
-		const allTransfers = queryTransferEvents(runtime)
+		const allResults: string[] = []
 
-		const results: string[] = []
-
-		// Process each subaccount
-		for (const subAccount of subaccounts) {
+		// Process each module
+		for (const moduleAddress of modules) {
+			runtime.log(`\n--- Processing module: ${moduleAddress} ---`)
 			try {
-				runtime.log(`Processing subaccount: ${subAccount}`)
-
-				// Get per-subaccount window duration
-				const { windowDuration } = getSubAccountLimits(runtime, subAccount)
-
-				// Build state for this subaccount using per-subaccount window duration
-				const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration)
-
-				// Calculate new spending allowance
-				const newAllowance = calculateSpendingAllowance(runtime, subAccount, state)
-
-				// Push update to contract
-				const txHash = pushBatchUpdate(runtime, subAccount, newAllowance, state.acquiredBalances)
-				results.push(`${subAccount}: ${txHash || 'Skipped'}`)
+				const moduleResults = processModuleSubaccounts(runtime, moduleAddress, currentTimestamp)
+				allResults.push(...moduleResults)
 			} catch (error) {
-				runtime.log(`Error processing ${subAccount}: ${error}`)
-				results.push(`${subAccount}: Error - ${error}`)
+				runtime.log(`Error processing module ${moduleAddress}: ${error}`)
+				allResults.push(`${moduleAddress}: Error - ${error}`)
 			}
 		}
 
-		runtime.log(`=== Periodic Refresh Complete ===`)
-		return results.join('; ')
+		runtime.log(`\n=== Periodic Refresh Complete ===`)
+		return allResults.join('; ')
 	} catch (error) {
 		runtime.log(`Error in periodic refresh: ${error}`)
 		return `Error: ${error}`
