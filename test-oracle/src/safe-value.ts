@@ -23,6 +23,7 @@ import {
   ChainlinkPriceFeedABI,
   MorphoVaultABI,
   UniswapV2PairABI,
+  ModuleRegistryABI,
 } from './abi.js'
 
 // Initialize clients
@@ -52,9 +53,9 @@ function log(message: string) {
 /**
  * Get the Safe address from the module
  */
-async function getSafeAddress(): Promise<Address> {
+async function getSafeAddress(moduleAddress: Address): Promise<Address> {
   const safeAddress = await publicClient.readContract({
-    address: config.moduleAddress,
+    address: moduleAddress,
     abi: DeFiInteractorModuleABI,
     functionName: 'avatar',
   })
@@ -213,10 +214,10 @@ async function calculateUniswapV2LPValue(
 /**
  * Batch fetch all token balances from the Safe
  */
-async function getBatchTokenBalances(tokenAddresses: Address[]): Promise<Map<string, bigint>> {
+async function getBatchTokenBalances(moduleAddress: Address, tokenAddresses: Address[]): Promise<Map<string, bigint>> {
   try {
     const balances = await publicClient.readContract({
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getTokenBalances',
       args: [tokenAddresses],
@@ -247,15 +248,15 @@ async function getNativeEthBalance(address: Address): Promise<bigint> {
 }
 
 /**
- * Calculate total Safe value
+ * Calculate total Safe value for a specific module
  */
-async function calculateSafeValue(): Promise<bigint> {
+async function calculateSafeValue(moduleAddress: Address): Promise<bigint> {
   const tokens = config.tokens
   let totalValueUSD = 0n
 
   // Get Safe address
-  const safeAddress = await getSafeAddress()
-  log(`Monitoring Safe: ${safeAddress}`)
+  const safeAddress = await getSafeAddress(moduleAddress)
+  log(`Monitoring Safe: ${safeAddress} (module: ${moduleAddress})`)
 
   // First, calculate native ETH value
   const ethBalance = await getNativeEthBalance(safeAddress)
@@ -277,7 +278,7 @@ async function calculateSafeValue(): Promise<bigint> {
 
   // Batch fetch all ERC20 balances
   const tokenAddresses = tokens.map(t => t.address as Address)
-  const balanceMap = await getBatchTokenBalances(tokenAddresses)
+  const balanceMap = await getBatchTokenBalances(moduleAddress, tokenAddresses)
 
   for (const tokenConfig of tokens) {
     const tokenType = tokenConfig.type || 'erc20'
@@ -315,14 +316,14 @@ async function calculateSafeValue(): Promise<bigint> {
 /**
  * Write safe value to the contract
  */
-async function writeSafeValueToChain(totalValueUSD: bigint): Promise<string> {
-  log(`Writing Safe value to chain: ${totalValueUSD} ($${formatUnits(totalValueUSD, 18)} USD)`)
+async function writeSafeValueToChain(moduleAddress: Address, totalValueUSD: bigint): Promise<string> {
+  log(`Writing Safe value to chain: ${totalValueUSD} ($${formatUnits(totalValueUSD, 18)} USD) for module ${moduleAddress}`)
 
   try {
     const hash = await walletClient.writeContract({
       chain: config.chain,
       account,
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'updateSafeValue',
       args: [totalValueUSD],
@@ -349,14 +350,44 @@ const VALUE_CHANGE_THRESHOLD_BPS = BigInt(process.env.SAFE_VALUE_CHANGE_THRESHOL
 // Always update if timestamp is older than this (in seconds)
 // This ensures the contract doesn't reject transactions due to stale data
 const MAX_STALENESS_SECONDS = BigInt(process.env.SAFE_VALUE_MAX_STALENESS_SECONDS || '2700') // 45 minutes
-4
+
+// ============ Multi-Module Support ============
+
+/**
+ * Get active modules from registry, or fall back to single moduleAddress
+ */
+async function getActiveModules(): Promise<Address[]> {
+  if (!config.registryAddress) {
+    // Backwards compatibility: use single module
+    return [config.moduleAddress]
+  }
+
+  try {
+    const modules = await publicClient.readContract({
+      address: config.registryAddress,
+      abi: ModuleRegistryABI,
+      functionName: 'getActiveModules',
+    })
+
+    if (modules.length === 0) {
+      log('Registry returned no active modules, falling back to config.moduleAddress')
+      return [config.moduleAddress]
+    }
+
+    log(`Found ${modules.length} active modules in registry`)
+    return modules as Address[]
+  } catch (error) {
+    log(`Error querying registry, falling back to single module: ${error}`)
+    return [config.moduleAddress]
+  }
+}
 /**
  * Get current on-chain safe value with timestamp
  */
-async function getOnChainSafeValueWithTimestamp(): Promise<{ value: bigint; lastUpdated: bigint }> {
+async function getOnChainSafeValueWithTimestamp(moduleAddress: Address): Promise<{ value: bigint; lastUpdated: bigint }> {
   try {
     const [totalValueUSD, lastUpdated] = await publicClient.readContract({
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSafeValue',
     })
@@ -368,15 +399,15 @@ async function getOnChainSafeValueWithTimestamp(): Promise<{ value: bigint; last
 }
 
 /**
- * Main cron job handler
+ * Process a single module's safe value update
  */
-async function onCronTrigger() {
-  log('=== Safe Value Monitor: Starting check ===')
+async function processModuleSafeValue(moduleAddress: Address) {
+  log(`--- Processing module: ${moduleAddress} ---`)
 
   try {
     const [totalValueUSD, onChainData] = await Promise.all([
-      calculateSafeValue(),
-      getOnChainSafeValueWithTimestamp(),
+      calculateSafeValue(moduleAddress),
+      getOnChainSafeValueWithTimestamp(moduleAddress),
     ])
 
     const { value: onChainValue, lastUpdated } = onChainData
@@ -388,7 +419,6 @@ async function onCronTrigger() {
 
     if (totalValueUSD === 0n) {
       log('Skipping write - total value is 0')
-      log('=== Safe Value Monitor: Complete ===')
       return
     }
 
@@ -407,7 +437,6 @@ async function onCronTrigger() {
       log(`Skipping update - value change within threshold:`)
       log(`  Diff: $${formatUnits(valueDiff, 18)} (${(valueDiff * 10000n / (onChainValue || 1n))}bps, threshold: ${VALUE_CHANGE_THRESHOLD_BPS}bps)`)
       log(`  Time since update: ${timeSinceUpdate}s (max: ${MAX_STALENESS_SECONDS}s)`)
-      log('=== Safe Value Monitor: Complete (no update needed) ===')
       return
     }
 
@@ -418,7 +447,26 @@ async function onCronTrigger() {
       log(`Updating due to value change >${VALUE_CHANGE_THRESHOLD_BPS / 100n}% (diff: $${formatUnits(valueDiff, 18)})`)
     }
 
-    await writeSafeValueToChain(totalValueUSD)
+    await writeSafeValueToChain(moduleAddress, totalValueUSD)
+  } catch (error) {
+    log(`Error processing module ${moduleAddress}: ${error}`)
+  }
+}
+
+/**
+ * Main cron job handler
+ */
+async function onCronTrigger() {
+  log('=== Safe Value Monitor: Starting check ===')
+
+  try {
+    const modules = await getActiveModules()
+    log(`Processing ${modules.length} module(s)`)
+
+    for (const moduleAddress of modules) {
+      await processModuleSafeValue(moduleAddress)
+    }
+
     log('=== Safe Value Monitor: Complete ===')
   } catch (error) {
     log(`Error in safe value update: ${error}`)

@@ -68,6 +68,8 @@ export const config = {
   rpcUrl: process.env.RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
   privateKey: process.env.PRIVATE_KEY as `0x${string}`,
   moduleAddress: process.env.MODULE_ADDRESS as `0x${string}`,
+  // Optional registry address for multi-module support
+  registryAddress: process.env.REGISTRY_ADDRESS as `0x${string}` | undefined,
 
   // Cron schedules
   safeValueCron: process.env.SAFE_VALUE_CRON || '0 */10 * * * *', // Every 30 minutes

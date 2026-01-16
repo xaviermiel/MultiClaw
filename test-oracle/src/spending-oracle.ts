@@ -26,7 +26,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 import cron from 'node-cron'
 import { config, validateConfig, type TokenConfig } from './config.js'
-import { DeFiInteractorModuleABI, OperationType, ChainlinkPriceFeedABI, ERC20ABI } from './abi.js'
+import { DeFiInteractorModuleABI, OperationType, ChainlinkPriceFeedABI, ERC20ABI, ModuleRegistryABI } from './abi.js'
 
 // ============ Token Price Cache ============
 
@@ -148,6 +148,37 @@ function log(message: string) {
   console.log(`[SpendingOracle ${new Date().toISOString()}] ${message}`)
 }
 
+// ============ Multi-Module Support ============
+
+/**
+ * Get active modules from registry, or fall back to single moduleAddress
+ */
+async function getActiveModules(): Promise<Address[]> {
+  if (!config.registryAddress) {
+    // Backwards compatibility: use single module
+    return [config.moduleAddress]
+  }
+
+  try {
+    const modules = await publicClient.readContract({
+      address: config.registryAddress,
+      abi: ModuleRegistryABI,
+      functionName: 'getActiveModules',
+    })
+
+    if (modules.length === 0) {
+      log('Registry returned no active modules, falling back to config.moduleAddress')
+      return [config.moduleAddress]
+    }
+
+    log(`Found ${modules.length} active modules in registry`)
+    return modules as Address[]
+  } catch (error) {
+    log(`Error querying registry, falling back to single module: ${error}`)
+    return [config.moduleAddress]
+  }
+}
+
 // ============ Retry Helper ============
 
 /**
@@ -172,10 +203,10 @@ async function retryOnce<T>(
 
 // ============ Contract Read Functions ============
 
-async function getSafeValue(): Promise<bigint> {
+async function getSafeValue(moduleAddress: Address): Promise<bigint> {
   const [totalValueUSD] = await retryOnce(
     () => publicClient.readContract({
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSafeValue',
     }),
@@ -184,10 +215,10 @@ async function getSafeValue(): Promise<bigint> {
   return totalValueUSD
 }
 
-async function getSubAccountLimits(subAccount: Address): Promise<{ maxSpendingBps: bigint; windowDuration: bigint }> {
+async function getSubAccountLimits(moduleAddress: Address, subAccount: Address): Promise<{ maxSpendingBps: bigint; windowDuration: bigint }> {
   const [maxSpendingBps, windowDuration] = await retryOnce(
     () => publicClient.readContract({
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSubAccountLimits',
       args: [subAccount],
@@ -197,10 +228,10 @@ async function getSubAccountLimits(subAccount: Address): Promise<{ maxSpendingBp
   return { maxSpendingBps, windowDuration }
 }
 
-async function getActiveSubaccounts(): Promise<Address[]> {
+async function getActiveSubaccounts(moduleAddress: Address): Promise<Address[]> {
   const subaccounts = await retryOnce(
     () => publicClient.readContract({
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSubaccountsByRole',
       args: [1], // DEFI_EXECUTE_ROLE
@@ -210,10 +241,10 @@ async function getActiveSubaccounts(): Promise<Address[]> {
   return subaccounts as Address[]
 }
 
-async function getOnChainSpendingAllowance(subAccount: Address): Promise<bigint> {
+async function getOnChainSpendingAllowance(moduleAddress: Address, subAccount: Address): Promise<bigint> {
   const allowance = await retryOnce(
     () => publicClient.readContract({
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSpendingAllowance',
       args: [subAccount],
@@ -223,10 +254,10 @@ async function getOnChainSpendingAllowance(subAccount: Address): Promise<bigint>
   return allowance as bigint
 }
 
-async function getOnChainAcquiredBalance(subAccount: Address, token: Address): Promise<bigint> {
+async function getOnChainAcquiredBalance(moduleAddress: Address, subAccount: Address, token: Address): Promise<bigint> {
   const balance = await retryOnce(
     () => publicClient.readContract({
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getAcquiredBalance',
       args: [subAccount, token],
@@ -318,10 +349,10 @@ async function fetchBlockTimestamps(blockNumbers: bigint[]): Promise<Map<bigint,
   return blockTimestamps
 }
 
-async function queryProtocolExecutionEvents(fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<ProtocolExecutionEvent[]> {
+async function queryProtocolExecutionEvents(moduleAddress: Address, fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<ProtocolExecutionEvent[]> {
   const logs = await retryOnce(
     () => publicClient.getLogs({
-      address: config.moduleAddress,
+      address: moduleAddress,
       event: PROTOCOL_EXECUTION_EVENT,
       fromBlock,
       toBlock,
@@ -352,10 +383,10 @@ async function queryProtocolExecutionEvents(fromBlock: bigint, toBlock: bigint, 
   return events
 }
 
-async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<TransferExecutedEvent[]> {
+async function queryTransferEvents(moduleAddress: Address, fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<TransferExecutedEvent[]> {
   const logs = await retryOnce(
     () => publicClient.getLogs({
-      address: config.moduleAddress,
+      address: moduleAddress,
       event: TRANSFER_EXECUTED_EVENT,
       fromBlock,
       toBlock,
@@ -391,7 +422,7 @@ async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccoun
  * that have ever had acquired balance set for a subaccount.
  * This is used to detect and clear stale on-chain balances.
  */
-async function queryHistoricalAcquiredTokens(subAccount: Address): Promise<Set<Address>> {
+async function queryHistoricalAcquiredTokens(moduleAddress: Address, subAccount: Address): Promise<Set<Address>> {
   const tokens = new Set<Address>()
 
   // Query from a reasonable lookback - use extended range to catch all historical tokens
@@ -403,7 +434,7 @@ async function queryHistoricalAcquiredTokens(subAccount: Address): Promise<Set<A
 
   const logs = await retryOnce(
     () => publicClient.getLogs({
-      address: config.moduleAddress,
+      address: moduleAddress,
       event: ACQUIRED_BALANCE_UPDATED_EVENT,
       fromBlock,
       toBlock: currentBlock,
@@ -1097,11 +1128,12 @@ export function buildSubAccountState(
 // ============ Allowance Calculation ============
 
 async function calculateSpendingAllowance(
+  moduleAddress: Address,
   subAccount: Address,
   state: SubAccountState
 ): Promise<bigint> {
-  const safeValue = await getSafeValue()
-  const { maxSpendingBps } = await getSubAccountLimits(subAccount)
+  const safeValue = await getSafeValue(moduleAddress)
+  const { maxSpendingBps } = await getSubAccountLimits(moduleAddress, subAccount)
 
   const maxSpending = (safeValue * maxSpendingBps) / 10000n
   const newAllowance = maxSpending > state.totalSpendingInWindow
@@ -1152,12 +1184,13 @@ let currentNonce: number | null = null
  * - Update if stale for more than 50 minutes
  */
 async function prepareBatchUpdate(
+  moduleAddress: Address,
   subAccount: Address,
   newAllowance: bigint,
   acquiredBalances: Map<Address, bigint>
 ): Promise<{ tokens: Address[]; balances: bigint[]; allowanceChanged: boolean; timestamp: bigint } | null> {
   // Get current on-chain values
-  const onChainAllowance = await getOnChainSpendingAllowance(subAccount)
+  const onChainAllowance = await getOnChainSpendingAllowance(moduleAddress, subAccount)
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
 
   // Check staleness
@@ -1206,7 +1239,7 @@ async function prepareBatchUpdate(
 
   // First, add all tokens from calculated acquired balances
   for (const [token, newBalance] of acquiredBalances) {
-    const onChainBalance = await getOnChainAcquiredBalance(subAccount, token)
+    const onChainBalance = await getOnChainAcquiredBalance(moduleAddress, subAccount, token)
     if (newBalance !== onChainBalance) {
       acquiredChanged = true
     }
@@ -1216,10 +1249,10 @@ async function prepareBatchUpdate(
 
   // Also check for tokens that have on-chain balance but aren't in calculated map
   // These need to be cleared to 0 (e.g., tokens that aged out or had incorrect matching)
-  const historicalTokens = await queryHistoricalAcquiredTokens(subAccount)
+  const historicalTokens = await queryHistoricalAcquiredTokens(moduleAddress, subAccount)
   for (const token of historicalTokens) {
     if (!acquiredBalances.has(token)) {
-      const onChainBalance = await getOnChainAcquiredBalance(subAccount, token)
+      const onChainBalance = await getOnChainAcquiredBalance(moduleAddress, subAccount, token)
       if (onChainBalance > 0n) {
         log(`  Clearing stale acquired balance for ${token}: ${onChainBalance} -> 0`)
         acquiredChanged = true
@@ -1259,6 +1292,7 @@ async function prepareBatchUpdate(
  * Uses nonce management for parallel submission
  */
 async function submitBatchUpdate(
+  moduleAddress: Address,
   subAccount: Address,
   newAllowance: bigint,
   tokens: Address[],
@@ -1269,7 +1303,7 @@ async function submitBatchUpdate(
     const hash = await walletClient.writeContract({
       chain: config.chain,
       account,
-      address: config.moduleAddress,
+      address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'batchUpdate',
       args: [subAccount, newAllowance, tokens, balances],
@@ -1335,11 +1369,12 @@ async function waitForPendingTransactions(): Promise<void> {
  * Legacy function for backward compatibility - prepares and submits with waiting
  */
 async function pushBatchUpdate(
+  moduleAddress: Address,
   subAccount: Address,
   newAllowance: bigint,
   acquiredBalances: Map<Address, bigint>
 ): Promise<string | null> {
-  const prepared = await prepareBatchUpdate(subAccount, newAllowance, acquiredBalances)
+  const prepared = await prepareBatchUpdate(moduleAddress, subAccount, newAllowance, acquiredBalances)
   if (!prepared) return null
 
   // Get nonce if not already tracking
@@ -1348,6 +1383,7 @@ async function pushBatchUpdate(
   }
 
   const hash = await submitBatchUpdate(
+    moduleAddress,
     subAccount,
     newAllowance,
     prepared.tokens,
@@ -1393,42 +1429,50 @@ async function pollForNewEvents() {
     const blocksToProcess = currentBlock - lastProcessedBlock
     log(`Polling blocks ${lastProcessedBlock + 1n} to ${currentBlock} (${blocksToProcess} blocks)`)
 
-    // Query new events in parallel
-    const [protocolEvents, transferEvents] = await Promise.all([
-      queryProtocolExecutionEvents(lastProcessedBlock + 1n, currentBlock),
-      queryTransferEvents(lastProcessedBlock + 1n, currentBlock),
-    ])
+    // Get all active modules
+    const modules = await getActiveModules()
 
-    if (protocolEvents.length > 0 || transferEvents.length > 0) {
-      log(`Found ${protocolEvents.length} protocol events and ${transferEvents.length} transfer events`)
+    // Process each module
+    for (const moduleAddress of modules) {
+      log(`--- Processing module: ${moduleAddress} ---`)
 
-      // Get unique subaccounts from events
-      const affectedSubaccounts = new Set<Address>()
-      for (const e of protocolEvents) {
-        affectedSubaccounts.add(e.subAccount)
-      }
-      for (const e of transferEvents) {
-        affectedSubaccounts.add(e.subAccount)
-      }
+      // Query new events in parallel for this module
+      const [protocolEvents, transferEvents] = await Promise.all([
+        queryProtocolExecutionEvents(moduleAddress, lastProcessedBlock + 1n, currentBlock),
+        queryTransferEvents(moduleAddress, lastProcessedBlock + 1n, currentBlock),
+      ])
 
-      // Process all affected subaccounts - transactions are submitted without waiting
-      for (const subAccount of affectedSubaccounts) {
-        // Skip if the subaccount is the module itself
-        if (subAccount.toLowerCase() === config.moduleAddress.toLowerCase()) {
-          log(`Skipping ${subAccount} - this is the module address, not a subaccount`)
-          continue
+      if (protocolEvents.length > 0 || transferEvents.length > 0) {
+        log(`Found ${protocolEvents.length} protocol events and ${transferEvents.length} transfer events`)
+
+        // Get unique subaccounts from events
+        const affectedSubaccounts = new Set<Address>()
+        for (const e of protocolEvents) {
+          affectedSubaccounts.add(e.subAccount)
+        }
+        for (const e of transferEvents) {
+          affectedSubaccounts.add(e.subAccount)
         }
 
-        try {
-          await processSubaccount(subAccount, currentBlock)
-        } catch (error) {
-          log(`Error processing ${subAccount}: ${error}`)
+        // Process all affected subaccounts - transactions are submitted without waiting
+        for (const subAccount of affectedSubaccounts) {
+          // Skip if the subaccount is the module itself
+          if (subAccount.toLowerCase() === moduleAddress.toLowerCase()) {
+            log(`Skipping ${subAccount} - this is the module address, not a subaccount`)
+            continue
+          }
+
+          try {
+            await processSubaccount(moduleAddress, subAccount, currentBlock)
+          } catch (error) {
+            log(`Error processing ${subAccount}: ${error}`)
+          }
         }
       }
-
-      // Wait for all pending transactions to confirm
-      await waitForPendingTransactions()
     }
+
+    // Wait for all pending transactions to confirm
+    await waitForPendingTransactions()
 
     lastProcessedBlock = currentBlock
   } catch (error) {
@@ -1440,7 +1484,7 @@ async function pollForNewEvents() {
 
 // ============ Subaccount Processing ============
 
-async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
+async function processSubaccount(moduleAddress: Address, subAccount: Address, currentBlock?: bigint) {
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
   const blockNumber = currentBlock ?? await publicClient.getBlockNumber()
 
@@ -1450,9 +1494,9 @@ async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
 
   // Query limits and events in parallel (extended range for token discovery)
   const [{ windowDuration }, protocolEvents, transferEvents] = await Promise.all([
-    getSubAccountLimits(subAccount),
-    queryProtocolExecutionEvents(extendedFromBlock, blockNumber, subAccount),
-    queryTransferEvents(extendedFromBlock, blockNumber, subAccount),
+    getSubAccountLimits(moduleAddress, subAccount),
+    queryProtocolExecutionEvents(moduleAddress, extendedFromBlock, blockNumber, subAccount),
+    queryTransferEvents(moduleAddress, extendedFromBlock, blockNumber, subAccount),
   ])
 
   // Collect all unique tokens from events for price cache
@@ -1479,10 +1523,10 @@ async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
   const state = buildSubAccountState(protocolEvents, transferEvents, subAccount, currentTimestamp, windowDuration, priceCache)
 
   // Calculate allowance
-  const newAllowance = await calculateSpendingAllowance(subAccount, state)
+  const newAllowance = await calculateSpendingAllowance(moduleAddress, subAccount, state)
 
   // Push update
-  await pushBatchUpdate(subAccount, newAllowance, state.acquiredBalances)
+  await pushBatchUpdate(moduleAddress, subAccount, newAllowance, state.acquiredBalances)
 }
 
 // ============ Cron Handler ============
@@ -1502,31 +1546,40 @@ async function onCronRefresh() {
     currentNonce = null
     pendingTransactions = []
 
-    // Fetch subaccounts and current block in parallel
-    const [subaccounts, currentBlock] = await Promise.all([
-      getActiveSubaccounts(),
+    // Get all active modules and current block
+    const [modules, currentBlock] = await Promise.all([
+      getActiveModules(),
       publicClient.getBlockNumber(),
     ])
-    log(`Found ${subaccounts.length} active subaccounts`)
+    log(`Processing ${modules.length} module(s)`)
 
-    if (subaccounts.length === 0) {
-      log('No active subaccounts, skipping refresh')
-      return
-    }
+    // Process each module
+    for (const moduleAddress of modules) {
+      log(`--- Processing module: ${moduleAddress} ---`)
 
-    // Process all subaccounts - transactions are submitted without waiting
-    for (const subAccount of subaccounts) {
-      // Skip if the subaccount is the module itself (shouldn't happen but safety check)
-      if (subAccount.toLowerCase() === config.moduleAddress.toLowerCase()) {
-        log(`Skipping ${subAccount} - this is the module address, not a subaccount`)
+      // Fetch subaccounts for this module
+      const subaccounts = await getActiveSubaccounts(moduleAddress)
+      log(`Found ${subaccounts.length} active subaccounts`)
+
+      if (subaccounts.length === 0) {
+        log('No active subaccounts for this module, skipping')
         continue
       }
 
-      try {
-        log(`Processing subaccount: ${subAccount}`)
-        await processSubaccount(subAccount, currentBlock)
-      } catch (error) {
-        log(`Error processing ${subAccount}: ${error}`)
+      // Process all subaccounts - transactions are submitted without waiting
+      for (const subAccount of subaccounts) {
+        // Skip if the subaccount is the module itself (shouldn't happen but safety check)
+        if (subAccount.toLowerCase() === moduleAddress.toLowerCase()) {
+          log(`Skipping ${subAccount} - this is the module address, not a subaccount`)
+          continue
+        }
+
+        try {
+          log(`Processing subaccount: ${subAccount}`)
+          await processSubaccount(moduleAddress, subAccount, currentBlock)
+        } catch (error) {
+          log(`Error processing ${subAccount}: ${error}`)
+        }
       }
     }
 
@@ -1561,6 +1614,9 @@ export function start() {
 
   log(`Starting Spending Oracle`)
   log(`Module address: ${config.moduleAddress}`)
+  if (config.registryAddress) {
+    log(`Registry address: ${config.registryAddress} (multi-module mode)`)
+  }
   log(`Updater address: ${account.address}`)
   log(`Poll interval: ${config.pollIntervalMs}ms`)
   log(`Cron schedule: ${config.spendingOracleCron}`)
