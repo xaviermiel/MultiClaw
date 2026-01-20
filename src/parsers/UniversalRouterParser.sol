@@ -298,7 +298,16 @@ contract UniversalRouterParser is ICalldataParser {
         for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
             uint8 command = uint8(commands[i]) & 0x3f;
 
-            if (command == UNWRAP_WETH) {
+            if (command == WRAP_ETH) {
+                // WRAP_ETH params: (address recipient, uint256 amount)
+                bytes memory wrapInput = inputs[i];
+                if (wrapInput.length >= 64) {
+                    (recipient,) = abi.decode(wrapInput, (address, uint256));
+                    if (recipient != ADDRESS_THIS) {
+                        return _resolveRecipient(recipient, defaultRecipient);
+                    }
+                }
+            } else if (command == UNWRAP_WETH) {
                 // UNWRAP_WETH params: (address recipient, uint256 amountMin)
                 bytes memory unwrapInput = inputs[i];
                 if (unwrapInput.length >= 64) {
@@ -324,7 +333,7 @@ contract UniversalRouterParser is ICalldataParser {
         }
 
         // No explicit final recipient found, use default (Safe address)
-        return address(0);
+        return defaultRecipient;
     }
 
     /// @notice Resolve special Universal Router address constants
