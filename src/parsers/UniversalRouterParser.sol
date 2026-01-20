@@ -5,20 +5,23 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
 
 /**
  * @title UniversalRouterParser
- * @notice Calldata parser for Uniswap Universal Router operations
+ * @notice Calldata parser for Uniswap Universal Router operations (V2, V3, and V4)
  * @dev Extracts token/amount from Universal Router's execute(bytes,bytes[],uint256) calldata
  *
  *      Universal Router uses command-based encoding:
  *      - commands: bytes where each byte is a command type
  *      - inputs: bytes[] where each element is the encoded params for the command
  *
- *      Common commands:
+ *      Supported commands:
  *      - 0x00: V3_SWAP_EXACT_IN
  *      - 0x01: V3_SWAP_EXACT_OUT
+ *      - 0x07: V3_SWAP_EXACT_IN (alternate, used on some deployments)
  *      - 0x08: V2_SWAP_EXACT_IN
  *      - 0x09: V2_SWAP_EXACT_OUT
  *      - 0x0b: WRAP_ETH
  *      - 0x0c: UNWRAP_WETH
+ *      - 0x0e: BALANCE_CHECK_ERC20 (skipped, non-swap)
+ *      - 0x10: V4_SWAP
  */
 contract UniversalRouterParser is ICalldataParser {
     error UnsupportedSelector();
@@ -27,15 +30,26 @@ contract UniversalRouterParser is ICalldataParser {
     // Universal Router function selector
     bytes4 public constant EXECUTE_SELECTOR = 0x3593564c; // execute(bytes,bytes[],uint256)
 
-    // Command types
+    // Command types - V3/V2
     uint8 public constant V3_SWAP_EXACT_IN = 0x00;
     uint8 public constant V3_SWAP_EXACT_OUT = 0x01;
     uint8 public constant SWEEP = 0x04;
     uint8 public constant PAY_PORTION = 0x06;
+    uint8 public constant V3_SWAP_EXACT_IN_ALT = 0x07; // Alternate command on some routers
     uint8 public constant V2_SWAP_EXACT_IN = 0x08;
     uint8 public constant V2_SWAP_EXACT_OUT = 0x09;
     uint8 public constant WRAP_ETH = 0x0b;
     uint8 public constant UNWRAP_WETH = 0x0c;
+    uint8 public constant BALANCE_CHECK_ERC20 = 0x0e;
+
+    // Command types - V4
+    uint8 public constant V4_SWAP = 0x10;
+
+    // V4 Action types (inside V4_SWAP)
+    uint8 public constant V4_SWAP_EXACT_IN_SINGLE = 0x06;
+    uint8 public constant V4_SWAP_EXACT_IN = 0x07;
+    uint8 public constant V4_SWAP_EXACT_OUT_SINGLE = 0x08;
+    uint8 public constant V4_SWAP_EXACT_OUT = 0x09;
 
     // Universal Router special address constants (resolved at runtime)
     address public constant MSG_SENDER = address(1);
@@ -63,7 +77,7 @@ contract UniversalRouterParser is ICalldataParser {
                 tokens = new address[](1);
                 tokens[0] = address(0);
                 return tokens;
-            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT) {
+            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT || command == V3_SWAP_EXACT_IN_ALT) {
                 // V3 swap params: (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
                 // First token is at start of path
                 bytes memory swapInput = inputs[i];
@@ -73,7 +87,7 @@ contract UniversalRouterParser is ICalldataParser {
                     if (path.length >= 20) {
                         // First 20 bytes of path is tokenIn for EXACT_IN
                         // For EXACT_OUT, path is reversed so first is tokenOut
-                        if (command == V3_SWAP_EXACT_IN) {
+                        if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_IN_ALT) {
                             assembly {
                                 token := shr(96, mload(add(path, 32)))
                             }
@@ -103,7 +117,16 @@ contract UniversalRouterParser is ICalldataParser {
                         return tokens;
                     }
                 }
+            } else if (command == V4_SWAP) {
+                // V4_SWAP params: (bytes actions, bytes[] params)
+                token = _extractV4InputToken(inputs[i]);
+                if (token != address(0)) {
+                    tokens = new address[](1);
+                    tokens[0] = token;
+                    return tokens;
+                }
             }
+            // Skip BALANCE_CHECK_ERC20 and other non-swap commands
         }
 
         return new address[](0);
@@ -131,10 +154,10 @@ contract UniversalRouterParser is ICalldataParser {
                     amounts[0] = amount;
                     return amounts;
                 }
-            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT) {
+            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT || command == V3_SWAP_EXACT_IN_ALT) {
                 bytes memory swapInput = inputs[i];
                 if (swapInput.length >= 128) {
-                    if (command == V3_SWAP_EXACT_IN) {
+                    if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_IN_ALT) {
                         // amountIn is second param
                         (, amount, , , ) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     } else {
@@ -157,7 +180,16 @@ contract UniversalRouterParser is ICalldataParser {
                     amounts[0] = amount;
                     return amounts;
                 }
+            } else if (command == V4_SWAP) {
+                // V4_SWAP params: (bytes actions, bytes[] params)
+                amount = _extractV4InputAmount(inputs[i]);
+                if (amount > 0) {
+                    amounts = new uint256[](1);
+                    amounts[0] = amount;
+                    return amounts;
+                }
             }
+            // Skip BALANCE_CHECK_ERC20 and other non-swap commands
         }
 
         return new uint256[](0);
@@ -181,12 +213,12 @@ contract UniversalRouterParser is ICalldataParser {
                 tokens = new address[](1);
                 tokens[0] = address(0);
                 return tokens;
-            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT) {
+            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT || command == V3_SWAP_EXACT_IN_ALT) {
                 bytes memory swapInput = inputs[i-1];
                 if (swapInput.length >= 128) {
                     (, , , bytes memory path, ) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     if (path.length >= 20) {
-                        if (command == V3_SWAP_EXACT_IN) {
+                        if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_IN_ALT) {
                             // Last 20 bytes of path is tokenOut
                             assembly {
                                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
@@ -216,7 +248,16 @@ contract UniversalRouterParser is ICalldataParser {
                         return tokens;
                     }
                 }
+            } else if (command == V4_SWAP) {
+                // V4_SWAP params: (bytes actions, bytes[] params)
+                token = _extractV4OutputToken(inputs[i-1]);
+                if (token != address(0)) {
+                    tokens = new address[](1);
+                    tokens[0] = token;
+                    return tokens;
+                }
             }
+            // Skip BALANCE_CHECK_ERC20 and other non-swap commands
         }
 
         return new address[](0);
@@ -267,6 +308,7 @@ contract UniversalRouterParser is ICalldataParser {
                     }
                 }
             } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT ||
+                       command == V3_SWAP_EXACT_IN_ALT ||
                        command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
                 // V3/V2 swap params: (address recipient, uint256 amountIn, uint256 amountOutMin, ...)
                 bytes memory swapInput = inputs[i];
@@ -277,6 +319,8 @@ contract UniversalRouterParser is ICalldataParser {
                     }
                 }
             }
+            // V4_SWAP recipient is handled via SETTLE/TAKE actions which go to msg.sender
+            // Skip BALANCE_CHECK_ERC20 and other non-swap commands
         }
 
         // No explicit final recipient found, use default (Safe address)
@@ -307,5 +351,133 @@ contract UniversalRouterParser is ICalldataParser {
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
         if (data.length < 4) revert InvalidCalldata();
         return 1; // SWAP
+    }
+
+    // ============ V4 Helper Functions ============
+
+    /**
+     * @notice Extract input token from V4_SWAP command
+     * @dev V4_SWAP params: (bytes actions, bytes[] params)
+     *      Actions contain action types, params contain encoded data for each action
+     *      SWAP_EXACT_IN_SINGLE (0x06): (PoolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMin, bytes hookData)
+     *      SWAP_EXACT_IN (0x07): (Currency currencyIn, PathKey[] path, uint128 amountIn, uint128 amountOutMin)
+     */
+    function _extractV4InputToken(bytes memory v4Input) internal pure returns (address token) {
+        if (v4Input.length < 64) return address(0);
+
+        (bytes memory actions, bytes[] memory params) = abi.decode(v4Input, (bytes, bytes[]));
+
+        for (uint256 i = 0; i < actions.length && i < params.length; i++) {
+            uint8 action = uint8(actions[i]);
+
+            if (action == V4_SWAP_EXACT_IN_SINGLE || action == V4_SWAP_EXACT_OUT_SINGLE) {
+                // Single pool swap: first param is PoolKey which contains currency0 and currency1
+                // PoolKey: (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks)
+                // For EXACT_IN_SINGLE: zeroForOne determines direction
+                if (params[i].length >= 160) {
+                    // Decode PoolKey (first 5 slots) + zeroForOne
+                    (address currency0, address currency1, , , , bool zeroForOne) =
+                        abi.decode(params[i], (address, address, uint24, int24, address, bool));
+                    // zeroForOne=true means swap currency0->currency1, so input is currency0
+                    // zeroForOne=false means swap currency1->currency0, so input is currency1
+                    if (action == V4_SWAP_EXACT_IN_SINGLE) {
+                        return zeroForOne ? currency0 : currency1;
+                    } else {
+                        // EXACT_OUT: input is opposite
+                        return zeroForOne ? currency1 : currency0;
+                    }
+                }
+            } else if (action == V4_SWAP_EXACT_IN) {
+                // Multi-hop swap: (Currency currencyIn, PathKey[] path, uint128 amountIn, uint128 amountOutMin)
+                if (params[i].length >= 64) {
+                    (address currencyIn, , , ) = abi.decode(params[i], (address, bytes, uint128, uint128));
+                    return currencyIn;
+                }
+            } else if (action == V4_SWAP_EXACT_OUT) {
+                // Multi-hop exact out: need to find the input currency from the path
+                // For now, skip - complex to decode
+                continue;
+            }
+        }
+
+        return address(0);
+    }
+
+    /**
+     * @notice Extract input amount from V4_SWAP command
+     */
+    function _extractV4InputAmount(bytes memory v4Input) internal pure returns (uint256 amount) {
+        if (v4Input.length < 64) return 0;
+
+        (bytes memory actions, bytes[] memory params) = abi.decode(v4Input, (bytes, bytes[]));
+
+        for (uint256 i = 0; i < actions.length && i < params.length; i++) {
+            uint8 action = uint8(actions[i]);
+
+            if (action == V4_SWAP_EXACT_IN_SINGLE) {
+                // (PoolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMin, bytes hookData)
+                // PoolKey is 5 slots (160 bytes), then zeroForOne (32 bytes), then amountIn
+                if (params[i].length >= 224) {
+                    // Skip PoolKey (5 slots) + zeroForOne (1 slot) to get amountIn
+                    assembly {
+                        // params[i] starts at params[i]+32, PoolKey is 160 bytes, zeroForOne is 32 bytes
+                        amount := mload(add(add(params, add(32, mul(i, 32))), 192))
+                    }
+                    // Decode properly
+                    (, , , , , , uint128 amountIn, ) =
+                        abi.decode(params[i], (address, address, uint24, int24, address, bool, uint128, uint128));
+                    return uint256(amountIn);
+                }
+            } else if (action == V4_SWAP_EXACT_IN) {
+                // (Currency currencyIn, PathKey[] path, uint128 amountIn, uint128 amountOutMin)
+                if (params[i].length >= 128) {
+                    (, , uint128 amountIn, ) = abi.decode(params[i], (address, bytes, uint128, uint128));
+                    return uint256(amountIn);
+                }
+            } else if (action == V4_SWAP_EXACT_OUT_SINGLE || action == V4_SWAP_EXACT_OUT) {
+                // For EXACT_OUT, the amount is amountInMax (third param after PoolKey/path)
+                // Similar structure but we want amountInMax
+                continue; // Skip for now - focus on EXACT_IN
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * @notice Extract output token from V4_SWAP command
+     */
+    function _extractV4OutputToken(bytes memory v4Input) internal pure returns (address token) {
+        if (v4Input.length < 64) return address(0);
+
+        (bytes memory actions, bytes[] memory params) = abi.decode(v4Input, (bytes, bytes[]));
+
+        // Look for swap actions in reverse order (last swap determines output)
+        for (uint256 i = actions.length; i > 0; i--) {
+            uint8 action = uint8(actions[i-1]);
+
+            if (action == V4_SWAP_EXACT_IN_SINGLE || action == V4_SWAP_EXACT_OUT_SINGLE) {
+                if (params[i-1].length >= 160) {
+                    (address currency0, address currency1, , , , bool zeroForOne) =
+                        abi.decode(params[i-1], (address, address, uint24, int24, address, bool));
+                    // zeroForOne=true means swap currency0->currency1, so output is currency1
+                    if (action == V4_SWAP_EXACT_IN_SINGLE) {
+                        return zeroForOne ? currency1 : currency0;
+                    } else {
+                        // EXACT_OUT: output is opposite
+                        return zeroForOne ? currency0 : currency1;
+                    }
+                }
+            } else if (action == V4_SWAP_EXACT_IN) {
+                // Multi-hop: output is the last currency in the path
+                // PathKey[] contains intermediate currencies, last one is output
+                // For simplicity, try to decode the path and get last currency
+                // PathKey: (Currency intermediateCurrency, uint24 fee, int24 tickSpacing, IHooks hooks, bytes hookData)
+                // This is complex - for now return address(0) and let it fall through
+                continue;
+            }
+        }
+
+        return address(0);
     }
 }
