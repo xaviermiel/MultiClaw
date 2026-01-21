@@ -362,8 +362,11 @@ contract UniswapV4ParserTest is Test {
 
     // ============ Default Recipient Tests ============
 
-    function testDefaultRecipientWhenNoExplicitRecipient() public view {
-        // Actions with no explicit recipient (e.g., SETTLE only)
+    function testNoRecipientWhenOnlySettleAction() public view {
+        // When there's only SETTLE (no TAKE/TAKE_PAIR/SWEEP), there's no
+        // explicit recipient in calldata. Parser returns address(0) to indicate
+        // no recipient was found. The defaultRecipient is only for protocols
+        // that implicitly use msg.sender.
         bytes memory actions = new bytes(1);
         actions[0] = bytes1(parser.SETTLE());
 
@@ -380,7 +383,7 @@ contract UniswapV4ParserTest is Test {
 
         address defaultRecipient = address(0x9999);
         address recipient = parser.extractRecipient(V4_POSITION_MANAGER, data, defaultRecipient);
-        assertEq(recipient, defaultRecipient, "Should return default recipient when no explicit one");
+        assertEq(recipient, address(0), "Should return zero when no recipient action in calldata");
     }
 
     // ============ DECREASE_LIQUIDITY Operation Type Tests ============

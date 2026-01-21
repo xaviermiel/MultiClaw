@@ -445,8 +445,10 @@ contract MorphoBlueParserTest is Test {
         parser.extractInputTokens(MORPHO_BLUE, data);
     }
 
-    function testDefaultRecipientWhenZero() public view {
-        // Create data where recipient would be address(0)
+    function testExplicitZeroRecipientReturnsZero() public view {
+        // When onBehalf is explicitly set to address(0) in calldata,
+        // parser should return address(0) (not defaultRecipient).
+        // The protocol would reject such a transaction anyway.
         IMorphoBlue.MarketParams memory params = IMorphoBlue.MarketParams({
             loanToken: LOAN_TOKEN,
             collateralToken: COLLATERAL_TOKEN,
@@ -460,13 +462,13 @@ contract MorphoBlueParserTest is Test {
             params,
             1000e6,
             0,
-            address(0), // zero onBehalf
+            address(0), // zero onBehalf - explicit in calldata
             ""
         );
 
         address defaultAddr = address(0x9999);
         address recipient = parser.extractRecipient(MORPHO_BLUE, data, defaultAddr);
-        assertEq(recipient, defaultAddr, "Should use default when recipient is zero");
+        assertEq(recipient, address(0), "Should return explicit zero from calldata");
     }
 
     // ============ Fuzz Tests ============
