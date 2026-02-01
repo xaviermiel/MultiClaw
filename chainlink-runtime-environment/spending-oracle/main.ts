@@ -1718,8 +1718,7 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 
 /**
  * Process a single module's subaccounts for cron refresh
- * Note: This is a simplified version that uses the legacy functions which rely on config.moduleAddress
- * For full multi-module support, all helper functions would need moduleAddress parameters
+ * Uses module-aware functions to properly support multi-module operation
  */
 const processModuleSubaccounts = (
 	runtime: Runtime<Config>,
@@ -1751,19 +1750,11 @@ const processModuleSubaccounts = (
 			// Build state for this subaccount
 			const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration)
 
-			// Calculate new spending allowance using module-aware safe value
-			const safeValue = getSafeValueForModule(runtime, moduleAddress)
-			const { maxSpendingBps } = getSubAccountLimitsForModule(runtime, moduleAddress, subAccount)
-			const maxSpending = (safeValue * maxSpendingBps) / 10000n
-			const newAllowance = maxSpending > state.totalSpendingInWindow
-				? maxSpending - state.totalSpendingInWindow
-				: 0n
+			// Calculate new spending allowance using module-aware functions
+			const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, subAccount, state)
 
-			runtime.log(`Allowance: safeValue=${safeValue}, maxBps=${maxSpendingBps}, max=${maxSpending}, spent=${state.totalSpendingInWindow}, new=${newAllowance}`)
-
-			// Push update to contract (uses moduleAddress from state.acquiredBalances context)
-			// Note: pushBatchUpdate still uses config.moduleAddress - would need full refactor for multi-module
-			const txHash = pushBatchUpdate(runtime, subAccount, newAllowance, state.acquiredBalances)
+			// Push update to contract using module-aware function
+			const txHash = pushBatchUpdateForModule(runtime, moduleAddress, subAccount, newAllowance, state.acquiredBalances)
 			results.push(`${moduleAddress}/${subAccount}: ${txHash || 'Skipped'}`)
 		} catch (error) {
 			runtime.log(`Error processing ${subAccount}: ${error}`)
