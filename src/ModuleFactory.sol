@@ -39,7 +39,10 @@ contract ModuleFactory is Ownable {
     // ============ Errors ============
 
     error InvalidAddress();
+    error InvalidOracleAddress(address oracle);
     error DeploymentFailed();
+    error ModuleAlreadyDeployed(address module);
+    error SafeAlreadyHasModule(address safe, address existingModule);
     error RegistryNotSet();
 
     // ============ Constructor ============
@@ -161,12 +164,32 @@ contract ModuleFactory is Ownable {
         address oracle,
         uint256 nonce
     ) internal returns (address module) {
+        // Validate addresses
         if (safe == address(0) || oracle == address(0)) {
             revert InvalidAddress();
         }
 
+        // Validate oracle is not Safe or Factory (prevents self-authorization)
+        if (oracle == safe || oracle == address(this)) {
+            revert InvalidOracleAddress(oracle);
+        }
+
+        // Pre-check registry before deployment to prevent factory/registry state mismatch
+        if (autoRegister && address(registry) != address(0)) {
+            address existingModule = registry.getModuleForSafe(safe);
+            if (existingModule != address(0)) {
+                revert SafeAlreadyHasModule(safe, existingModule);
+            }
+        }
+
         bytes32 salt = computeSalt(safe, nonce);
         bytes memory bytecode = _getCreationBytecode(safe, oracle);
+
+        // Check if contract already exists at predicted address
+        address predictedAddress = _computeCreate2Address(salt, bytecode);
+        if (predictedAddress.code.length > 0) {
+            revert ModuleAlreadyDeployed(predictedAddress);
+        }
 
         assembly {
             module := create2(0, add(bytecode, 0x20), mload(bytecode), salt)
@@ -191,6 +214,27 @@ contract ModuleFactory is Ownable {
         }
 
         return module;
+    }
+
+    /**
+     * @notice Compute CREATE2 address for given salt and bytecode
+     * @param salt The salt for CREATE2
+     * @param bytecode The creation bytecode
+     * @return predicted The predicted address
+     */
+    function _computeCreate2Address(
+        bytes32 salt,
+        bytes memory bytecode
+    ) internal view returns (address predicted) {
+        bytes32 hash = keccak256(
+            abi.encodePacked(
+                bytes1(0xff),
+                address(this),
+                salt,
+                keccak256(bytecode)
+            )
+        );
+        return address(uint160(uint256(hash)));
     }
 
     /**
