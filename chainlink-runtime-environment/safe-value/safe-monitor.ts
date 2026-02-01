@@ -210,40 +210,18 @@ const safeJsonStringify = (obj: any): string =>
 /**
  * Get the Safe address from the DeFiInteractorModule's avatar() function
  */
-const getSafeAddress = (runtime: Runtime<Config>): string => {
+const getSafeAddress = (runtime: Runtime<Config>, moduleAddress: Address): string => {
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: runtime.config.chainSelectorName,
 		isTestnet: isTestnetChain(runtime.config.chainSelectorName),
 	})
 
-	runtime.log('0')
-
 	if (!network) {
 		throw new Error(`Network not found for chain selector name: ${runtime.config.chainSelectorName}`)
 	}
 
 	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
-
-	try {
-		const testCallData = encodeFunctionData({
-			abi: DeFiInteractorModule,
-			functionName: 'getTokenBalances',
-			args: [[]],
-		})
-		const testCall = evmClient
-			.callContract(runtime, {
-				call: encodeCallMsg({
-					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
-					data: testCallData,
-				}),
-				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-			})
-			.result()
-	} catch (testError) {
-		runtime.log(`Contract test failed: ${testError}`)
-	}
 
 	const callData = encodeFunctionData({
 		abi: DeFiInteractorModule,
@@ -256,15 +234,14 @@ const getSafeAddress = (runtime: Runtime<Config>): string => {
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
 			})
 			.result()
 	} catch (error) {
-		runtime.log(`Error calling avatar(): ${error}`)
-		runtime.log(`Error details: ${JSON.stringify(error, null, 2)}`)
+		runtime.log(`Error calling avatar() on module ${moduleAddress}: ${error}`)
 		throw error
 	}
 
@@ -625,7 +602,7 @@ const calculateUniswapV2LPValue = (
 /**
  * Batch fetch all token balances from the Safe using getTokenBalances
  */
-const getBatchTokenBalances = (runtime: Runtime<Config>): Map<string, bigint> => {
+const getBatchTokenBalances = (runtime: Runtime<Config>, moduleAddress: Address): Map<string, bigint> => {
 	const config = runtime.config
 	const network = getNetwork({
 		chainFamily: 'evm',
@@ -653,7 +630,7 @@ const getBatchTokenBalances = (runtime: Runtime<Config>): Map<string, bigint> =>
 		.callContract(runtime, {
 			call: encodeCallMsg({
 				from: zeroAddress,
-				to: config.moduleAddress as Address,
+				to: moduleAddress,
 				data: callData,
 			}),
 			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -722,14 +699,14 @@ const getNativeEthBalance = (runtime: Runtime<Config>, address: string): bigint 
 /**
  * Calculate the total USD value of all tokens in the Safe
  */
-const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
+const calculateSafeValue = (runtime: Runtime<Config>, moduleAddress: Address): SafeValueData => {
 	const config = runtime.config
 	const tokens: TokenBalance[] = []
 	let totalValueUSD = 0n
 
 	// Get the Safe address from the module
-	const safeAddress = getSafeAddress(runtime)
-	runtime.log(`Monitoring Safe: ${safeAddress}`)
+	const safeAddress = getSafeAddress(runtime, moduleAddress)
+	runtime.log(`Monitoring Safe: ${safeAddress} (module: ${moduleAddress})`)
 
 	// First, calculate native ETH value if price feed is configured
 	if (config.ethPriceFeedAddress) {
@@ -767,7 +744,7 @@ const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
 
 	// Batch fetch all token balances in a single call
 	runtime.log('Fetching all token balances in batch...')
-	const balanceMap = getBatchTokenBalances(runtime)
+	const balanceMap = getBatchTokenBalances(runtime, moduleAddress)
 
 	for (const tokenConfig of config.tokens) {
 		const tokenType = tokenConfig.type || 'erc20'
@@ -834,7 +811,7 @@ const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
 /**
  * Get current on-chain safe value
  */
-const getOnChainSafeValue = (runtime: Runtime<Config>): bigint => {
+const getOnChainSafeValue = (runtime: Runtime<Config>, moduleAddress: Address): bigint => {
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: runtime.config.chainSelectorName,
@@ -857,7 +834,7 @@ const getOnChainSafeValue = (runtime: Runtime<Config>): bigint => {
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -876,7 +853,7 @@ const getOnChainSafeValue = (runtime: Runtime<Config>): bigint => {
 
 		return totalValueUSD
 	} catch (error) {
-		runtime.log(`Error reading on-chain safe value: ${error}`)
+		runtime.log(`Error reading on-chain safe value for module ${moduleAddress}: ${error}`)
 		return 0n
 	}
 }
@@ -887,7 +864,7 @@ const VALUE_CHANGE_THRESHOLD_BPS = 10n // 0.1%
 /**
  * Write the Safe value to the on-chain storage contract
  */
-const writeSafeValueToChain = (runtime: Runtime<Config>, safeValueData: SafeValueData): string => {
+const writeSafeValueToChain = (runtime: Runtime<Config>, moduleAddress: Address, safeValueData: SafeValueData): string => {
 	const config = runtime.config
 	const network = getNetwork({
 		chainFamily: 'evm',
@@ -902,7 +879,7 @@ const writeSafeValueToChain = (runtime: Runtime<Config>, safeValueData: SafeValu
 	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
 
 	runtime.log(
-		`Writing Safe value to chain: ${safeValueData.totalValueUSD.toString()} (${(Number(safeValueData.totalValueUSD) / 1e18).toFixed(2)} USD)`,
+		`Writing Safe value to chain for module ${moduleAddress}: ${safeValueData.totalValueUSD.toString()} (${(Number(safeValueData.totalValueUSD) / 1e18).toFixed(2)} USD)`,
 	)
 
 	// Encode the contract call data for updateSafeValue (no safeAddress needed, module knows its own Safe)
@@ -1028,12 +1005,11 @@ const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string =
 		runtime.log(`\n--- Processing module: ${moduleAddress} ---`)
 
 		try {
-			// Calculate Safe value (uses runtime.config.moduleAddress for now)
-			// For full multi-module support, calculateSafeValue would need moduleAddress parameter
-			const safeValueData = calculateSafeValue(runtime)
+			// Calculate Safe value for this specific module
+			const safeValueData = calculateSafeValue(runtime, moduleAddress)
 
-			// Get current on-chain value
-			const onChainValue = getOnChainSafeValue(runtime)
+			// Get current on-chain value for this module
+			const onChainValue = getOnChainSafeValue(runtime, moduleAddress)
 
 			runtime.log('=== Safe Value Calculation ===')
 			runtime.log(safeJsonStringify(safeValueData))
@@ -1058,7 +1034,7 @@ const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string =
 			}
 
 			// Write to chain
-			const txHash = writeSafeValueToChain(runtime, safeValueData)
+			const txHash = writeSafeValueToChain(runtime, moduleAddress, safeValueData)
 			results.push(`${moduleAddress}: ${txHash}`)
 		} catch (error) {
 			runtime.log(`Error processing module ${moduleAddress}: ${error}`)

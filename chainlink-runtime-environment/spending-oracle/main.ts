@@ -188,11 +188,12 @@ const getCurrentBlockTimestamp = (): bigint => {
 }
 
 /**
- * Get current acquired balance from contract
+ * Get current acquired balance from contract for a specific module
  * This is the source of truth for what's currently available
  */
-const getContractAcquiredBalance = (
+const getContractAcquiredBalanceForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 	token: Address,
 ): bigint => {
@@ -209,7 +210,7 @@ const getContractAcquiredBalance = (
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -226,9 +227,20 @@ const getContractAcquiredBalance = (
 			data: bytesToHex(result.data),
 		})
 	} catch (error) {
-		runtime.log(`Error getting acquired balance: ${error}`)
+		runtime.log(`Error getting acquired balance for module ${moduleAddress}: ${error}`)
 		return 0n
 	}
+}
+
+/**
+ * Get current acquired balance from contract (legacy - uses config moduleAddress)
+ */
+const getContractAcquiredBalance = (
+	runtime: Runtime<Config>,
+	subAccount: Address,
+	token: Address,
+): bigint => {
+	return getContractAcquiredBalanceForModule(runtime, runtime.config.moduleAddress as Address, subAccount, token)
 }
 
 const getSubAccountLimitsForModule = (
@@ -990,12 +1002,13 @@ const queryTransferEvents = (
 }
 
 /**
- * Query historical AcquiredBalanceUpdated events to find all tokens
+ * Query historical AcquiredBalanceUpdated events for a specific module to find all tokens
  * that have ever had acquired balance set for a subaccount.
  * This is used to detect and clear stale on-chain balances.
  */
-const queryHistoricalAcquiredTokens = (
+const queryHistoricalAcquiredTokensForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 ): Set<Address> => {
 	const tokens = new Set<Address>()
@@ -1014,7 +1027,7 @@ const queryHistoricalAcquiredTokens = (
 		const logsResult = evmClient
 			.filterLogs(runtime, {
 				filterQuery: {
-					addresses: [runtime.config.moduleAddress],
+					addresses: [moduleAddress],
 					topics: topics,
 					fromBlock: { absVal: fromBlock.toString(), sign: '' },
 					toBlock: { absVal: currentBlock.toString(), sign: '' },
@@ -1033,10 +1046,20 @@ const queryHistoricalAcquiredTokens = (
 			}
 		}
 	} catch (error) {
-		runtime.log(`Error querying historical acquired tokens: ${error}`)
+		runtime.log(`Error querying historical acquired tokens for module ${moduleAddress}: ${error}`)
 	}
 
 	return tokens
+}
+
+/**
+ * Query historical AcquiredBalanceUpdated events (legacy - uses config moduleAddress)
+ */
+const queryHistoricalAcquiredTokens = (
+	runtime: Runtime<Config>,
+	subAccount: Address,
+): Set<Address> => {
+	return queryHistoricalAcquiredTokensForModule(runtime, runtime.config.moduleAddress as Address, subAccount)
 }
 
 // ============ FIFO Queue Helpers ============
@@ -1428,15 +1451,16 @@ const buildSubAccountState = (
 }
 
 /**
- * Calculate new spending allowance for a subaccount
+ * Calculate new spending allowance for a subaccount on a specific module
  */
-const calculateSpendingAllowance = (
+const calculateSpendingAllowanceForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 	state: SubAccountState,
 ): bigint => {
-	const safeValue = getSafeValue(runtime)
-	const { maxSpendingBps } = getSubAccountLimits(runtime, subAccount)
+	const safeValue = getSafeValueForModule(runtime, moduleAddress)
+	const { maxSpendingBps } = getSubAccountLimitsForModule(runtime, moduleAddress, subAccount)
 
 	// maxSpending = safeValue * maxSpendingBps / 10000
 	const maxSpending = (safeValue * maxSpendingBps) / 10000n
@@ -1452,10 +1476,22 @@ const calculateSpendingAllowance = (
 }
 
 /**
- * Get current on-chain spending allowance
+ * Calculate new spending allowance for a subaccount (legacy - uses config moduleAddress)
  */
-const getOnChainSpendingAllowance = (
+const calculateSpendingAllowance = (
 	runtime: Runtime<Config>,
+	subAccount: Address,
+	state: SubAccountState,
+): bigint => {
+	return calculateSpendingAllowanceForModule(runtime, runtime.config.moduleAddress as Address, subAccount, state)
+}
+
+/**
+ * Get current on-chain spending allowance for a specific module
+ */
+const getOnChainSpendingAllowanceForModule = (
+	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 ): bigint => {
 	const evmClient = createEvmClient(runtime)
@@ -1471,7 +1507,7 @@ const getOnChainSpendingAllowance = (
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -1488,19 +1524,30 @@ const getOnChainSpendingAllowance = (
 			data: bytesToHex(result.data),
 		})
 	} catch (error) {
-		runtime.log(`Error getting on-chain spending allowance: ${error}`)
+		runtime.log(`Error getting on-chain spending allowance for module ${moduleAddress}: ${error}`)
 		return 0n
 	}
+}
+
+/**
+ * Get current on-chain spending allowance (legacy - uses config moduleAddress)
+ */
+const getOnChainSpendingAllowance = (
+	runtime: Runtime<Config>,
+	subAccount: Address,
+): bigint => {
+	return getOnChainSpendingAllowanceForModule(runtime, runtime.config.moduleAddress as Address, subAccount)
 }
 
 // Threshold for considering allowance values "equal" (0% tolerance for allowances)
 const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
 
 /**
- * Push batch update to contract (skips if no changes)
+ * Push batch update to contract for a specific module (skips if no changes)
  */
-const pushBatchUpdate = (
+const pushBatchUpdateForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 	newAllowance: bigint,
 	acquiredBalances: Map<Address, bigint>,
@@ -1508,7 +1555,7 @@ const pushBatchUpdate = (
 	const evmClient = createEvmClient(runtime)
 
 	// Get current on-chain allowance
-	const onChainAllowance = getOnChainSpendingAllowance(runtime, subAccount)
+	const onChainAllowance = getOnChainSpendingAllowanceForModule(runtime, moduleAddress, subAccount)
 
 	// Check if allowance change is significant
 	const allowanceDiff = newAllowance > onChainAllowance
@@ -1524,7 +1571,7 @@ const pushBatchUpdate = (
 
 	// First, add all tokens from calculated acquired balances
 	for (const [token, newBalance] of acquiredBalances) {
-		const onChainBalance = getContractAcquiredBalance(runtime, subAccount, token)
+		const onChainBalance = getContractAcquiredBalanceForModule(runtime, moduleAddress, subAccount, token)
 		if (newBalance !== onChainBalance) {
 			acquiredChanged = true
 		}
@@ -1534,10 +1581,10 @@ const pushBatchUpdate = (
 
 	// Also check for tokens that have on-chain balance but aren't in calculated map
 	// These need to be cleared to 0 (e.g., tokens that aged out or had incorrect matching)
-	const historicalTokens = queryHistoricalAcquiredTokens(runtime, subAccount)
+	const historicalTokens = queryHistoricalAcquiredTokensForModule(runtime, moduleAddress, subAccount)
 	for (const token of historicalTokens) {
 		if (!acquiredBalances.has(token)) {
-			const onChainBalance = getContractAcquiredBalance(runtime, subAccount, token)
+			const onChainBalance = getContractAcquiredBalanceForModule(runtime, moduleAddress, subAccount, token)
 			if (onChainBalance > 0n) {
 				runtime.log(`  Clearing stale acquired balance for ${token}: ${onChainBalance} -> 0`)
 				acquiredChanged = true
@@ -1553,7 +1600,7 @@ const pushBatchUpdate = (
 		return null
 	}
 
-	runtime.log(`Pushing batch update: subAccount=${subAccount}, allowance=${newAllowance} (was ${onChainAllowance}), tokens=${tokens.length}`)
+	runtime.log(`Pushing batch update for module ${moduleAddress}: subAccount=${subAccount}, allowance=${newAllowance} (was ${onChainAllowance}), tokens=${tokens.length}`)
 
 	const callData = encodeFunctionData({
 		abi: DeFiInteractorModule,
@@ -1587,6 +1634,18 @@ const pushBatchUpdate = (
 	const txHash = bytesToHex(resp.txHash || new Uint8Array(32))
 	runtime.log(`Batch update complete. TxHash: ${txHash}`)
 	return txHash
+}
+
+/**
+ * Push batch update to contract (legacy - uses config moduleAddress)
+ */
+const pushBatchUpdate = (
+	runtime: Runtime<Config>,
+	subAccount: Address,
+	newAllowance: bigint,
+	acquiredBalances: Map<Address, bigint>,
+): string | null => {
+	return pushBatchUpdateForModule(runtime, runtime.config.moduleAddress as Address, subAccount, newAllowance, acquiredBalances)
 }
 
 // ============ Event Handler ============
