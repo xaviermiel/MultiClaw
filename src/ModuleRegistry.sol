@@ -205,22 +205,15 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
     /**
      * @notice Get all active modules
      * @return modules Array of active module addresses
+     * @dev Uses cached _activeModuleCount to avoid double iteration
      */
     function getActiveModules() external view override returns (address[] memory) {
-        uint256 count = 0;
+        uint256 count = _activeModuleCount;
         uint256 length = _allModules.length;
 
-        // First pass: count active modules
-        for (uint256 i = 0; i < length; i++) {
-            if (_isRegistered[_allModules[i]] && _moduleInfo[_allModules[i]].isActive) {
-                count++;
-            }
-        }
-
-        // Second pass: populate array
         address[] memory active = new address[](count);
         uint256 index = 0;
-        for (uint256 i = 0; i < length; i++) {
+        for (uint256 i = 0; i < length && index < count; i++) {
             if (_isRegistered[_allModules[i]] && _moduleInfo[_allModules[i]].isActive) {
                 active[index++] = _allModules[i];
             }
@@ -234,20 +227,14 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      * @param limit Maximum number of modules to return
      * @return modules Array of active module addresses
      * @return total Total number of active modules
+     * @dev Uses cached _activeModuleCount to avoid O(n) counting
      */
     function getActiveModulesPaginated(
         uint256 offset,
         uint256 limit
     ) external view override returns (address[] memory modules, uint256 total) {
+        total = _activeModuleCount;
         uint256 length = _allModules.length;
-
-        // First count total active
-        total = 0;
-        for (uint256 i = 0; i < length; i++) {
-            if (_isRegistered[_allModules[i]] && _moduleInfo[_allModules[i]].isActive) {
-                total++;
-            }
-        }
 
         // Calculate return size
         uint256 remaining = offset < total ? total - offset : 0;
