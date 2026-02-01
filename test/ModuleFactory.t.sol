@@ -210,6 +210,40 @@ contract ModuleFactoryTest is Test {
         factoryNoRegistry.deployModule(address(safe1), oracle);
     }
 
+    function testDeployModuleRevertsIfOracleIsSafe() public {
+        // Oracle cannot be the Safe itself (prevents self-authorization)
+        vm.expectRevert(abi.encodeWithSelector(ModuleFactory.InvalidOracleAddress.selector, address(safe1)));
+        factory.deployModule(address(safe1), address(safe1));
+    }
+
+    function testDeployModuleRevertsIfOracleIsFactory() public {
+        // Oracle cannot be the Factory itself
+        vm.expectRevert(abi.encodeWithSelector(ModuleFactory.InvalidOracleAddress.selector, address(factory)));
+        factory.deployModule(address(safe1), address(factory));
+    }
+
+    function testDeployModuleRevertsIfSafeAlreadyHasModule() public {
+        // First deployment succeeds
+        factory.deployModule(address(safe1), oracle);
+
+        // Second deployment for same Safe should revert (pre-check before CREATE2)
+        address existingModule = registry.safeToModule(address(safe1));
+        vm.expectRevert(abi.encodeWithSelector(ModuleFactory.SafeAlreadyHasModule.selector, address(safe1), existingModule));
+        factory.deployModule(address(safe1), oracle);
+    }
+
+    function testDeployModuleRevertsIfModuleAlreadyDeployed() public {
+        // Deploy without auto-register to allow same nonce re-attempt
+        factory.setAutoRegister(false);
+
+        // First deployment succeeds
+        address module = factory.deployModuleWithNonce(address(safe1), oracle, 0);
+
+        // Trying to deploy with same nonce should revert (contract already exists)
+        vm.expectRevert(abi.encodeWithSelector(ModuleFactory.ModuleAlreadyDeployed.selector, module));
+        factory.deployModuleWithNonce(address(safe1), oracle, 0);
+    }
+
     // ============ View Function Tests ============
 
     function testGetDeployedModule() public {
