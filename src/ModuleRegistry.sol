@@ -27,6 +27,9 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
     /// @notice Authorized factory addresses that can auto-register
     mapping(address => bool) public authorizedFactories;
 
+    /// @notice Cached count of active modules (avoids O(n) iteration)
+    uint256 private _activeModuleCount;
+
     // ============ Events ============
 
     event ModuleRegistered(
@@ -140,6 +143,7 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
         _allModules.push(module);
         safeToModule[safe] = module;
         _isRegistered[module] = true;
+        _activeModuleCount++;
 
         emit ModuleRegistered(module, safe, oracle);
     }
@@ -152,7 +156,10 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      */
     function deactivateModule(address module) external onlyOwner {
         if (!_isRegistered[module]) revert ModuleNotRegistered(module);
-        _moduleInfo[module].isActive = false;
+        if (_moduleInfo[module].isActive) {
+            _moduleInfo[module].isActive = false;
+            _activeModuleCount--;
+        }
         emit ModuleDeactivated(module);
     }
 
@@ -162,7 +169,10 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      */
     function reactivateModule(address module) external onlyOwner {
         if (!_isRegistered[module]) revert ModuleNotRegistered(module);
-        _moduleInfo[module].isActive = true;
+        if (!_moduleInfo[module].isActive) {
+            _moduleInfo[module].isActive = true;
+            _activeModuleCount++;
+        }
         emit ModuleReactivated(module);
     }
 
@@ -173,6 +183,11 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      */
     function removeModule(address module) external onlyOwner {
         if (!_isRegistered[module]) revert ModuleNotRegistered(module);
+
+        // Decrement active count if module was active
+        if (_moduleInfo[module].isActive) {
+            _activeModuleCount--;
+        }
 
         address safe = _moduleInfo[module].safeAddress;
         delete safeToModule[safe];
@@ -268,14 +283,10 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
     /**
      * @notice Get count of active modules
      * @return count Number of active modules
+     * @dev Uses cached count for O(1) gas efficiency
      */
     function getActiveModuleCount() external view override returns (uint256 count) {
-        uint256 length = _allModules.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (_isRegistered[_allModules[i]] && _moduleInfo[_allModules[i]].isActive) {
-                count++;
-            }
-        }
+        return _activeModuleCount;
     }
 
     /**
