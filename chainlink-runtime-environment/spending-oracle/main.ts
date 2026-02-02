@@ -705,9 +705,27 @@ const getActiveSubaccountsForModule = (runtime: Runtime<Config>, moduleAddress: 
 
 
 /**
+ * SDK BigInt type with Uint8Array representation
+ */
+interface SdkBigInt {
+	absVal: Uint8Array
+	sign: bigint
+}
+
+/**
+ * Check if value is an SDK BigInt type (vs native bigint)
+ */
+const isSdkBigInt = (value: unknown): value is SdkBigInt => {
+	return value !== null &&
+		typeof value === 'object' &&
+		'absVal' in value &&
+		'sign' in value
+}
+
+/**
  * Convert SDK BigInt (Uint8Array absVal) to native bigint
  */
-const sdkBigIntToBigInt = (sdkBigInt: { absVal: Uint8Array; sign: bigint }): bigint => {
+const sdkBigIntToBigInt = (sdkBigInt: SdkBigInt): bigint => {
 	// absVal is big-endian bytes representing the absolute value
 	let result = 0n
 	for (const byte of sdkBigInt.absVal) {
@@ -715,6 +733,22 @@ const sdkBigIntToBigInt = (sdkBigInt: { absVal: Uint8Array; sign: bigint }): big
 	}
 	// Apply sign (negative if sign < 0)
 	return sdkBigInt.sign < 0n ? -result : result
+}
+
+/**
+ * Convert value to native bigint, handling both SDK BigInt and native bigint types
+ */
+const toBigInt = (value: bigint | SdkBigInt | number): bigint => {
+	if (typeof value === 'bigint') {
+		return value
+	}
+	if (typeof value === 'number') {
+		return BigInt(value)
+	}
+	if (isSdkBigInt(value)) {
+		return sdkBigIntToBigInt(value)
+	}
+	return 0n
 }
 
 /**
@@ -765,7 +799,7 @@ const getBlockTimestamp = (
 			.result()
 
 		if (headerResult.header?.timestamp) {
-			return sdkBigIntToBigInt(headerResult.header.timestamp)
+			return toBigInt(headerResult.header.timestamp)
 		}
 		// Fallback to current time if header fetch fails
 		runtime.log(`Warning: Could not get timestamp for block ${blockNumber}, using current time`)
