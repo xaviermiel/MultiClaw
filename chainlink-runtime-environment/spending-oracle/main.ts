@@ -1213,6 +1213,10 @@ const pruneExpiredEntries = (
 
 // ============ State Building ============
 
+// High precision for ratio calculations to minimize truncation errors
+// Using 1e18 instead of 10000 (basis points) for much higher accuracy
+const PRECISION = 10n ** 18n
+
 // Unified event type for chronological processing
 type UnifiedEvent =
 	| { type: 'protocol'; event: ProtocolExecutionEvent }
@@ -1348,16 +1352,21 @@ const buildSubAccountState = (
 			// Track deposits for withdrawal matching
 			// Store the original acquisition timestamp so withdrawals inherit it correctly
 			// For multi-token deposits (LP), create a record for each input/output token pair
+			// For mixed acquired/non-acquired inputs, we create SEPARATE deposit records
+			// so that the acquired portion inherits the proper timestamp and non-acquired gets event timestamp
 			if (event.opType === OperationType.DEPOSIT) {
-				// Find the oldest original timestamp from consumed acquired tokens
-				// If no acquired tokens were consumed, use the deposit timestamp (it's new spending)
-				let originalAcquisitionTimestamp = event.timestamp
+				// Calculate acquired ratio for splitting deposit records
+				const totalConsumedForDeposit = consumedEntries.reduce((sum, e) => sum + e.amount, 0n)
+				const fromNonAcquiredForDeposit = totalAmountIn - totalConsumedForDeposit
+
+				// Find the oldest original timestamp from consumed acquired tokens (for acquired portion)
+				let acquiredTimestamp = event.timestamp
 				if (consumedEntries.length > 0) {
-					originalAcquisitionTimestamp = consumedEntries.reduce(
+					acquiredTimestamp = consumedEntries.reduce(
 						(oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
 						consumedEntries[0].originalTimestamp
 					)
-					runtime.log(`  DEPOSIT: storing original acquisition timestamp ${originalAcquisitionTimestamp} for future withdrawal`)
+					runtime.log(`  DEPOSIT: acquired portion will inherit timestamp ${acquiredTimestamp}`)
 				}
 
 				// Create a deposit record linking input token to output token
@@ -1370,32 +1379,120 @@ const buildSubAccountState = (
 				const isMultiInputSingleOutput = validInputCount > 1 && event.tokensOut.length === 1
 				const isSingleInputMultiOutput = validInputCount === 1 && validOutputCount > 1
 
+				// Calculate USD-weighted ratio for acquired vs non-acquired (needed for mixed deposits)
+				let acquiredRatioForDeposit = 0n
+				if (totalAmountIn > 0n) {
+					if (priceCache && hasAllPrices && totalValueInUSD > 0n) {
+						// USD-weighted ratio
+						acquiredRatioForDeposit = (consumedValueUSD * PRECISION) / totalValueInUSD
+					} else {
+						// Amount-weighted ratio
+						acquiredRatioForDeposit = (totalConsumedForDeposit * PRECISION) / totalAmountIn
+					}
+				}
+
 				if (isSingleInputMultiOutput) {
-					// Single input → multiple outputs: create a deposit record for each output
-					// Divide the input amount equally among output records
+					// Single input → multiple outputs: create deposit records for each output
+					// Weight input allocation by output value (USD), not by count
 					const tokenIn = event.tokensIn.find((_, i) => event.amountsIn[i] > 0n)!
 					const amountIn = event.amountsIn.find(a => a > 0n)!
-					const inputSharePerOutput = amountIn / BigInt(validOutputCount)
 
+					// Calculate total output value for USD weighting
+					let totalOutputValueUSD = 0n
+					const outputValuesUSD: bigint[] = []
+					for (let i = 0; i < event.tokensOut.length; i++) {
+						const amountOut = event.amountsOut[i]
+						if (amountOut <= 0n) {
+							outputValuesUSD.push(0n)
+							continue
+						}
+						const valueUSD = priceCache ? getTokenValueUSD(event.tokensOut[i], amountOut, priceCache) : null
+						if (valueUSD !== null) {
+							outputValuesUSD.push(valueUSD)
+							totalOutputValueUSD += valueUSD
+						} else {
+							outputValuesUSD.push(0n)
+						}
+					}
+
+					// Allocate input to each output
+					let allocatedInput = 0n
 					for (let i = 0; i < event.tokensOut.length; i++) {
 						const tokenOut = event.tokensOut[i]
 						const amountOut = event.amountsOut[i]
 						if (amountOut <= 0n) continue
 
-						runtime.log(`  DEPOSIT: single-input multi-output detected, allocating ${inputSharePerOutput} ${tokenIn} to ${tokenOut} output (1/${validOutputCount} share)`)
+						// Calculate this output's share of the input
+						let inputShare: bigint
+						const remainingOutputs = event.tokensOut.slice(i).filter((_, idx) => event.amountsOut[i + idx] > 0n).length
+						if (remainingOutputs === 1) {
+							// Last output gets remainder to prevent dust loss
+							inputShare = amountIn - allocatedInput
+						} else if (totalOutputValueUSD > 0n && outputValuesUSD[i] > 0n) {
+							// USD-weighted share
+							inputShare = (amountIn * outputValuesUSD[i]) / totalOutputValueUSD
+						} else {
+							// Fallback: equal division
+							inputShare = amountIn / BigInt(validOutputCount)
+						}
+						allocatedInput += inputShare
 
-						state.depositRecords.push({
-							subAccount: event.subAccount,
-							target: event.target,
-							tokenIn: tokenIn,
-							amountIn: inputSharePerOutput, // Each output gets proportional share of input
-							remainingAmount: inputSharePerOutput,
-							tokenOut: tokenOut,
-							amountOut: amountOut,
-							remainingOutputAmount: amountOut,
-							timestamp: event.timestamp,
-							originalAcquisitionTimestamp,
-						})
+						runtime.log(`  DEPOSIT: single-input multi-output, allocating ${inputShare} ${tokenIn} to ${tokenOut} (value-weighted)`)
+
+						// For mixed acquired/non-acquired, create separate deposit records
+						if (totalConsumedForDeposit > 0n && fromNonAcquiredForDeposit > 0n) {
+							// Split into acquired and non-acquired portions
+							const acquiredInputShare = (inputShare * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredInputShare = inputShare - acquiredInputShare
+							const acquiredOutputShare = (amountOut * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredOutputShare = amountOut - acquiredOutputShare
+
+							if (acquiredInputShare > 0n) {
+								runtime.log(`    Acquired portion: ${acquiredInputShare} ${tokenIn} -> ${acquiredOutputShare} ${tokenOut}, timestamp ${acquiredTimestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: acquiredInputShare,
+									remainingAmount: acquiredInputShare,
+									tokenOut: tokenOut,
+									amountOut: acquiredOutputShare,
+									remainingOutputAmount: acquiredOutputShare,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: acquiredTimestamp,
+								})
+							}
+							if (nonAcquiredInputShare > 0n) {
+								runtime.log(`    Non-acquired portion: ${nonAcquiredInputShare} ${tokenIn} -> ${nonAcquiredOutputShare} ${tokenOut}, timestamp ${event.timestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: nonAcquiredInputShare,
+									remainingAmount: nonAcquiredInputShare,
+									tokenOut: tokenOut,
+									amountOut: nonAcquiredOutputShare,
+									remainingOutputAmount: nonAcquiredOutputShare,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: event.timestamp, // Non-acquired = new spending
+								})
+							}
+						} else {
+							// All acquired or all non-acquired - single record
+							const originalTimestamp = totalConsumedForDeposit > 0n ? acquiredTimestamp : event.timestamp
+							state.depositRecords.push({
+								subAccount: event.subAccount,
+								target: event.target,
+								tokenIn: tokenIn,
+								amountIn: inputShare,
+								remainingAmount: inputShare,
+								tokenOut: tokenOut,
+								amountOut: amountOut,
+								remainingOutputAmount: amountOut,
+								timestamp: event.timestamp,
+								originalAcquisitionTimestamp: originalTimestamp,
+							})
+						}
 					}
 				} else {
 					// Standard case: loop over inputs
@@ -1415,18 +1512,62 @@ const buildSubAccountState = (
 							runtime.log(`  DEPOSIT: multi-input LP detected, allocating ${amountOut} ${tokenOut} to ${tokenIn} input (1/${validInputCount} share)`)
 						}
 
-						state.depositRecords.push({
-							subAccount: event.subAccount,
-							target: event.target,
-							tokenIn: tokenIn,
-							amountIn: amountIn,
-							remainingAmount: amountIn,
-							tokenOut: tokenOut,
-							amountOut: amountOut,
-							remainingOutputAmount: amountOut,
-							timestamp: event.timestamp,
-							originalAcquisitionTimestamp,
-						})
+						// For mixed acquired/non-acquired, create separate deposit records per input
+						// Note: We use the overall acquired ratio as approximation since consumedEntries
+						// contains entries from ALL input tokens.
+						if (totalConsumedForDeposit > 0n && fromNonAcquiredForDeposit > 0n) {
+							// Split into acquired and non-acquired portions
+							const acquiredAmountIn = (amountIn * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredAmountIn = amountIn - acquiredAmountIn
+							const acquiredAmountOut = (amountOut * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredAmountOut = amountOut - acquiredAmountOut
+
+							if (acquiredAmountIn > 0n) {
+								runtime.log(`  DEPOSIT: acquired portion ${acquiredAmountIn} ${tokenIn} -> ${acquiredAmountOut} ${tokenOut}, timestamp ${acquiredTimestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: acquiredAmountIn,
+									remainingAmount: acquiredAmountIn,
+									tokenOut: tokenOut,
+									amountOut: acquiredAmountOut,
+									remainingOutputAmount: acquiredAmountOut,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: acquiredTimestamp,
+								})
+							}
+							if (nonAcquiredAmountIn > 0n) {
+								runtime.log(`  DEPOSIT: non-acquired portion ${nonAcquiredAmountIn} ${tokenIn} -> ${nonAcquiredAmountOut} ${tokenOut}, timestamp ${event.timestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: nonAcquiredAmountIn,
+									remainingAmount: nonAcquiredAmountIn,
+									tokenOut: tokenOut,
+									amountOut: nonAcquiredAmountOut,
+									remainingOutputAmount: nonAcquiredAmountOut,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: event.timestamp, // Non-acquired = new spending
+								})
+							}
+						} else {
+							// All acquired or all non-acquired - single record
+							const originalTimestamp = totalConsumedForDeposit > 0n ? acquiredTimestamp : event.timestamp
+							state.depositRecords.push({
+								subAccount: event.subAccount,
+								target: event.target,
+								tokenIn: tokenIn,
+								amountIn: amountIn,
+								remainingAmount: amountIn,
+								tokenOut: tokenOut,
+								amountOut: amountOut,
+								remainingOutputAmount: amountOut,
+								timestamp: event.timestamp,
+								originalAcquisitionTimestamp: originalTimestamp,
+							})
+						}
 					}
 				}
 			}
@@ -1462,14 +1603,15 @@ const buildSubAccountState = (
 
 						if (priceCache && hasAllPrices && totalValueInUSD > 0n) {
 							// USD-weighted ratio: based on actual value, not raw amounts
-							acquiredRatio = (consumedValueUSD * 10000n) / totalValueInUSD
+							// Using high precision (1e18) to minimize truncation errors
+							acquiredRatio = (consumedValueUSD * PRECISION) / totalValueInUSD
 							useUSDWeighting = true
 						} else {
 							// Fallback: amount-weighted ratio (original behavior)
-							acquiredRatio = (totalConsumed * 10000n) / totalAmountIn
+							acquiredRatio = (totalConsumed * PRECISION) / totalAmountIn
 						}
 
-						const outputFromAcquired = (amountOut * acquiredRatio) / 10000n
+						const outputFromAcquired = (amountOut * acquiredRatio) / PRECISION
 						const outputFromNonAcquired = amountOut - outputFromAcquired
 
 						const opName = OperationType[event.opType]
@@ -1481,12 +1623,22 @@ const buildSubAccountState = (
 
 						// Proportionally split the acquired output among consumed entries by their amounts
 						// Each consumed entry's portion of the output inherits that entry's timestamp
-						for (const entry of consumedEntries) {
-							const entryRatio = (entry.amount * 10000n) / totalConsumed
-							const entryOutput = (outputFromAcquired * entryRatio) / 10000n
+						// Track allocated amount to ensure no dust is lost
+						let allocatedFromAcquired = 0n
+						for (let idx = 0; idx < consumedEntries.length; idx++) {
+							const entry = consumedEntries[idx]
+							let entryOutput: bigint
+							if (idx === consumedEntries.length - 1) {
+								// Last entry gets remainder to prevent dust loss
+								entryOutput = outputFromAcquired - allocatedFromAcquired
+							} else {
+								const entryRatio = (entry.amount * PRECISION) / totalConsumed
+								entryOutput = (outputFromAcquired * entryRatio) / PRECISION
+							}
 							if (entryOutput > 0n) {
 								runtime.log(`    ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
 								addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+								allocatedFromAcquired += entryOutput
 							}
 						}
 
@@ -1498,12 +1650,22 @@ const buildSubAccountState = (
 
 						// Proportionally split the output among consumed entries by their amounts
 						// Each consumed entry's portion of the output inherits that entry's timestamp
-						for (const entry of consumedEntries) {
-							const entryRatio = (entry.amount * 10000n) / totalConsumed
-							const entryOutput = (amountOut * entryRatio) / 10000n
+						// Track allocated amount to ensure no dust is lost
+						let allocatedOutput = 0n
+						for (let idx = 0; idx < consumedEntries.length; idx++) {
+							const entry = consumedEntries[idx]
+							let entryOutput: bigint
+							if (idx === consumedEntries.length - 1) {
+								// Last entry gets remainder to prevent dust loss
+								entryOutput = amountOut - allocatedOutput
+							} else {
+								const entryRatio = (entry.amount * PRECISION) / totalConsumed
+								entryOutput = (amountOut * entryRatio) / PRECISION
+							}
 							if (entryOutput > 0n) {
 								runtime.log(`  ${opName}: ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
 								addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+								allocatedOutput += entryOutput
 							}
 						}
 					} else {
