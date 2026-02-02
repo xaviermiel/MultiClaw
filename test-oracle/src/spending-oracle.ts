@@ -612,9 +612,8 @@ async function queryTransferEvents(moduleAddress: Address, fromBlock: bigint, to
  * that have ever had acquired balance set for a subaccount.
  * This is used to detect and clear stale on-chain balances.
  *
- * We query from the earliest possible block to catch ALL historical tokens,
- * not just recent ones. This prevents stale balance issues when tokens were acquired
- * long ago and have since aged out of the normal lookback window.
+ * Uses pagination to handle large block ranges without hitting RPC limits.
+ * Respects maxHistoricalBlocks to prevent unbounded growth as chain ages.
  */
 async function queryHistoricalAcquiredTokens(moduleAddress: Address, subAccount: Address): Promise<Set<Address>> {
   const tokens = new Set<Address>()
@@ -624,52 +623,96 @@ async function queryHistoricalAcquiredTokens(moduleAddress: Address, subAccount:
     'getBlockNumber'
   )
 
-  // Query from block 0 or earliest block to catch ALL historical tokens
-  // This ensures we find tokens that were acquired outside the normal lookback window
-  // and can properly clear stale on-chain balances
-  const fromBlock = 0n
+  // Limit how far back we search to prevent unbounded growth
+  const maxHistoricalBlocks = BigInt(config.maxHistoricalBlocks)
+  const maxBlocksPerQuery = BigInt(config.maxBlocksPerQuery)
 
-  try {
-    const logs = await rpcManager.executeWithFallback(
-      (client) => client.getLogs({
-        address: moduleAddress,
-        event: ACQUIRED_BALANCE_UPDATED_EVENT,
-        fromBlock,
-        toBlock: currentBlock,
-        args: { subAccount },
-      }),
-      `queryHistoricalAcquiredTokens(${subAccount})`
-    )
+  // Calculate the starting block (bounded by maxHistoricalBlocks)
+  const earliestBlock = currentBlock > maxHistoricalBlocks
+    ? currentBlock - maxHistoricalBlocks
+    : 0n
 
-    for (const logEntry of logs) {
-      const token = logEntry.args.token as Address
-      if (token) {
-        tokens.add(token.toLowerCase() as Address)
+  log(`Querying historical tokens from block ${earliestBlock} to ${currentBlock} (${currentBlock - earliestBlock} blocks, max ${maxBlocksPerQuery} per query)`)
+
+  // Query in chunks to avoid RPC limits
+  let fromBlock = earliestBlock
+  let totalLogs = 0
+  let queryCount = 0
+
+  while (fromBlock < currentBlock) {
+    const toBlock = fromBlock + maxBlocksPerQuery > currentBlock
+      ? currentBlock
+      : fromBlock + maxBlocksPerQuery
+
+    try {
+      const logs = await rpcManager.executeWithFallback(
+        (client) => client.getLogs({
+          address: moduleAddress,
+          event: ACQUIRED_BALANCE_UPDATED_EVENT,
+          fromBlock,
+          toBlock,
+          args: { subAccount },
+        }),
+        `queryHistoricalAcquiredTokens(${subAccount}) chunk ${queryCount}`
+      )
+
+      for (const logEntry of logs) {
+        const token = logEntry.args.token as Address
+        if (token) {
+          tokens.add(token.toLowerCase() as Address)
+        }
+      }
+
+      totalLogs += logs.length
+      queryCount++
+    } catch (error) {
+      // If a chunk fails, try with smaller range
+      log(`Query chunk failed (blocks ${fromBlock}-${toBlock}), trying smaller range: ${error}`)
+
+      const smallerChunkSize = maxBlocksPerQuery / 2n
+      if (smallerChunkSize >= 100n) {
+        // Retry with smaller chunks
+        let subFrom = fromBlock
+        while (subFrom < toBlock) {
+          const subTo = subFrom + smallerChunkSize > toBlock
+            ? toBlock
+            : subFrom + smallerChunkSize
+
+          try {
+            const logs = await rpcManager.executeWithFallback(
+              (client) => client.getLogs({
+                address: moduleAddress,
+                event: ACQUIRED_BALANCE_UPDATED_EVENT,
+                fromBlock: subFrom,
+                toBlock: subTo,
+                args: { subAccount },
+              }),
+              `queryHistoricalAcquiredTokens(${subAccount}) small chunk`
+            )
+
+            for (const logEntry of logs) {
+              const token = logEntry.args.token as Address
+              if (token) {
+                tokens.add(token.toLowerCase() as Address)
+              }
+            }
+
+            totalLogs += logs.length
+          } catch (subError) {
+            log(`Sub-chunk query failed (blocks ${subFrom}-${subTo}), skipping: ${subError}`)
+          }
+
+          subFrom = subTo + 1n
+        }
+      } else {
+        log(`Chunk too small to retry, skipping blocks ${fromBlock}-${toBlock}`)
       }
     }
-  } catch (error) {
-    // Some RPC providers limit historical queries - fall back to extended range
-    log(`Full historical query failed, falling back to extended range: ${error}`)
-    const fallbackFromBlock = currentBlock - BigInt(config.blocksToLookBack * 10)
 
-    const logs = await rpcManager.executeWithFallback(
-      (client) => client.getLogs({
-        address: moduleAddress,
-        event: ACQUIRED_BALANCE_UPDATED_EVENT,
-        fromBlock: fallbackFromBlock > 0n ? fallbackFromBlock : 0n,
-        toBlock: currentBlock,
-        args: { subAccount },
-      }),
-      `queryHistoricalAcquiredTokens(${subAccount}) fallback`
-    )
-
-    for (const logEntry of logs) {
-      const token = logEntry.args.token as Address
-      if (token) {
-        tokens.add(token.toLowerCase() as Address)
-      }
-    }
+    fromBlock = toBlock + 1n
   }
+
+  log(`Historical token query complete: ${tokens.size} unique tokens found in ${totalLogs} events (${queryCount} queries)`)
 
   return tokens
 }

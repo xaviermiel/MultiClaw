@@ -94,6 +94,15 @@ export const config = {
   // Sepolia: 12 blocks (~2.4 min), Mainnet: 64 blocks (~12 min) recommended
   confirmationBlocks: parseInt(process.env.CONFIRMATION_BLOCKS || '12'),
 
+  // Maximum blocks per log query to prevent RPC timeouts
+  // Most RPCs limit to 2000-10000 blocks per request
+  maxBlocksPerQuery: parseInt(process.env.MAX_BLOCKS_PER_QUERY || '5000'),
+
+  // Maximum total blocks to search for historical tokens
+  // Limits unbounded growth; set based on expected token lifetime
+  // Default: ~30 days of blocks on Sepolia (7200 blocks/day * 30)
+  maxHistoricalBlocks: parseInt(process.env.MAX_HISTORICAL_BLOCKS || '216000'),
+
   // Gas
   gasLimit: BigInt(process.env.GAS_LIMIT || '500000'),
 

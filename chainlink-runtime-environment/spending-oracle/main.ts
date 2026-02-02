@@ -71,6 +71,10 @@ const configSchema = z.object({
 	// How many blocks to look back for events (approximate 24h worth)
 	// Ethereum: ~7200 blocks/day, Arbitrum: ~300000 blocks/day
 	blocksToLookBack: z.number(),
+	// Maximum blocks per log query to prevent RPC timeouts
+	maxBlocksPerQuery: z.number(),
+	// Maximum total blocks to search for historical tokens
+	maxHistoricalBlocks: z.number(),
 })
 
 type Config = z.infer<typeof configSchema>
@@ -1067,6 +1071,9 @@ const queryTransferEventsForModule = (
  * Query historical AcquiredBalanceUpdated events for a specific module to find all tokens
  * that have ever had acquired balance set for a subaccount.
  * This is used to detect and clear stale on-chain balances.
+ *
+ * Uses pagination to handle large block ranges without hitting RPC limits.
+ * Respects maxHistoricalBlocks to prevent unbounded growth as chain ages.
  */
 const queryHistoricalAcquiredTokensForModule = (
 	runtime: Runtime<Config>,
@@ -1077,36 +1084,64 @@ const queryHistoricalAcquiredTokensForModule = (
 	const evmClient = createEvmClient(runtime)
 
 	try {
-		// Query from a reasonable lookback - use extended range to catch all historical tokens
 		const currentBlock = getCurrentBlockNumber(runtime)
-		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
+
+		// Limit how far back we search to prevent unbounded growth
+		const maxHistoricalBlocks = BigInt(runtime.config.maxHistoricalBlocks)
+		const maxBlocksPerQuery = BigInt(runtime.config.maxBlocksPerQuery)
+
+		// Calculate the starting block (bounded by maxHistoricalBlocks)
+		const earliestBlock = currentBlock > maxHistoricalBlocks
+			? currentBlock - maxHistoricalBlocks
+			: 0n
+
+		runtime.log(`Querying historical tokens from block ${earliestBlock} to ${currentBlock} (${currentBlock - earliestBlock} blocks)`)
 
 		const topics: Array<{ topic: string[] }> = [
 			{ topic: [ACQUIRED_BALANCE_UPDATED_EVENT_SIG] },
 			{ topic: [addressToTopicBytes(subAccount)] },
 		]
 
-		const logsResult = evmClient
-			.filterLogs(runtime, {
-				filterQuery: {
-					addresses: [moduleAddress],
-					topics: topics,
-					fromBlock: { absVal: fromBlock.toString(), sign: '' },
-					toBlock: { absVal: currentBlock.toString(), sign: '' },
-				},
-			})
-			.result()
+		// Query in chunks to avoid RPC limits
+		let fromBlock = earliestBlock
+		let totalLogs = 0
 
-		if (logsResult.logs && logsResult.logs.length > 0) {
-			for (const log of logsResult.logs) {
-				// topics[2] is the token address (indexed)
-				const topic2 = log.topics[2]
-				const token = topicToAddress(topic2)
-				if (token) {
-					tokens.add(token.toLowerCase() as Address)
+		while (fromBlock < currentBlock) {
+			const toBlock = fromBlock + maxBlocksPerQuery > currentBlock
+				? currentBlock
+				: fromBlock + maxBlocksPerQuery
+
+			try {
+				const logsResult = evmClient
+					.filterLogs(runtime, {
+						filterQuery: {
+							addresses: [moduleAddress],
+							topics: topics,
+							fromBlock: { absVal: fromBlock.toString(), sign: '' },
+							toBlock: { absVal: toBlock.toString(), sign: '' },
+						},
+					})
+					.result()
+
+				if (logsResult.logs && logsResult.logs.length > 0) {
+					for (const log of logsResult.logs) {
+						// topics[2] is the token address (indexed)
+						const topic2 = log.topics[2]
+						const token = topicToAddress(topic2)
+						if (token) {
+							tokens.add(token.toLowerCase() as Address)
+						}
+					}
+					totalLogs += logsResult.logs.length
 				}
+			} catch (chunkError) {
+				runtime.log(`Error querying chunk ${fromBlock}-${toBlock}, skipping: ${chunkError}`)
 			}
+
+			fromBlock = toBlock + 1n
 		}
+
+		runtime.log(`Historical token query complete: ${tokens.size} unique tokens found in ${totalLogs} events`)
 	} catch (error) {
 		runtime.log(`Error querying historical acquired tokens for module ${moduleAddress}: ${error}`)
 	}
