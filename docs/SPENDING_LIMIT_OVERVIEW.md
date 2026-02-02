@@ -144,9 +144,12 @@ Day Start:
 
 ### Off-Chain Oracle Responsibilities
 
-- **Rolling window tracking**: Spending expires after 24 hours
+- **Event-driven processing**: Log triggers provide instant event handling via Chainlink CRE
+- **Rolling window tracking**: Spending expires after 24 hours (one-way, no recovery)
 - **Deposit/withdrawal matching**: Mark withdrawn tokens as acquired if matched to deposit
-- **Acquired balance management**: Track which tokens are free to use
+- **FIFO acquired balance management**: Track which tokens are free to use with timestamp inheritance
+- **Multi-module support**: Monitor multiple DeFiInteractorModule instances via registry
+- **Periodic refresh**: Cron trigger updates allowances as spending expires
 - **Portfolio valuation**: Calculate total value from balances + prices
 
 ---
@@ -234,7 +237,8 @@ The contract extracts `tokenIn` and `amountIn` from the calldata via registered 
 3. **Acquired tokens are free to use** (from swaps, withdrawals) - only exact amounts received
 4. **Acquired status expires after 24h** - tokens become "original" and cost spending again
 5. **Spending is one-way** - once consumed, only resets when 24h window expires
-6. **Oracle manages rolling windows** and updates allowances
-7. **On-chain verification** prevents lying about operations
-8. **Multiple safety layers** protect against compromised sub-accounts
+6. **Oracle uses event-driven triggers** for instant processing + cron for periodic refresh
+7. **FIFO queues track acquired balances** with timestamp inheritance through swaps
+8. **On-chain verification** prevents lying about operations
+9. **Multiple safety layers** protect against compromised sub-accounts
 

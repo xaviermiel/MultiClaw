@@ -174,18 +174,31 @@ forge test --match-test testGrantRole -vvv
 
 ## Chainlink Runtime Environment (CRE) Integration
 
-The **DeFiInteractorModule** includes integrated Safe value monitoring powered by Chainlink Runtime Environment.
+The **DeFiInteractorModule** includes two CRE-powered oracles for autonomous operation.
 
-### Safe Value Monitoring
+### 1. Spending Oracle
 
-The module automatically tracks and stores the USD value of its associated Safe:
-- Runs every hours (configurable)
+Monitors events and manages spending allowances for the Acquired Balance Model:
+- Real-time log triggers for instant event processing
+- FIFO tracking of acquired balances with timestamp inheritance
+- Rolling 24-hour window spending calculations
+- Multi-module support via hybrid approach (log triggers + registry discovery)
+
+**Implementation:**
+- `chainlink-runtime-environment/spending-oracle/main.ts` - CRE workflow
+- `chainlink-runtime-environment/spending-oracle/config.*.json` - Configuration
+
+See [Spending Oracle README](./chainlink-runtime-environment/spending-oracle/README.md) for configuration details.
+
+### 2. Safe Value Monitoring
+
+Tracks and stores the USD value of the associated Safe:
+- Runs periodically (configurable)
 - Fetches token balances from the Safe (ERC20 + DeFi positions)
 - Supports Aave aTokens, Morpho vaults, Uniswap LP, and 100+ major tokens
 - Gets USD prices from Chainlink price feeds
 - Calculates total portfolio value in USD
 - Stores value on-chain via signed Chainlink reports
-- Queryable by any smart contract
 
 **Implementation:**
 - `src/DeFiInteractorModule.sol` - Module with integrated value storage

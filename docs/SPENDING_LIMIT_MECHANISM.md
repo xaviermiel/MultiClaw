@@ -195,20 +195,23 @@ mapping(address => AggregatorV3Interface) public tokenPriceFeeds;
 
 ### 3.2 Events
 
+> **Note**: The `ProtocolExecution` event uses arrays to support multi-token operations (e.g., Uniswap V4 batch swaps). Code examples throughout this document may use simplified single-value syntax (`tokenIn`, `amountIn`) for clarity, but the actual implementation uses arrays (`tokensIn[]`, `amountsIn[]`).
+
 ```solidity
 // ============ Execution Events ============
 
 /// @notice Emitted on every protocol interaction
+/// @dev Uses arrays to support multi-token operations (e.g., Uniswap V4, batch swaps)
 event ProtocolExecution(
     address indexed subAccount,
     address indexed target,
     OperationType opType,
-    address tokenIn,
-    uint256 amountIn,
-    address tokenOut,
-    uint256 amountOut,
-    uint256 spendingCost,
-    uint256 timestamp
+    address[] tokensIn,
+    uint256[] amountsIn,
+    address[] tokensOut,
+    uint256[] amountsOut,
+    uint256 spendingCost
+    // Note: No timestamp param - contract uses block.timestamp, oracle fetches from block header
 );
 
 // ============ Oracle Update Events ============
@@ -1506,7 +1509,7 @@ The core use case for this protocol is enabling sub-accounts to manage liquidity
 | **Spending limit enforcement** | Simple check: `cost <= allowance` | Calculate allowance based on complex rules |
 | **Acquired balance tracking** | Store values, emit events | Determine when to add/remove acquired status |
 | **Window management** | None (stateless) | Track rolling windows, handle expiry |
-| **Deposit/withdrawal netting** | Emit deposit/withdraw events | Match deposits to withdrawals, calculate recovery |
+| **Deposit/withdrawal matching** | Emit ProtocolExecution events | Match deposits to withdrawals for acquired status |
 | **Portfolio valuation** | Store value, check staleness | Calculate from token balances + prices |
 | **Price feeds** | None | Aggregate from Chainlink, TWAP, etc. |
 | **Anomaly detection** | None | Detect suspicious patterns, reduce allowance |
@@ -1604,244 +1607,291 @@ function _requireFreshOracle(address subAccount) internal view {
 
 ### 8.4 Off-Chain Oracle Logic
 
-The oracle monitors events and applies complex rules:
+The oracle monitors `ProtocolExecution` and `TransferExecuted` events using Chainlink CRE (Chainlink Runtime Environment) with event-driven triggers:
 
 ```typescript
-// Pseudocode for off-chain oracle
+// Pseudocode matching current CRE implementation
 
-interface SpendingState {
-  subAccount: Address;
-  deposits: Map<Protocol, DepositRecord[]>;   // Historical deposits with timestamps
-  spendingHistory: SpendingRecord[];          // Rolling window of spending
-  acquiredBalances: Map<Token, AcquiredRecord[]>; // With timestamps
+// ============ Core Data Structures ============
+
+interface SubAccountState {
+  spendingRecords: { amount: bigint; timestamp: bigint }[];
+  depositRecords: DepositRecord[];
+  totalSpendingInWindow: bigint;
+  acquiredQueues: Map<Address, AcquiredBalanceEntry[]>;  // FIFO queues
+  acquiredBalances: Map<Address, bigint>;  // Computed totals
 }
 
 interface DepositRecord {
-  protocol: Address;
-  token: Address;
-  amount: bigint;
-  valueUSD: bigint;
-  timestamp: number;
-  txHash: string;
+  subAccount: Address;
+  target: Address;
+  tokenIn: Address;
+  amountIn: bigint;
+  remainingAmount: bigint;      // Tracks unconsumed deposit
+  tokenOut: Address;            // LP/receipt token received
+  amountOut: bigint;
+  remainingOutputAmount: bigint; // Tracks unconsumed output
+  timestamp: bigint;
+  originalAcquisitionTimestamp: bigint;  // For FIFO inheritance
 }
 
-interface AcquiredRecord {
+interface AcquiredBalanceEntry {
   amount: bigint;
-  costBasisUSD: bigint;
-  source: 'swap' | 'withdrawal' | 'external' | 'rewards';
-  timestamp: number;
+  originalTimestamp: bigint;  // For 24h expiry calculation
+}
+
+// ============ Event Types ============
+
+// Single unified event with operation type enum
+interface ProtocolExecutionEvent {
+  subAccount: Address;
+  target: Address;
+  opType: OperationType;  // SWAP, DEPOSIT, WITHDRAW, CLAIM, APPROVE
+  tokensIn: Address[];
+  amountsIn: bigint[];
+  tokensOut: Address[];
+  amountsOut: bigint[];
+  spendingCost: bigint;
+  timestamp: bigint;
+  blockNumber: bigint;
+}
+
+enum OperationType {
+  UNKNOWN = 0,
+  SWAP = 1,
+  DEPOSIT = 2,
+  WITHDRAW = 3,
+  CLAIM = 4,
+  APPROVE = 5
 }
 
 // ============ Rolling Window Spending ============
 
-function calculateCurrentSpending(state: SpendingState): bigint {
-  const windowStart = Date.now() - WINDOW_DURATION_MS; // 24 hours
-
-  // Sum spending in window, with linear decay for older entries
+function calculateCurrentSpending(state: SubAccountState, windowStart: bigint): bigint {
   let totalSpending = 0n;
-
-  for (const record of state.spendingHistory) {
+  for (const record of state.spendingRecords) {
     if (record.timestamp >= windowStart) {
-      // Full weight for recent spending
-      totalSpending += record.valueUSD;
+      totalSpending += record.amount;
     }
-    // Entries older than window are ignored
   }
-
   return totalSpending;
 }
 
 function calculateSpendingAllowance(
-  state: SpendingState,
   portfolioValue: bigint,
-  maxSpendingBps: number
+  maxSpendingBps: number,
+  currentSpending: bigint
 ): bigint {
   const maxSpending = (portfolioValue * BigInt(maxSpendingBps)) / 10000n;
-  const currentSpending = calculateCurrentSpending(state);
-
-  // Available = max - current (with floor at 0)
   return currentSpending >= maxSpending ? 0n : maxSpending - currentSpending;
 }
 
 
-// ============ Withdrawal Recovery Logic ============
+// ============ FIFO Acquired Balance Management ============
 
-function processWithdrawal(
-  state: SpendingState,
-  event: WithdrawalEvent
-): { recoveredSpending: bigint; newAcquired: bigint } {
-  const { protocol, token, amount, valueUSD, timestamp } = event;
+function consumeAcquiredBalance(
+  queue: AcquiredBalanceEntry[],
+  amount: bigint,
+  eventTimestamp: bigint,
+  windowDuration: bigint
+): { consumed: AcquiredBalanceEntry[]; remaining: bigint } {
+  const consumed: AcquiredBalanceEntry[] = [];
+  let remaining = amount;
+  const expiryThreshold = eventTimestamp - windowDuration;
 
-  // Find matching deposits from SAME sub-account within window
-  const windowStart = timestamp - WINDOW_DURATION_MS;
-  const matchingDeposits = state.deposits.get(protocol)?.filter(d =>
-    d.timestamp >= windowStart &&
-    d.token === token
-  ) || [];
+  // FIFO: consume oldest non-expired entries first
+  while (remaining > 0n && queue.length > 0) {
+    const entry = queue[0];
 
-  if (matchingDeposits.length === 0) {
-    // No matching deposit - withdrawal is just acquired, no recovery
-    return { recoveredSpending: 0n, newAcquired: amount };
-  }
-
-  // Match FIFO (first in, first out)
-  let remainingWithdraw = valueUSD;
-  let recoveredSpending = 0n;
-
-  for (const deposit of matchingDeposits.sort((a, b) => a.timestamp - b.timestamp)) {
-    if (remainingWithdraw <= 0n) break;
-
-    const matchAmount = remainingWithdraw > deposit.valueUSD
-      ? deposit.valueUSD
-      : remainingWithdraw;
-
-    recoveredSpending += matchAmount;
-    remainingWithdraw -= matchAmount;
-
-    // Mark deposit as partially/fully matched
-    deposit.valueUSD -= matchAmount;
-  }
-
-  // Anything beyond matched deposits is just acquired (no recovery)
-  const newAcquired = amount; // Full amount is acquired
-
-  return { recoveredSpending, newAcquired };
-}
-
-
-// ============ Acquired Balance Expiry ============
-
-function calculateAcquiredBalance(
-  state: SpendingState,
-  token: Address
-): bigint {
-  const windowStart = Date.now() - WINDOW_DURATION_MS;
-  const records = state.acquiredBalances.get(token) || [];
-
-  // Only count acquired balance from current window
-  let total = 0n;
-  for (const record of records) {
-    if (record.timestamp >= windowStart) {
-      total += record.amount;
-    }
-    // Older acquired balance "expires" - becomes original again
-  }
-
-  return total;
-}
-
-
-// ============ Example: Gradual Expiry ============
-
-function calculateAcquiredBalanceWithDecay(
-  state: SpendingState,
-  token: Address
-): bigint {
-  const now = Date.now();
-  const records = state.acquiredBalances.get(token) || [];
-
-  let total = 0n;
-  for (const record of records) {
-    const age = now - record.timestamp;
-
-    if (age >= WINDOW_DURATION_MS) {
-      // Fully expired
+    // Skip expired entries
+    if (entry.originalTimestamp < expiryThreshold) {
+      queue.shift();
       continue;
     }
 
-    // Linear decay: 100% at t=0, 0% at t=window
-    const remainingWeight = WINDOW_DURATION_MS - age;
-    const effectiveAmount = (record.amount * BigInt(remainingWeight)) / BigInt(WINDOW_DURATION_MS);
+    if (entry.amount <= remaining) {
+      consumed.push(queue.shift()!);
+      remaining -= entry.amount;
+    } else {
+      consumed.push({ amount: remaining, originalTimestamp: entry.originalTimestamp });
+      entry.amount -= remaining;
+      remaining = 0n;
+    }
+  }
 
-    total += effectiveAmount;
+  return { consumed, remaining };
+}
+
+function calculateAcquiredBalance(
+  queue: AcquiredBalanceEntry[],
+  currentTimestamp: bigint,
+  windowDuration: bigint
+): bigint {
+  const expiryThreshold = currentTimestamp - windowDuration;
+  let total = 0n;
+
+  for (const entry of queue) {
+    if (entry.originalTimestamp >= expiryThreshold) {
+      total += entry.amount;
+    }
   }
 
   return total;
 }
 
 
-// ============ Adding Acquired Balance (Exact Amount Tracking) ============
+// ============ Withdrawal/Claim Deposit Matching ============
 
-function addAcquiredBalance(
-  state: SpendingState,
-  token: Address,
-  amount: bigint,  // EXACT amount received from operation
-  source: 'swap' | 'withdrawal' | 'external' | 'rewards'
-): void {
-  const records = state.acquiredBalances.get(token) || [];
+function matchWithdrawalToDeposits(
+  state: SubAccountState,
+  event: ProtocolExecutionEvent,
+  tokenOut: Address,
+  amountOut: bigint
+): { matchedAmount: bigint; inheritedTimestamp: bigint } {
+  // Find matching deposits to same protocol by this subaccount
+  const matchingDeposits = state.depositRecords.filter(d =>
+    d.target === event.target &&
+    d.tokenOut.toLowerCase() === tokenOut.toLowerCase() &&
+    d.remainingOutputAmount > 0n
+  );
 
-  // Create new record with exact amount and current timestamp
-  records.push({
-    amount,           // Only this exact amount is acquired
-    costBasisUSD: 0n, // Set by caller if needed
-    source,
-    timestamp: Date.now()  // For 24h expiry tracking
-  });
+  if (matchingDeposits.length === 0) {
+    return { matchedAmount: 0n, inheritedTimestamp: 0n };
+  }
 
-  state.acquiredBalances.set(token, records);
+  // FIFO matching
+  let remainingToMatch = amountOut;
+  let weightedTimestamp = 0n;
+  let totalMatched = 0n;
 
-  // Note: Any existing balance of this token in the Safe that wasn't
-  // received from this operation remains "original" and costs spending
+  for (const deposit of matchingDeposits.sort((a, b) =>
+    Number(a.timestamp - b.timestamp)
+  )) {
+    if (remainingToMatch <= 0n) break;
+
+    const matchAmount = remainingToMatch > deposit.remainingOutputAmount
+      ? deposit.remainingOutputAmount
+      : remainingToMatch;
+
+    // Inherit original acquisition timestamp (FIFO chain)
+    weightedTimestamp += deposit.originalAcquisitionTimestamp * matchAmount;
+    totalMatched += matchAmount;
+
+    deposit.remainingOutputAmount -= matchAmount;
+    remainingToMatch -= matchAmount;
+  }
+
+  const inheritedTimestamp = totalMatched > 0n
+    ? weightedTimestamp / totalMatched
+    : 0n;
+
+  return { matchedAmount: totalMatched, inheritedTimestamp };
 }
 
 
-// ============ Main Oracle Loop ============
+// ============ CRE Event Handlers ============
 
-async function oracleLoop() {
-  while (true) {
-    // 1. Fetch new events from contract
-    const events = await fetchNewEvents();
+// Triggered instantly on each ProtocolExecution event (via logTrigger)
+function onProtocolExecution(event: ProtocolExecutionEvent): void {
+  const state = buildStateFromHistoricalEvents(event.subAccount);
 
-    // 2. Update state for each affected sub-account
-    for (const event of events) {
-      const state = await loadState(event.subAccount);
-
-      if (event.type === 'SwapExecuted') {
-        // Add output token as acquired
-        addAcquiredBalance(state, event.tokenOut, event.received, 'swap');
-
-        // Add spending record
-        addSpendingRecord(state, event.spendingCost, event.timestamp);
-      }
-
-      if (event.type === 'ProtocolDeposit') {
-        // Track deposit for withdrawal matching
-        addDepositRecord(state, event);
-
-        // Add spending record
-        addSpendingRecord(state, event.spendingCost, event.timestamp);
-      }
-
-      if (event.type === 'ProtocolWithdrawal') {
-        const { recoveredSpending, newAcquired } = processWithdrawal(state, event);
-
-        // Add acquired balance
-        addAcquiredBalance(state, event.token, newAcquired, 'withdrawal');
-
-        // Remove from spending history (recovery)
-        if (recoveredSpending > 0n) {
-          removeSpendingAmount(state, recoveredSpending);
-        }
-      }
-
-      await saveState(state);
+  if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
+    // Consume acquired balance from inputs (FIFO)
+    for (let i = 0; i < event.tokensIn.length; i++) {
+      const { consumed, remaining } = consumeAcquiredBalance(
+        state.acquiredQueues.get(event.tokensIn[i]) || [],
+        event.amountsIn[i],
+        event.timestamp,
+        WINDOW_DURATION
+      );
+      // 'remaining' is original tokens → costs spending
     }
 
-    // 3. Calculate and push updates for all active sub-accounts
-    for (const subAccount of activeSubAccounts) {
-      const state = await loadState(subAccount);
-      const portfolioValue = await getPortfolioValue();
-
-      const newAllowance = calculateSpendingAllowance(state, portfolioValue, MAX_SPENDING_BPS);
-      const tokenBalances = calculateAllAcquiredBalances(state);
-
-      await contract.batchUpdate(subAccount, newAllowance, tokenBalances);
+    // Add spending record (one-way, no recovery)
+    if (event.spendingCost > 0n) {
+      state.spendingRecords.push({
+        amount: event.spendingCost,
+        timestamp: event.timestamp
+      });
     }
 
-    await sleep(UPDATE_INTERVAL); // e.g., every 1 minute
+    // For SWAP: output becomes acquired with current timestamp
+    // For DEPOSIT: track deposit for withdrawal matching
+    if (event.opType === OperationType.SWAP) {
+      for (let i = 0; i < event.tokensOut.length; i++) {
+        addAcquiredBalance(state, event.tokensOut[i], event.amountsOut[i], event.timestamp);
+      }
+    }
+  }
+
+  if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
+    // Match to deposits, inherit original timestamp
+    for (let i = 0; i < event.tokensOut.length; i++) {
+      const { matchedAmount, inheritedTimestamp } = matchWithdrawalToDeposits(
+        state, event, event.tokensOut[i], event.amountsOut[i]
+      );
+
+      if (matchedAmount > 0n) {
+        // Matched withdrawal: acquired with inherited timestamp
+        addAcquiredBalance(state, event.tokensOut[i], matchedAmount, inheritedTimestamp);
+      }
+      // Unmatched portion is NOT acquired (belongs to multisig)
+    }
+    // Note: NO spending recovery - spending is one-way
+  }
+
+  // Push update to contract
+  const newAllowance = calculateSpendingAllowance(portfolioValue, maxSpendingBps, state.totalSpendingInWindow);
+  contract.batchUpdate(event.subAccount, newAllowance, state.acquiredBalances);
+}
+
+// Triggered periodically (via cronTrigger) to refresh all subaccounts
+function onCronRefresh(): void {
+  const modules = getActiveModulesFromRegistry();  // Multi-module support
+
+  for (const moduleAddress of modules) {
+    const subaccounts = getActiveSubaccounts(moduleAddress);
+
+    for (const subAccount of subaccounts) {
+      const state = buildStateFromHistoricalEvents(subAccount);
+      const portfolioValue = getPortfolioValue();
+
+      const newAllowance = calculateSpendingAllowance(
+        portfolioValue, maxSpendingBps, state.totalSpendingInWindow
+      );
+
+      contract.batchUpdate(subAccount, newAllowance, state.acquiredBalances);
+    }
   }
 }
+
+
+// ============ Helper: Add Acquired Balance ============
+
+function addAcquiredBalance(
+  state: SubAccountState,
+  token: Address,
+  amount: bigint,
+  originalTimestamp: bigint  // For expiry and FIFO inheritance
+): void {
+  const queue = state.acquiredQueues.get(token) || [];
+
+  queue.push({
+    amount,
+    originalTimestamp  // Preserves original acquisition time through swaps
+  });
+
+  state.acquiredQueues.set(token, queue);
+}
 ```
+
+**Key Implementation Details:**
+
+1. **Event-Driven Architecture**: Uses CRE log triggers for instant event processing, plus cron trigger for periodic refresh
+2. **Stateless Design**: State is reconstructed from historical blockchain events on each invocation
+3. **FIFO Queues**: Acquired balances use FIFO (oldest consumed first) with timestamp inheritance
+4. **No Spending Recovery**: Spending is one-way - withdrawals don't recover spent allowance
+5. **Multi-Module Support**: Oracle can monitor multiple DeFiInteractorModule instances via registry
 
 ### 8.5 Example: Rolling Window with Your Scenario
 
@@ -2900,7 +2950,7 @@ interface ISpendingLimitModule {
         DEPOSIT,
         WITHDRAW,
         CLAIM,
-        TRANSFER
+        APPROVE
     }
 
     // ============ Events ============
@@ -2909,12 +2959,11 @@ interface ISpendingLimitModule {
         address indexed subAccount,
         address indexed target,
         OperationType opType,
-        address tokenIn,
-        uint256 amountIn,
-        address tokenOut,
-        uint256 amountOut,
-        uint256 spendingCost,
-        uint256 timestamp
+        address[] tokensIn,
+        uint256[] amountsIn,
+        address[] tokensOut,
+        uint256[] amountsOut,
+        uint256 spendingCost
     );
 
     event SpendingAllowanceUpdated(address indexed subAccount, uint256 newAllowance, uint256 timestamp);
@@ -2996,10 +3045,9 @@ interface ICalldataParser {
 | **Acquired Balance** | Exact token amount received from operations; free to use but expires after 24h |
 | **Acquired Expiry** | After 24 hours, acquired tokens become "original" and cost spending to use again |
 | **Spending Allowance** | Remaining USD value a sub-account can spend (oracle-managed) |
-| **Recovery** | Reduction in spending when withdrawing from protocols |
 | **Rolling Window** | 24h sliding window for spending and acquired balance tracking (oracle-managed) |
 | **Selector** | First 4 bytes of calldata identifying the function being called |
-| **Operation Type** | Classification: SWAP, DEPOSIT, WITHDRAW, CLAIM, TRANSFER |
+| **Operation Type** | Classification: SWAP, DEPOSIT, WITHDRAW, CLAIM, APPROVE |
 | **Calldata Parser** | Contract that extracts token/amount from protocol-specific calldata |
 | **Oracle** | Off-chain service (Chainlink CRE) that manages spending allowances |
 | **Safe** | Gnosis Safe multisig that holds the funds (avatar) |
