@@ -1160,12 +1160,13 @@ const ALLOWANCE_INCREASE_THRESHOLD_BPS = BigInt(process.env.ALLOWANCE_INCREASE_T
 // Always update if last update was more than this many seconds ago
 const MAX_STALENESS_SECONDS = BigInt(process.env.SPENDING_ORACLE_MAX_STALENESS_SECONDS || '2700') // 45 minutes
 
-// Track last update timestamp per subaccount
-const lastUpdateTimestamp = new Map<Address, bigint>()
+// Track last update timestamp per module:subaccount (avoids collision across modules)
+const lastUpdateTimestamp = new Map<string, bigint>()
 
 // Pending transaction tracking for batch submissions
 interface PendingTransaction {
   hash: `0x${string}`
+  moduleAddress: Address
   subAccount: Address
   timestamp: bigint // Timestamp to set on successful confirmation
 }
@@ -1193,8 +1194,8 @@ async function prepareBatchUpdate(
   const onChainAllowance = await getOnChainSpendingAllowance(moduleAddress, subAccount)
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
 
-  // Check staleness
-  const subAccountKey = subAccount.toLowerCase() as Address
+  // Check staleness (key includes moduleAddress to avoid collision across modules)
+  const subAccountKey = `${moduleAddress}:${subAccount}`.toLowerCase()
   const lastUpdate = lastUpdateTimestamp.get(subAccountKey) || 0n
   const timeSinceUpdate = currentTimestamp - lastUpdate
   const isStale = timeSinceUpdate > MAX_STALENESS_SECONDS
@@ -1352,7 +1353,7 @@ async function waitForPendingTransactions(): Promise<void> {
     if (result.status === 'fulfilled') {
       successful++
       // Only update timestamp after successful confirmation (not before TX submission)
-      const subAccountKey = tx.subAccount.toLowerCase() as Address
+      const subAccountKey = `${tx.moduleAddress}:${tx.subAccount}`.toLowerCase()
       lastUpdateTimestamp.set(subAccountKey, tx.timestamp)
     } else {
       failed++
@@ -1395,7 +1396,7 @@ async function pushBatchUpdate(
   currentNonce++
 
   // Track pending transaction with timestamp to set on success
-  pendingTransactions.push({ hash, subAccount, timestamp: prepared.timestamp })
+  pendingTransactions.push({ hash, moduleAddress, subAccount, timestamp: prepared.timestamp })
 
   return hash
 }
