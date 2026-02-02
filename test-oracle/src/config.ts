@@ -63,9 +63,19 @@ const OTHER_SEPOLIA_TOKENS = {
   EURC: '0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4',
 }
 
+// Parse RPC URLs from environment (comma-separated for fallback support)
+function parseRpcUrls(): string[] {
+  const primary = process.env.RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com'
+  const fallbacks = process.env.RPC_FALLBACK_URLS?.split(',').map(u => u.trim()).filter(Boolean) || []
+  return [primary, ...fallbacks]
+}
+
 // Main configuration
 export const config = {
-  rpcUrl: process.env.RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
+  // Primary RPC URL (first in the list)
+  rpcUrl: parseRpcUrls()[0],
+  // All RPC URLs including fallbacks
+  rpcUrls: parseRpcUrls(),
   privateKey: process.env.PRIVATE_KEY as `0x${string}`,
   moduleAddress: process.env.MODULE_ADDRESS as `0x${string}`,
   // Optional registry address for multi-module support
@@ -79,6 +89,10 @@ export const config = {
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '15000'),
   blocksToLookBack: parseInt(process.env.BLOCKS_TO_LOOK_BACK || '7200'),
   windowDurationSeconds: parseInt(process.env.WINDOW_DURATION_SECONDS || '86400'),
+
+  // Reorg protection: number of blocks to wait before considering a block finalized
+  // Sepolia: 12 blocks (~2.4 min), Mainnet: 64 blocks (~12 min) recommended
+  confirmationBlocks: parseInt(process.env.CONFIRMATION_BLOCKS || '12'),
 
   // Gas
   gasLimit: BigInt(process.env.GAS_LIMIT || '500000'),

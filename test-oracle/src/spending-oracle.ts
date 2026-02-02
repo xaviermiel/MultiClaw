@@ -117,18 +117,131 @@ const ACQUIRED_BALANCE_UPDATED_EVENT = parseAbiItem(
   'event AcquiredBalanceUpdated(address indexed subAccount, address indexed token, uint256 newBalance)'
 )
 
-// ============ Initialize Clients ============
+// ============ Initialize Clients with RPC Fallback ============
 
-const publicClient = createPublicClient({
-  chain: config.chain,
-  transport: http(config.rpcUrl),
-})
+/**
+ * RPC client manager with automatic fallback support
+ * Tracks health of each RPC endpoint and rotates on failures
+ */
+class RpcClientManager {
+  private clients: ReturnType<typeof createPublicClient>[]
+  private currentIndex = 0
+  private failureCounts: number[] = []
+  private readonly maxFailures = 3
+
+  constructor(rpcUrls: string[]) {
+    if (rpcUrls.length === 0) {
+      throw new Error('At least one RPC URL is required')
+    }
+
+    this.clients = rpcUrls.map(url =>
+      createPublicClient({
+        chain: config.chain,
+        transport: http(url),
+      })
+    )
+    this.failureCounts = new Array(rpcUrls.length).fill(0)
+
+    log(`Initialized RPC client manager with ${rpcUrls.length} endpoint(s)`)
+  }
+
+  /**
+   * Get the current active client
+   */
+  get client(): ReturnType<typeof createPublicClient> {
+    return this.clients[this.currentIndex]
+  }
+
+  /**
+   * Report a failure and potentially rotate to next RPC
+   */
+  reportFailure(): void {
+    this.failureCounts[this.currentIndex]++
+
+    if (this.failureCounts[this.currentIndex] >= this.maxFailures) {
+      const oldIndex = this.currentIndex
+      this.rotateToNextHealthy()
+      if (this.currentIndex !== oldIndex) {
+        log(`RPC endpoint ${oldIndex} exceeded failure threshold, rotated to endpoint ${this.currentIndex}`)
+      }
+    }
+  }
+
+  /**
+   * Report a success, reset failure count for current endpoint
+   */
+  reportSuccess(): void {
+    this.failureCounts[this.currentIndex] = 0
+  }
+
+  /**
+   * Rotate to the next healthy endpoint
+   */
+  private rotateToNextHealthy(): void {
+    const startIndex = this.currentIndex
+
+    for (let i = 1; i <= this.clients.length; i++) {
+      const nextIndex = (startIndex + i) % this.clients.length
+      if (this.failureCounts[nextIndex] < this.maxFailures) {
+        this.currentIndex = nextIndex
+        return
+      }
+    }
+
+    // All endpoints are unhealthy, reset counts and use first
+    log('All RPC endpoints unhealthy, resetting failure counts')
+    this.failureCounts = new Array(this.clients.length).fill(0)
+    this.currentIndex = 0
+  }
+
+  /**
+   * Execute an operation with automatic fallback
+   */
+  async executeWithFallback<T>(
+    operation: (client: ReturnType<typeof createPublicClient>) => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    const startIndex = this.currentIndex
+    let lastError: unknown
+
+    // Try each endpoint once
+    for (let attempt = 0; attempt < this.clients.length; attempt++) {
+      try {
+        const result = await operation(this.client)
+        this.reportSuccess()
+        return result
+      } catch (error) {
+        lastError = error
+        log(`${operationName} failed on RPC endpoint ${this.currentIndex}: ${error}`)
+        this.reportFailure()
+
+        // If we've tried all endpoints, throw
+        if ((this.currentIndex + 1) % this.clients.length === startIndex) {
+          break
+        }
+      }
+    }
+
+    throw lastError
+  }
+}
+
+// Initialize RPC client manager
+const rpcManager = new RpcClientManager(config.rpcUrls)
+
+// Convenience getter for the current public client
+const getPublicClient = () => rpcManager.client
 
 let walletClient: ReturnType<typeof createWalletClient>
 let account: ReturnType<typeof privateKeyToAccount>
 
 // Track last processed block for event polling
 let lastProcessedBlock = 0n
+
+// Track block hashes for reorg detection
+// Maps block number -> block hash (limited to recent blocks)
+const processedBlockHashes = new Map<bigint, `0x${string}`>()
+const MAX_BLOCK_HASH_CACHE = 1000
 
 // Prevent overlapping operations - single mutex for all state updates
 let isProcessing = false
@@ -137,9 +250,66 @@ function initWalletClient() {
   account = privateKeyToAccount(config.privateKey)
   walletClient = createWalletClient({
     chain: config.chain,
-    transport: http(config.rpcUrl),
+    transport: http(config.rpcUrls[0]), // Use primary RPC for writes
     account,
   })
+}
+
+/**
+ * Check for chain reorganization by comparing block hashes
+ * Returns the block number to reprocess from if reorg detected, otherwise null
+ */
+async function checkForReorg(): Promise<bigint | null> {
+  if (processedBlockHashes.size === 0) {
+    return null
+  }
+
+  // Check recent blocks for hash mismatches (reorg indicator)
+  const blocksToCheck = Math.min(config.confirmationBlocks * 2, processedBlockHashes.size)
+  const recentBlocks = Array.from(processedBlockHashes.entries())
+    .sort((a, b) => Number(b[0] - a[0])) // Sort descending by block number
+    .slice(0, blocksToCheck)
+
+  for (const [blockNum, expectedHash] of recentBlocks) {
+    try {
+      const block = await rpcManager.executeWithFallback(
+        (client) => client.getBlock({ blockNumber: blockNum }),
+        `checkForReorg(block ${blockNum})`
+      )
+
+      if (block.hash !== expectedHash) {
+        log(`Reorg detected at block ${blockNum}: expected ${expectedHash}, got ${block.hash}`)
+        // Clear affected block hashes and return the reorg point
+        for (const [num] of processedBlockHashes) {
+          if (num >= blockNum) {
+            processedBlockHashes.delete(num)
+          }
+        }
+        return blockNum - 1n // Reprocess from before the reorg
+      }
+    } catch (error) {
+      log(`Error checking block ${blockNum} for reorg: ${error}`)
+      // On error, assume no reorg to avoid false positives
+    }
+  }
+
+  return null
+}
+
+/**
+ * Record a processed block hash for future reorg detection
+ */
+function recordBlockHash(blockNumber: bigint, blockHash: `0x${string}`): void {
+  processedBlockHashes.set(blockNumber, blockHash)
+
+  // Prune old entries to prevent unbounded growth
+  if (processedBlockHashes.size > MAX_BLOCK_HASH_CACHE) {
+    const sortedBlocks = Array.from(processedBlockHashes.keys()).sort((a, b) => Number(a - b))
+    const toDelete = sortedBlocks.slice(0, processedBlockHashes.size - MAX_BLOCK_HASH_CACHE)
+    for (const blockNum of toDelete) {
+      processedBlockHashes.delete(blockNum)
+    }
+  }
 }
 
 // ============ Logging ============
@@ -160,11 +330,14 @@ async function getActiveModules(): Promise<Address[]> {
   }
 
   try {
-    const modules = await publicClient.readContract({
-      address: config.registryAddress,
-      abi: ModuleRegistryABI,
-      functionName: 'getActiveModules',
-    })
+    const modules = await rpcManager.executeWithFallback(
+      (client) => client.readContract({
+        address: config.registryAddress!,
+        abi: ModuleRegistryABI,
+        functionName: 'getActiveModules',
+      }),
+      'getActiveModules'
+    )
 
     if (modules.length === 0) {
       log('Registry returned no active modules, falling back to config.moduleAddress')
@@ -204,8 +377,8 @@ async function retryOnce<T>(
 // ============ Contract Read Functions ============
 
 async function getSafeValue(moduleAddress: Address): Promise<bigint> {
-  const [totalValueUSD] = await retryOnce(
-    () => publicClient.readContract({
+  const [totalValueUSD] = await rpcManager.executeWithFallback(
+    (client) => client.readContract({
       address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSafeValue',
@@ -216,8 +389,8 @@ async function getSafeValue(moduleAddress: Address): Promise<bigint> {
 }
 
 async function getSubAccountLimits(moduleAddress: Address, subAccount: Address): Promise<{ maxSpendingBps: bigint; windowDuration: bigint }> {
-  const [maxSpendingBps, windowDuration] = await retryOnce(
-    () => publicClient.readContract({
+  const [maxSpendingBps, windowDuration] = await rpcManager.executeWithFallback(
+    (client) => client.readContract({
       address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSubAccountLimits',
@@ -229,8 +402,8 @@ async function getSubAccountLimits(moduleAddress: Address, subAccount: Address):
 }
 
 async function getActiveSubaccounts(moduleAddress: Address): Promise<Address[]> {
-  const subaccounts = await retryOnce(
-    () => publicClient.readContract({
+  const subaccounts = await rpcManager.executeWithFallback(
+    (client) => client.readContract({
       address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSubaccountsByRole',
@@ -242,8 +415,8 @@ async function getActiveSubaccounts(moduleAddress: Address): Promise<Address[]> 
 }
 
 async function getOnChainSpendingAllowance(moduleAddress: Address, subAccount: Address): Promise<bigint> {
-  const allowance = await retryOnce(
-    () => publicClient.readContract({
+  const allowance = await rpcManager.executeWithFallback(
+    (client) => client.readContract({
       address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSpendingAllowance',
@@ -255,8 +428,8 @@ async function getOnChainSpendingAllowance(moduleAddress: Address, subAccount: A
 }
 
 async function getOnChainAcquiredBalance(moduleAddress: Address, subAccount: Address, token: Address): Promise<bigint> {
-  const balance = await retryOnce(
-    () => publicClient.readContract({
+  const balance = await rpcManager.executeWithFallback(
+    (client) => client.readContract({
       address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getAcquiredBalance',
@@ -351,11 +524,15 @@ async function fetchBlockTimestamps(blockNumbers: bigint[]): Promise<Map<bigint,
 
   await Promise.all(
     blockNumbers.map(async (blockNum) => {
-      const block = await retryOnce(
-        () => publicClient.getBlock({ blockNumber: blockNum }),
+      const block = await rpcManager.executeWithFallback(
+        (client) => client.getBlock({ blockNumber: blockNum }),
         `getBlock(${blockNum})`
       )
       blockTimestamps.set(blockNum, block.timestamp)
+      // Record block hash for reorg detection
+      if (block.hash) {
+        recordBlockHash(blockNum, block.hash)
+      }
     })
   )
 
@@ -363,8 +540,8 @@ async function fetchBlockTimestamps(blockNumbers: bigint[]): Promise<Map<bigint,
 }
 
 async function queryProtocolExecutionEvents(moduleAddress: Address, fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<ProtocolExecutionEvent[]> {
-  const logs = await retryOnce(
-    () => publicClient.getLogs({
+  const logs = await rpcManager.executeWithFallback(
+    (client) => client.getLogs({
       address: moduleAddress,
       event: PROTOCOL_EXECUTION_EVENT,
       fromBlock,
@@ -397,8 +574,8 @@ async function queryProtocolExecutionEvents(moduleAddress: Address, fromBlock: b
 }
 
 async function queryTransferEvents(moduleAddress: Address, fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<TransferExecutedEvent[]> {
-  const logs = await retryOnce(
-    () => publicClient.getLogs({
+  const logs = await rpcManager.executeWithFallback(
+    (client) => client.getLogs({
       address: moduleAddress,
       event: TRANSFER_EXECUTED_EVENT,
       fromBlock,
@@ -442,8 +619,8 @@ async function queryTransferEvents(moduleAddress: Address, fromBlock: bigint, to
 async function queryHistoricalAcquiredTokens(moduleAddress: Address, subAccount: Address): Promise<Set<Address>> {
   const tokens = new Set<Address>()
 
-  const currentBlock = await retryOnce(
-    () => publicClient.getBlockNumber(),
+  const currentBlock = await rpcManager.executeWithFallback(
+    (client) => client.getBlockNumber(),
     'getBlockNumber'
   )
 
@@ -453,8 +630,8 @@ async function queryHistoricalAcquiredTokens(moduleAddress: Address, subAccount:
   const fromBlock = 0n
 
   try {
-    const logs = await retryOnce(
-      () => publicClient.getLogs({
+    const logs = await rpcManager.executeWithFallback(
+      (client) => client.getLogs({
         address: moduleAddress,
         event: ACQUIRED_BALANCE_UPDATED_EVENT,
         fromBlock,
@@ -475,8 +652,8 @@ async function queryHistoricalAcquiredTokens(moduleAddress: Address, subAccount:
     log(`Full historical query failed, falling back to extended range: ${error}`)
     const fallbackFromBlock = currentBlock - BigInt(config.blocksToLookBack * 10)
 
-    const logs = await retryOnce(
-      () => publicClient.getLogs({
+    const logs = await rpcManager.executeWithFallback(
+      (client) => client.getLogs({
         address: moduleAddress,
         event: ACQUIRED_BALANCE_UPDATED_EVENT,
         fromBlock: fallbackFromBlock > 0n ? fallbackFromBlock : 0n,
@@ -516,11 +693,14 @@ function getPriceFeedForToken(tokenAddress: Address): Address | null {
  */
 async function getTokenDecimals(tokenAddress: Address): Promise<number> {
   try {
-    const decimals = await publicClient.readContract({
-      address: tokenAddress,
-      abi: ERC20ABI,
-      functionName: 'decimals',
-    })
+    const decimals = await rpcManager.executeWithFallback(
+      (client) => client.readContract({
+        address: tokenAddress,
+        abi: ERC20ABI,
+        functionName: 'decimals',
+      }),
+      `getTokenDecimals(${tokenAddress})`
+    )
     return decimals
   } catch (error) {
     log(`Error getting decimals for ${tokenAddress}: ${error}`)
@@ -533,17 +713,23 @@ async function getTokenDecimals(tokenAddress: Address): Promise<number> {
  */
 async function getChainlinkPriceUSD(priceFeedAddress: Address): Promise<bigint> {
   try {
-    const [, answer] = await publicClient.readContract({
-      address: priceFeedAddress,
-      abi: ChainlinkPriceFeedABI,
-      functionName: 'latestRoundData',
-    })
+    const [, answer] = await rpcManager.executeWithFallback(
+      (client) => client.readContract({
+        address: priceFeedAddress,
+        abi: ChainlinkPriceFeedABI,
+        functionName: 'latestRoundData',
+      }),
+      `getChainlinkPrice(${priceFeedAddress})`
+    )
 
-    const feedDecimals = await publicClient.readContract({
-      address: priceFeedAddress,
-      abi: ChainlinkPriceFeedABI,
-      functionName: 'decimals',
-    })
+    const feedDecimals = await rpcManager.executeWithFallback(
+      (client) => client.readContract({
+        address: priceFeedAddress,
+        abi: ChainlinkPriceFeedABI,
+        functionName: 'decimals',
+      }),
+      `getChainlinkDecimals(${priceFeedAddress})`
+    )
 
     // Normalize to 18 decimals
     const price18 = BigInt(answer) * BigInt(10 ** (18 - feedDecimals))
@@ -1539,10 +1725,13 @@ async function waitForPendingTransactions(): Promise<void> {
   const results = await Promise.allSettled(
     pendingTransactions.map(async (tx) => {
       try {
-        const receipt = await publicClient.waitForTransactionReceipt({
-          hash: tx.hash,
-          timeout: 120_000 // 2 minute timeout
-        })
+        const receipt = await rpcManager.executeWithFallback(
+          (client) => client.waitForTransactionReceipt({
+            hash: tx.hash,
+            timeout: 120_000 // 2 minute timeout
+          }),
+          `waitForTransactionReceipt(${tx.hash.slice(0, 10)})`
+        )
         log(`Transaction ${tx.hash.slice(0, 10)}... confirmed in block ${receipt.blockNumber} (${tx.subAccount})`)
         return receipt
       } catch (error) {
@@ -1588,7 +1777,10 @@ async function pushBatchUpdate(
 
   // Get nonce if not already tracking
   if (currentNonce === null) {
-    currentNonce = await publicClient.getTransactionCount({ address: account.address })
+    currentNonce = await rpcManager.executeWithFallback(
+      (client) => client.getTransactionCount({ address: account.address }),
+      'getTransactionCount'
+    )
   }
 
   const hash = await submitBatchUpdate(
@@ -1597,11 +1789,11 @@ async function pushBatchUpdate(
     newAllowance,
     prepared.tokens,
     prepared.balances,
-    currentNonce
+    currentNonce!
   )
 
   // Increment nonce for next transaction
-  currentNonce++
+  currentNonce!++
 
   // Track pending transaction with timestamp to set on success
   pendingTransactions.push({ hash, moduleAddress, subAccount, timestamp: prepared.timestamp })
@@ -1623,11 +1815,26 @@ async function pollForNewEvents() {
     currentNonce = null
     pendingTransactions = []
 
-    const currentBlock = await publicClient.getBlockNumber()
+    const latestBlock = await rpcManager.executeWithFallback(
+      (client) => client.getBlockNumber(),
+      'getBlockNumber'
+    )
+
+    // Apply confirmation depth for reorg protection
+    // Only process blocks that are sufficiently confirmed
+    const confirmationBlocks = BigInt(config.confirmationBlocks)
+    const currentBlock = latestBlock > confirmationBlocks ? latestBlock - confirmationBlocks : 0n
 
     if (lastProcessedBlock === 0n) {
       // First run - start from recent blocks
       lastProcessedBlock = currentBlock - BigInt(config.blocksToLookBack)
+    }
+
+    // Check for chain reorganization
+    const reorgPoint = await checkForReorg()
+    if (reorgPoint !== null) {
+      log(`Reorg detected! Rewinding from block ${lastProcessedBlock} to ${reorgPoint}`)
+      lastProcessedBlock = reorgPoint
     }
 
     if (currentBlock <= lastProcessedBlock) {
@@ -1636,7 +1843,7 @@ async function pollForNewEvents() {
     }
 
     const blocksToProcess = currentBlock - lastProcessedBlock
-    log(`Polling blocks ${lastProcessedBlock + 1n} to ${currentBlock} (${blocksToProcess} blocks)`)
+    log(`Polling blocks ${lastProcessedBlock + 1n} to ${currentBlock} (${blocksToProcess} blocks, ${confirmationBlocks} confirmation depth)`)
 
     // Get all active modules
     const modules = await getActiveModules()
@@ -1695,7 +1902,10 @@ async function pollForNewEvents() {
 
 async function processSubaccount(moduleAddress: Address, subAccount: Address, currentBlock?: bigint) {
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
-  const blockNumber = currentBlock ?? await publicClient.getBlockNumber()
+  const blockNumber = currentBlock ?? await rpcManager.executeWithFallback(
+    (client) => client.getBlockNumber(),
+    'getBlockNumber'
+  )
 
   // Query from 2x the lookback range to discover tokens that may have acquired balance
   // even if the original acquisition is outside the current window
@@ -1756,10 +1966,17 @@ async function onCronRefresh() {
     pendingTransactions = []
 
     // Get all active modules and current block
-    const [modules, currentBlock] = await Promise.all([
+    const [modules, latestBlock] = await Promise.all([
       getActiveModules(),
-      publicClient.getBlockNumber(),
+      rpcManager.executeWithFallback(
+        (client) => client.getBlockNumber(),
+        'getBlockNumber'
+      ),
     ])
+
+    // Apply confirmation depth for reorg protection
+    const confirmationBlocks = BigInt(config.confirmationBlocks)
+    const currentBlock = latestBlock > confirmationBlocks ? latestBlock - confirmationBlocks : 0n
     log(`Processing ${modules.length} module(s)`)
 
     // Process each module
