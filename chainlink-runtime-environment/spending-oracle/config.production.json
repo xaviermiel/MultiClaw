@@ -1,5 +1,6 @@
 {
-  "moduleAddress": "0x0000000000000000000000000000000000000000",
+  "moduleAddresses": [],
+  "registryAddress": "",
   "chainSelectorName": "ethereum-mainnet",
   "gasLimit": "500000",
   "proxyAddress": "0x0000000000000000000000000000000000000000",

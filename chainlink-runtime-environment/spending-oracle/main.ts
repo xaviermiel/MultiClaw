@@ -56,9 +56,12 @@ const TokenSchema = z.object({
 })
 
 const configSchema = z.object({
-	// Single module address (legacy/fallback mode)
-	moduleAddress: z.string(),
-	// Registry address for multi-module support (optional - if provided, overrides moduleAddress)
+	// Single module address (legacy/fallback mode - deprecated, use moduleAddresses)
+	moduleAddress: z.string().optional(),
+	// Multiple module addresses for instant log triggers (hybrid approach)
+	// These modules get real-time event monitoring via logTrigger
+	moduleAddresses: z.array(z.string()).optional(),
+	// Registry address for multi-module support (optional - cron will discover new modules from registry)
 	registryAddress: z.string().optional(),
 	chainSelectorName: z.string(),
 	gasLimit: z.string(),
@@ -578,13 +581,42 @@ const getSafeValueForModule = (runtime: Runtime<Config>, moduleAddress: Address)
 
 
 /**
+ * Get configured module addresses from config
+ * Supports both legacy single moduleAddress and new moduleAddresses array
+ */
+const getConfiguredModuleAddresses = (runtime: Runtime<Config>): Address[] => {
+	const addresses: Address[] = []
+
+	// Add moduleAddresses array if present
+	if (runtime.config.moduleAddresses && runtime.config.moduleAddresses.length > 0) {
+		addresses.push(...runtime.config.moduleAddresses as Address[])
+	}
+
+	// Add legacy moduleAddress if present and not already included
+	if (runtime.config.moduleAddress) {
+		const legacyAddr = runtime.config.moduleAddress.toLowerCase() as Address
+		if (!addresses.some(a => a.toLowerCase() === legacyAddr)) {
+			addresses.push(runtime.config.moduleAddress as Address)
+		}
+	}
+
+	return addresses
+}
+
+/**
  * Get all active modules from the registry
- * Returns array of module addresses, or falls back to single moduleAddress if no registry
+ * Returns array of module addresses, or falls back to configured modules if no registry
  */
 const getActiveModulesFromRegistry = (runtime: Runtime<Config>): Address[] => {
-	// If no registry configured, use single module address (backwards compatibility)
+	const configuredModules = getConfiguredModuleAddresses(runtime)
+
+	// If no registry configured, use configured module addresses
 	if (!runtime.config.registryAddress) {
-		return [runtime.config.moduleAddress as Address]
+		if (configuredModules.length === 0) {
+			runtime.log('Warning: No modules configured and no registry address')
+			return []
+		}
+		return configuredModules
 	}
 
 	const evmClient = createEvmClient(runtime)
@@ -607,21 +639,27 @@ const getActiveModulesFromRegistry = (runtime: Runtime<Config>): Address[] => {
 			.result()
 
 		if (!result.data || result.data.length === 0) {
-			runtime.log('No active modules found in registry, falling back to moduleAddress')
-			return [runtime.config.moduleAddress as Address]
+			runtime.log('No active modules found in registry, using configured modules')
+			return configuredModules
 		}
 
-		const modules = decodeFunctionResult({
+		const registryModules = decodeFunctionResult({
 			abi: ModuleRegistry,
 			functionName: 'getActiveModules',
 			data: bytesToHex(result.data),
 		}) as Address[]
 
-		runtime.log(`Found ${modules.length} active modules in registry`)
-		return modules
+		// Combine registry modules with configured modules (deduped)
+		const allModules = new Set<string>([
+			...registryModules.map(a => a.toLowerCase()),
+			...configuredModules.map(a => a.toLowerCase()),
+		])
+
+		runtime.log(`Found ${registryModules.length} registry modules + ${configuredModules.length} configured modules = ${allModules.size} unique modules`)
+		return Array.from(allModules) as Address[]
 	} catch (error) {
-		runtime.log(`Error querying registry: ${error}, falling back to moduleAddress`)
-		return [runtime.config.moduleAddress as Address]
+		runtime.log(`Error querying registry: ${error}, using configured modules`)
+		return configuredModules
 	}
 }
 
@@ -2111,18 +2149,23 @@ const pushBatchUpdateForModule = (
 /**
  * Handle ProtocolExecution event
  * Triggered on each new protocol interaction
- * Note: Event trigger only monitors config.moduleAddress, so we use it explicitly
+ * Extracts module address from the log (supports multi-module via hybrid approach)
  */
 const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => {
 	runtime.log('=== Spending Oracle: ProtocolExecution Event ===')
-
-	const moduleAddress = runtime.config.moduleAddress as Address
 
 	try {
 		const log = payload.log
 		if (!log || !log.topics || log.topics.length < 3) {
 			runtime.log('Invalid event log format')
 			return 'Invalid event'
+		}
+
+		// Extract module address from the log (the contract that emitted the event)
+		const moduleAddress = (log.address as Address) || (runtime.config.moduleAddress as Address)
+		if (!moduleAddress) {
+			runtime.log('No module address in log or config')
+			return 'Invalid event: no module address'
 		}
 
 		const newEvent = parseProtocolExecutionEvent(log)
@@ -2301,13 +2344,18 @@ const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string 
 const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 	runtime.log('=== Spending Oracle: TransferExecuted Event ===')
 
-	const moduleAddress = runtime.config.moduleAddress as Address
-
 	try {
 		const log = payload.log
 		if (!log || !log.topics || log.topics.length < 4) {
 			runtime.log('Invalid transfer event log format')
 			return 'Invalid event'
+		}
+
+		// Extract module address from the log (the contract that emitted the event)
+		const moduleAddress = (log.address as Address) || (runtime.config.moduleAddress as Address)
+		if (!moduleAddress) {
+			runtime.log('No module address in log or config')
+			return 'Invalid event: no module address'
 		}
 
 		const newTransfer = parseTransferExecutedEvent(log)
@@ -2371,6 +2419,33 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 
 // ============ Workflow Initialization ============
 
+/**
+ * Get all module addresses to monitor from config
+ * Combines moduleAddresses array with legacy moduleAddress (deduplicated)
+ */
+const getModuleAddressesForTriggers = (config: Config): string[] => {
+	const addresses = new Set<string>()
+
+	// Add moduleAddresses array if present
+	if (config.moduleAddresses && config.moduleAddresses.length > 0) {
+		for (const addr of config.moduleAddresses) {
+			addresses.add(addr.toLowerCase())
+		}
+	}
+
+	// Add legacy moduleAddress if present
+	if (config.moduleAddress) {
+		addresses.add(config.moduleAddress.toLowerCase())
+	}
+
+	return Array.from(addresses)
+}
+
+/**
+ * Initialize workflow with hybrid multi-module support:
+ * - Log triggers for configured modules (instant event processing)
+ * - Cron trigger catches new modules from registry (delayed but complete)
+ */
 const initWorkflow = (config: Config) => {
 	const network = getNetwork({
 		chainFamily: 'evm',
@@ -2385,32 +2460,50 @@ const initWorkflow = (config: Config) => {
 	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
 	const cronTrigger = new cre.capabilities.CronCapability()
 
-	return [
-		// Event trigger: Process each ProtocolExecution event
-		// logTrigger uses topics array where topics[0] contains event signatures
-		cre.handler(
-			evmClient.logTrigger({
-				addresses: [config.moduleAddress],
-				topics: [{ values: [PROTOCOL_EXECUTION_EVENT_SIG] }],
-			}),
-			onProtocolExecution,
-		),
-		// Event trigger: Process each TransferExecuted event
-		cre.handler(
-			evmClient.logTrigger({
-				addresses: [config.moduleAddress],
-				topics: [{ values: [TRANSFER_EXECUTED_EVENT_SIG] }],
-			}),
-			onTransferExecuted,
-		),
-		// Cron trigger: Periodic refresh of spending allowances
+	// Get all configured module addresses
+	const moduleAddresses = getModuleAddressesForTriggers(config)
+
+	// Build handlers array
+	const handlers = []
+
+	// Create log triggers for each configured module (instant event processing)
+	// This provides real-time monitoring for known modules
+	for (const moduleAddress of moduleAddresses) {
+		// ProtocolExecution event trigger
+		handlers.push(
+			cre.handler(
+				evmClient.logTrigger({
+					addresses: [moduleAddress],
+					topics: [{ values: [PROTOCOL_EXECUTION_EVENT_SIG] }],
+				}),
+				onProtocolExecution,
+			)
+		)
+
+		// TransferExecuted event trigger
+		handlers.push(
+			cre.handler(
+				evmClient.logTrigger({
+					addresses: [moduleAddress],
+					topics: [{ values: [TRANSFER_EXECUTED_EVENT_SIG] }],
+				}),
+				onTransferExecuted,
+			)
+		)
+	}
+
+	// Cron trigger: Periodic refresh of spending allowances
+	// This also catches any new modules from registry that aren't in config yet
+	handlers.push(
 		cre.handler(
 			cronTrigger.trigger({
 				schedule: config.refreshSchedule,
 			}),
 			onCronRefresh,
-		),
-	]
+		)
+	)
+
+	return handlers
 }
 
 export async function main() {
