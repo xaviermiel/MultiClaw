@@ -108,9 +108,21 @@ interface DepositRecord {
 	tokenIn: Address
 	amountIn: bigint
 	remainingAmount: bigint  // Tracks how much of the deposit hasn't been withdrawn yet
+	tokenOut: Address        // Output token received from deposit (e.g., aToken, LP token)
+	amountOut: bigint        // Amount of output token received
+	remainingOutputAmount: bigint  // Tracks how much output hasn't been consumed by withdrawal
 	timestamp: bigint  // When the deposit happened
 	originalAcquisitionTimestamp: bigint  // When the tokens were originally acquired (for FIFO inheritance)
 }
+
+// ============ Token Price Cache ============
+
+interface TokenPriceInfo {
+	priceUSD: bigint      // Price in USD with 18 decimals
+	decimals: number      // Token decimals
+}
+
+type TokenPriceCache = Map<Address, TokenPriceInfo>
 
 /**
  * FIFO queue entry for acquired balances
@@ -186,6 +198,250 @@ const createEvmClient = (runtime: Runtime<Config>) => {
 const getCurrentBlockTimestamp = (): bigint => {
 	return BigInt(Math.floor(Date.now() / 1000))
 }
+
+// ============ Retry Logic ============
+
+/**
+ * Retry an operation once on failure
+ */
+const retryOnce = <T>(
+	runtime: Runtime<Config>,
+	operation: () => T,
+	operationName: string
+): T => {
+	try {
+		return operation()
+	} catch (firstError) {
+		runtime.log(`${operationName} failed, retrying once: ${firstError}`)
+		try {
+			return operation()
+		} catch (secondError) {
+			runtime.log(`${operationName} failed after retry: ${secondError}`)
+			throw secondError
+		}
+	}
+}
+
+// ============ Chainlink Price Feed ABI ============
+
+const ChainlinkPriceFeedABI = [
+	{
+		inputs: [],
+		name: 'latestRoundData',
+		outputs: [
+			{ name: 'roundId', type: 'uint80' },
+			{ name: 'answer', type: 'int256' },
+			{ name: 'startedAt', type: 'uint256' },
+			{ name: 'updatedAt', type: 'uint256' },
+			{ name: 'answeredInRound', type: 'uint80' },
+		],
+		stateMutability: 'view',
+		type: 'function',
+	},
+	{
+		inputs: [],
+		name: 'decimals',
+		outputs: [{ name: '', type: 'uint8' }],
+		stateMutability: 'view',
+		type: 'function',
+	},
+] as const
+
+// ERC20 ABI for decimals
+const ERC20DecimalsABI = [
+	{
+		inputs: [],
+		name: 'decimals',
+		outputs: [{ name: '', type: 'uint8' }],
+		stateMutability: 'view',
+		type: 'function',
+	},
+] as const
+
+// ============ Token Price Functions ============
+
+/**
+ * Get price feed address for a token from config
+ */
+const getPriceFeedForToken = (runtime: Runtime<Config>, tokenAddress: Address): Address | null => {
+	const tokenLower = tokenAddress.toLowerCase()
+	const tokenConfig = runtime.config.tokens.find(t => t.address.toLowerCase() === tokenLower)
+	if (tokenConfig?.priceFeedAddress) {
+		return tokenConfig.priceFeedAddress as Address
+	}
+	return null
+}
+
+/**
+ * Get token decimals from contract
+ */
+const getTokenDecimals = (runtime: Runtime<Config>, tokenAddress: Address): number => {
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: ERC20DecimalsABI,
+		functionName: 'decimals',
+	})
+
+	try {
+		const result = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: tokenAddress,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!result.data || result.data.length === 0) {
+			return 18
+		}
+
+		const decimals = decodeFunctionResult({
+			abi: ERC20DecimalsABI,
+			functionName: 'decimals',
+			data: bytesToHex(result.data),
+		})
+
+		return Number(decimals)
+	} catch (error) {
+		runtime.log(`Error getting decimals for ${tokenAddress}: ${error}`)
+		return 18
+	}
+}
+
+/**
+ * Get price from Chainlink price feed (normalized to 18 decimals)
+ */
+const getChainlinkPriceUSD = (runtime: Runtime<Config>, priceFeedAddress: Address): bigint => {
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: ChainlinkPriceFeedABI,
+		functionName: 'latestRoundData',
+	})
+
+	try {
+		const priceResult = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: priceFeedAddress,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!priceResult.data || priceResult.data.length === 0) {
+			return 0n
+		}
+
+		const [, answer] = decodeFunctionResult({
+			abi: ChainlinkPriceFeedABI,
+			functionName: 'latestRoundData',
+			data: bytesToHex(priceResult.data),
+		})
+
+		// Get feed decimals
+		const decimalsCallData = encodeFunctionData({
+			abi: ChainlinkPriceFeedABI,
+			functionName: 'decimals',
+		})
+
+		const decimalsResult = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: priceFeedAddress,
+					data: decimalsCallData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		let feedDecimals = 8
+		if (decimalsResult.data && decimalsResult.data.length > 0) {
+			feedDecimals = Number(decodeFunctionResult({
+				abi: ChainlinkPriceFeedABI,
+				functionName: 'decimals',
+				data: bytesToHex(decimalsResult.data),
+			}))
+		}
+
+		// Normalize to 18 decimals
+		const price18 = BigInt(answer) * BigInt(10 ** (18 - feedDecimals))
+		return price18
+	} catch (error) {
+		runtime.log(`Error getting price from ${priceFeedAddress}: ${error}`)
+		return 0n
+	}
+}
+
+/**
+ * Build a price cache for all tokens involved in events
+ * Returns a map of token address -> { priceUSD (18 decimals), decimals }
+ */
+const buildTokenPriceCache = (runtime: Runtime<Config>, tokens: Set<Address>): TokenPriceCache => {
+	const cache: TokenPriceCache = new Map()
+
+	for (const token of tokens) {
+		const tokenLower = token.toLowerCase() as Address
+		const priceFeed = getPriceFeedForToken(runtime, tokenLower)
+
+		if (!priceFeed) {
+			// No price feed configured - skip
+			continue
+		}
+
+		try {
+			const priceUSD = getChainlinkPriceUSD(runtime, priceFeed)
+			const decimals = getTokenDecimals(runtime, tokenLower)
+
+			if (priceUSD > 0n) {
+				cache.set(tokenLower, { priceUSD, decimals })
+			}
+		} catch (error) {
+			runtime.log(`Error fetching price for ${token}: ${error}`)
+		}
+	}
+
+	return cache
+}
+
+/**
+ * Calculate USD value for a token amount using the price cache
+ * Returns value in 18 decimals, or null if price not available
+ */
+const getTokenValueUSD = (
+	token: Address,
+	amount: bigint,
+	priceCache: TokenPriceCache
+): bigint | null => {
+	const tokenLower = token.toLowerCase() as Address
+	const priceInfo = priceCache.get(tokenLower)
+
+	if (!priceInfo || priceInfo.priceUSD === 0n) {
+		return null
+	}
+
+	// value = amount * price / 10^decimals
+	// Both price and result are in 18 decimals
+	return (amount * priceInfo.priceUSD) / BigInt(10 ** priceInfo.decimals)
+}
+
+// ============ Update Thresholds ============
+
+// Only update if allowance INCREASED by more than this percentage
+const ALLOWANCE_INCREASE_THRESHOLD_BPS = 200n // 2%
+
+// Always update if last update was more than this many seconds ago
+const MAX_STALENESS_SECONDS = 2700n // 45 minutes
+
+// Track last update timestamp per subaccount (module:subaccount -> timestamp)
+const lastUpdateTimestamp = new Map<string, bigint>()
 
 /**
  * Get current acquired balance from contract for a specific module
@@ -958,8 +1214,9 @@ type UnifiedEvent =
  * Key Design:
  * - FIFO queues track (amount, originalTimestamp) for each token
  * - When swapping/depositing, consumed acquired tokens' timestamps are inherited
- * - Mixed acquired/non-acquired inputs are proportionally split in outputs
+ * - Mixed acquired/non-acquired inputs are proportionally split in outputs (USD-weighted if priceCache available)
  * - Deposits store originalAcquisitionTimestamp so withdrawals inherit correctly
+ * - Deposits also track output tokens (e.g., aToken, LP token) for proper withdrawal matching
  */
 const buildSubAccountState = (
 	runtime: Runtime<Config>,
@@ -968,6 +1225,7 @@ const buildSubAccountState = (
 	subAccount: Address,
 	currentTimestamp: bigint,
 	subAccountWindowDuration?: bigint,
+	priceCache?: TokenPriceCache,
 ): SubAccountState => {
 	// Use per-subaccount window duration if provided, otherwise fall back to config
 	const windowDuration = subAccountWindowDuration ?? BigInt(runtime.config.windowDurationSeconds)
@@ -1042,6 +1300,9 @@ const buildSubAccountState = (
 			// NOTE: Now handles multiple input tokens (e.g., LP position minting uses 2 tokens)
 			let consumedEntries: AcquiredBalanceEntry[] = []
 			let totalAmountIn = 0n
+			let totalValueInUSD = 0n       // USD value of all inputs (for weighted ratio)
+			let consumedValueUSD = 0n      // USD value of consumed acquired tokens
+			let hasAllPrices = true        // Whether we have prices for all input tokens
 			if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
 				// Process each input token
 				for (let i = 0; i < event.tokensIn.length; i++) {
@@ -1055,12 +1316,28 @@ const buildSubAccountState = (
 					const result = consumeFromQueue(inputQueue, amountIn, event.timestamp, windowDuration)
 					consumedEntries.push(...result.consumed)
 					tokensWithAcquiredHistory.add(tokenInLower)
+
+					// Track USD values for weighted ratio calculation
+					if (priceCache) {
+						const inputValueUSD = getTokenValueUSD(tokenIn, amountIn, priceCache)
+						if (inputValueUSD !== null) {
+							totalValueInUSD += inputValueUSD
+							// Calculate USD value of consumed portion for this token
+							const consumedAmount = result.consumed.reduce((sum, e) => sum + e.amount, 0n)
+							const consumedTokenValueUSD = getTokenValueUSD(tokenIn, consumedAmount, priceCache)
+							if (consumedTokenValueUSD !== null) {
+								consumedValueUSD += consumedTokenValueUSD
+							}
+						} else {
+							hasAllPrices = false
+						}
+					}
 				}
 			}
 
 			// Track deposits for withdrawal matching
 			// Store the original acquisition timestamp so withdrawals inherit it correctly
-			// For multi-token deposits (LP), create a record for each input token
+			// For multi-token deposits (LP), create a record for each input/output token pair
 			if (event.opType === OperationType.DEPOSIT) {
 				// Find the oldest original timestamp from consumed acquired tokens
 				// If no acquired tokens were consumed, use the deposit timestamp (it's new spending)
@@ -1073,31 +1350,84 @@ const buildSubAccountState = (
 					runtime.log(`  DEPOSIT: storing original acquisition timestamp ${originalAcquisitionTimestamp} for future withdrawal`)
 				}
 
-				// Create a deposit record for each input token
-				for (let i = 0; i < event.tokensIn.length; i++) {
-					const tokenIn = event.tokensIn[i]
-					const amountIn = event.amountsIn[i]
-					if (amountIn <= 0n) continue
+				// Create a deposit record linking input token to output token
+				// This allows us to consume the output token (e.g., aLINK) when withdrawing the input token (LINK)
 
-					state.depositRecords.push({
-						subAccount: event.subAccount,
-						target: event.target,
-						tokenIn: tokenIn,
-						amountIn: amountIn,
-						remainingAmount: amountIn,
-						timestamp: event.timestamp,
-						originalAcquisitionTimestamp,
-					})
+				// For multi-token LP deposits (N inputs → 1 output), we need to divide the output
+				// proportionally among input tokens to avoid double-counting remainingOutputAmount
+				const validInputCount = event.tokensIn.filter((_, i) => event.amountsIn[i] > 0n).length
+				const validOutputCount = event.tokensOut.filter((_, i) => event.amountsOut[i] > 0n).length
+				const isMultiInputSingleOutput = validInputCount > 1 && event.tokensOut.length === 1
+				const isSingleInputMultiOutput = validInputCount === 1 && validOutputCount > 1
+
+				if (isSingleInputMultiOutput) {
+					// Single input → multiple outputs: create a deposit record for each output
+					// Divide the input amount equally among output records
+					const tokenIn = event.tokensIn.find((_, i) => event.amountsIn[i] > 0n)!
+					const amountIn = event.amountsIn.find(a => a > 0n)!
+					const inputSharePerOutput = amountIn / BigInt(validOutputCount)
+
+					for (let i = 0; i < event.tokensOut.length; i++) {
+						const tokenOut = event.tokensOut[i]
+						const amountOut = event.amountsOut[i]
+						if (amountOut <= 0n) continue
+
+						runtime.log(`  DEPOSIT: single-input multi-output detected, allocating ${inputSharePerOutput} ${tokenIn} to ${tokenOut} output (1/${validOutputCount} share)`)
+
+						state.depositRecords.push({
+							subAccount: event.subAccount,
+							target: event.target,
+							tokenIn: tokenIn,
+							amountIn: inputSharePerOutput, // Each output gets proportional share of input
+							remainingAmount: inputSharePerOutput,
+							tokenOut: tokenOut,
+							amountOut: amountOut,
+							remainingOutputAmount: amountOut,
+							timestamp: event.timestamp,
+							originalAcquisitionTimestamp,
+						})
+					}
+				} else {
+					// Standard case: loop over inputs
+					for (let i = 0; i < event.tokensIn.length; i++) {
+						const tokenIn = event.tokensIn[i]
+						const amountIn = event.amountsIn[i]
+						if (amountIn <= 0n) continue
+
+						// Find corresponding output token (same index if available, otherwise first output)
+						const tokenOut = event.tokensOut[i] || event.tokensOut[0] || ('0x' as Address)
+						let amountOut = event.amountsOut[i] || event.amountsOut[0] || 0n
+
+						// For multi-input → single-output LP deposits, divide output equally among inputs
+						// This prevents double-counting: if 2 tokens deposit into 1 LP, each record gets 50% of LP
+						if (isMultiInputSingleOutput && amountOut > 0n) {
+							amountOut = amountOut / BigInt(validInputCount)
+							runtime.log(`  DEPOSIT: multi-input LP detected, allocating ${amountOut} ${tokenOut} to ${tokenIn} input (1/${validInputCount} share)`)
+						}
+
+						state.depositRecords.push({
+							subAccount: event.subAccount,
+							target: event.target,
+							tokenIn: tokenIn,
+							amountIn: amountIn,
+							remainingAmount: amountIn,
+							tokenOut: tokenOut,
+							amountOut: amountOut,
+							remainingOutputAmount: amountOut,
+							timestamp: event.timestamp,
+							originalAcquisitionTimestamp,
+						})
+					}
 				}
 			}
 
-			// Handle output tokens (add to acquired queue)
+			// Handle output tokens (add to acquired queue) - iterate over tokensOut/amountsOut arrays
 			// For SWAPs and DEPOSITs: proportionally split output between acquired (inherited timestamp) and new (current timestamp)
+			// Uses USD-weighted ratios when priceCache is available for accurate multi-token handling
 			// For WITHDRAW/CLAIM: output matched to deposits inherits their original acquisition timestamp
-			// NOTE: Now handles multiple output tokens (e.g., LP position withdrawals return 2 tokens)
 
 			if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
-				// Process each output token
+				// Process all output tokens in the array
 				for (let i = 0; i < event.tokensOut.length; i++) {
 					const tokenOut = event.tokensOut[i]
 					const amountOut = event.amountsOut[i]
@@ -1113,33 +1443,59 @@ const buildSubAccountState = (
 
 					if (totalConsumed > 0n && fromNonAcquired > 0n) {
 						// Mixed case: proportionally split the output
-						// Acquired portion inherits oldest timestamp, non-acquired portion is newly acquired
-						const acquiredRatio = (totalConsumed * 10000n) / totalAmountIn // basis points
+						// Acquired portion inherits timestamps proportionally, non-acquired portion is newly acquired
+
+						// Use USD-weighted ratio if we have prices for all input tokens
+						// This correctly handles multi-token inputs with different values (e.g., 1 WETH + 1000 USDC)
+						let acquiredRatio: bigint
+						let useUSDWeighting = false
+
+						if (priceCache && hasAllPrices && totalValueInUSD > 0n) {
+							// USD-weighted ratio: based on actual value, not raw amounts
+							acquiredRatio = (consumedValueUSD * 10000n) / totalValueInUSD
+							useUSDWeighting = true
+						} else {
+							// Fallback: amount-weighted ratio (original behavior)
+							acquiredRatio = (totalConsumed * 10000n) / totalAmountIn
+						}
+
 						const outputFromAcquired = (amountOut * acquiredRatio) / 10000n
 						const outputFromNonAcquired = amountOut - outputFromAcquired
 
-						// Find oldest timestamp from consumed entries
-						const oldestTimestamp = consumedEntries.reduce(
-							(oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
-							consumedEntries[0].originalTimestamp
-						)
-
 						const opName = OperationType[event.opType]
-						runtime.log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
-						runtime.log(`    ${outputFromAcquired} ${tokenOut} inherits timestamp ${oldestTimestamp}`)
-						runtime.log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
+						if (useUSDWeighting) {
+							runtime.log(`  ${opName}: mixed input (USD-weighted) - ${consumedValueUSD} acquired + ${totalValueInUSD - consumedValueUSD} non-acquired (USD)`)
+						} else {
+							runtime.log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
+						}
 
-						addToQueue(outputQueue, outputFromAcquired, oldestTimestamp)
+						// Proportionally split the acquired output among consumed entries by their amounts
+						// Each consumed entry's portion of the output inherits that entry's timestamp
+						for (const entry of consumedEntries) {
+							const entryRatio = (entry.amount * 10000n) / totalConsumed
+							const entryOutput = (outputFromAcquired * entryRatio) / 10000n
+							if (entryOutput > 0n) {
+								runtime.log(`    ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
+								addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+							}
+						}
+
+						runtime.log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
 						addToQueue(outputQueue, outputFromNonAcquired, event.timestamp)
 					} else if (totalConsumed > 0n) {
-						// Entire input was acquired - output inherits oldest timestamp
-						const oldestTimestamp = consumedEntries.reduce(
-							(oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
-							consumedEntries[0].originalTimestamp
-						)
+						// Entire input was acquired - output inherits timestamps proportionally from consumed entries
 						const opName = OperationType[event.opType]
-						runtime.log(`  ${opName}: ${amountOut} ${tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
-						addToQueue(outputQueue, amountOut, oldestTimestamp)
+
+						// Proportionally split the output among consumed entries by their amounts
+						// Each consumed entry's portion of the output inherits that entry's timestamp
+						for (const entry of consumedEntries) {
+							const entryRatio = (entry.amount * 10000n) / totalConsumed
+							const entryOutput = (amountOut * entryRatio) / 10000n
+							if (entryOutput > 0n) {
+								runtime.log(`  ${opName}: ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
+								addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+							}
+						}
 					} else {
 						// No acquired input - output is newly acquired
 						const opName = OperationType[event.opType]
@@ -1148,7 +1504,7 @@ const buildSubAccountState = (
 					}
 				}
 			} else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
-				// Process each output token for withdrawals/claims
+				// Process all output tokens in the array
 				for (let i = 0; i < event.tokensOut.length; i++) {
 					const tokenOut = event.tokensOut[i]
 					const amountOut = event.amountsOut[i]
@@ -1156,9 +1512,15 @@ const buildSubAccountState = (
 
 					const tokenOutLower = tokenOut.toLowerCase() as Address
 
-					// Find matching deposits for this specific token
+					// Find matching deposits
 					let remainingToMatch = amountOut
-					let matchedOriginalTimestamp: bigint | null = null
+
+					// Track output tokens to consume from acquired queue (e.g., aLINK when withdrawing LINK)
+					// We track the deposit reference so we can update remainingOutputAmount after actual queue consumption
+					const outputTokensToConsume: { token: Address; amount: bigint; deposit: DepositRecord }[] = []
+
+					// Track matched amounts per timestamp - each deposit portion inherits its own timestamp
+					const matchedByTimestamp: { amount: bigint; timestamp: bigint }[] = []
 
 					for (const deposit of state.depositRecords) {
 						if (remainingToMatch <= 0n) break
@@ -1175,28 +1537,98 @@ const buildSubAccountState = (
 							deposit.remainingAmount -= consumeAmount
 							remainingToMatch -= consumeAmount
 
-							// Track the original acquisition timestamp for inheritance (not the deposit timestamp)
-							// This ensures the full chain of acquired status is preserved:
-							// Original swap → deposit → withdrawal all share the same original timestamp
-							if (matchedOriginalTimestamp === null || deposit.originalAcquisitionTimestamp < matchedOriginalTimestamp) {
-								matchedOriginalTimestamp = deposit.originalAcquisitionTimestamp
+							// Calculate proportional output token consumption (e.g., aLINK)
+							// If we're withdrawing 50% of the deposited amount, consume 50% of the output token
+							// NOTE: We don't reduce remainingOutputAmount here - we do it after actual queue consumption
+							// to handle cases where queue entries have expired
+							if (deposit.tokenOut && deposit.tokenOut !== '0x' && deposit.remainingOutputAmount > 0n) {
+								const ratio = (consumeAmount * 10000n) / deposit.amountIn
+								const outputToConsume = (deposit.amountOut * ratio) / 10000n
+								const maxConsume = outputToConsume > deposit.remainingOutputAmount
+									? deposit.remainingOutputAmount
+									: outputToConsume
+
+								if (maxConsume > 0n) {
+									outputTokensToConsume.push({
+										token: deposit.tokenOut.toLowerCase() as Address,
+										amount: maxConsume,
+										deposit: deposit
+									})
+									runtime.log(`  ${OperationType[event.opType]} will consume up to ${maxConsume} ${deposit.tokenOut} (deposit output token)`)
+								}
 							}
+
+							// Track this matched portion with its own timestamp (not the oldest across all deposits)
+							// This ensures each deposit's portion inherits its correct original acquisition timestamp
+							matchedByTimestamp.push({
+								amount: consumeAmount,
+								timestamp: deposit.originalAcquisitionTimestamp
+							})
 
 							runtime.log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (original acquisition: ${deposit.originalAcquisitionTimestamp})`)
 						}
 					}
 
-					const matchedAmount = amountOut - remainingToMatch
-					if (matchedAmount > 0n) {
+					// Consume the deposit's output tokens (e.g., aLINK) from the acquired queue
+					// These tokens were added when depositing and should be removed when withdrawing
+					// We update deposit.remainingOutputAmount based on actual consumption (not calculated)
+					// to handle cases where queue entries have expired
+					for (const { token, amount, deposit } of outputTokensToConsume) {
+						const outputTokenQueue = getQueue(token)
+						tokensWithAcquiredHistory.add(token)
+						const { consumed } = consumeFromQueue(outputTokenQueue, amount, event.timestamp, windowDuration)
+						const totalConsumedAmount = consumed.reduce((sum, e) => sum + e.amount, 0n)
+
+						// Update deposit record with actual amount consumed (may be less than requested if expired)
+						deposit.remainingOutputAmount -= totalConsumedAmount
+						runtime.log(`  ${OperationType[event.opType]} consumed ${totalConsumedAmount} ${token} from acquired queue (deposit receipt token)`)
+					}
+
+					// Add each matched portion to the queue with its own inherited timestamp
+					// This correctly preserves timestamp granularity from different deposits
+					const totalMatched = matchedByTimestamp.reduce((sum, m) => sum + m.amount, 0n)
+					if (totalMatched > 0n) {
 						tokensWithAcquiredHistory.add(tokenOutLower)
 						const outputQueue = getQueue(tokenOutLower)
 
-						// Withdrawal inherits the original acquisition timestamp (not deposit timestamp)
-						const outputTimestamp = matchedOriginalTimestamp || event.timestamp
-						runtime.log(`  ${OperationType[event.opType]} matched: ${matchedAmount} ${tokenOut} inherits original timestamp ${outputTimestamp}`)
-						addToQueue(outputQueue, matchedAmount, outputTimestamp)
-					} else {
-						runtime.log(`  ${OperationType[event.opType]} NOT matched: no matching deposit found for token ${tokenOut}`)
+						for (const { amount, timestamp } of matchedByTimestamp) {
+							runtime.log(`  ${OperationType[event.opType]} matched: ${amount} inherits original timestamp ${timestamp}`)
+							addToQueue(outputQueue, amount, timestamp)
+						}
+					}
+
+					// Handle unmatched amount
+					if (remainingToMatch > 0n) {
+						if (event.opType === OperationType.CLAIM) {
+							// CLAIM rewards should only be acquired if there's a matching deposit for this target
+							// (i.e., the subaccount created the position that generates rewards)
+							const hasMatchingDeposit = state.depositRecords.some(
+								d => d.target.toLowerCase() === event.target.toLowerCase() &&
+									 d.subAccount.toLowerCase() === event.subAccount.toLowerCase()
+							)
+
+							if (hasMatchingDeposit) {
+								// Find the oldest deposit timestamp for this target to inherit
+								const oldestDepositTimestamp = state.depositRecords
+									.filter(d => d.target.toLowerCase() === event.target.toLowerCase() &&
+												d.subAccount.toLowerCase() === event.subAccount.toLowerCase())
+									.reduce((oldest, d) => d.originalAcquisitionTimestamp < oldest ? d.originalAcquisitionTimestamp : oldest,
+											event.timestamp)
+
+								tokensWithAcquiredHistory.add(tokenOutLower)
+								const outputQueue = getQueue(tokenOutLower)
+								runtime.log(`  CLAIM: ${remainingToMatch} ${tokenOut} is acquired (has deposit at target), inherits timestamp ${oldestDepositTimestamp}`)
+								addToQueue(outputQueue, remainingToMatch, oldestDepositTimestamp)
+							} else {
+								// No matching deposit - claim is from multisig's position, not subaccount's
+								runtime.log(`  CLAIM: ${remainingToMatch} ${tokenOut} NOT acquired (no matching deposit from subaccount)`)
+							}
+						} else {
+							// Unmatched WITHDRAW - the LP/receipt tokens weren't acquired by subaccount
+							// This means either: external aTokens sent to Safe, or deposit was outside window/by multisig
+							// In either case, the withdrawn tokens belong to the multisig, not subaccount
+							runtime.log(`  WITHDRAW unmatched: ${remainingToMatch} ${tokenOut} NOT acquired (no matching deposit from subaccount)`)
+						}
 					}
 				}
 			}
@@ -1317,11 +1749,14 @@ const getOnChainSpendingAllowanceForModule = (
 }
 
 
-// Threshold for considering allowance values "equal" (0% tolerance for allowances)
-const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
-
 /**
- * Push batch update to contract for a specific module (skips if no changes)
+ * Push batch update to contract for a specific module (skips if no meaningful changes)
+ *
+ * Update logic:
+ * - Always update if acquired balances changed
+ * - Always update if allowance went down (any decrease)
+ * - Update if allowance went up by more than 2% (ALLOWANCE_INCREASE_THRESHOLD_BPS)
+ * - Update if stale for more than 45 minutes (MAX_STALENESS_SECONDS)
  */
 const pushBatchUpdateForModule = (
 	runtime: Runtime<Config>,
@@ -1334,13 +1769,44 @@ const pushBatchUpdateForModule = (
 
 	// Get current on-chain allowance
 	const onChainAllowance = getOnChainSpendingAllowanceForModule(runtime, moduleAddress, subAccount)
+	const currentTimestamp = getCurrentBlockTimestamp()
 
-	// Check if allowance change is significant
-	const allowanceDiff = newAllowance > onChainAllowance
-		? newAllowance - onChainAllowance
-		: onChainAllowance - newAllowance
-	const allowanceThreshold = (onChainAllowance * ALLOWANCE_CHANGE_THRESHOLD_BPS) / 10000n
-	const allowanceChanged = allowanceDiff > allowanceThreshold
+	// Check staleness
+	const subAccountKey = `${moduleAddress}:${subAccount}`.toLowerCase()
+	const lastUpdate = lastUpdateTimestamp.get(subAccountKey) || 0n
+	const timeSinceUpdate = currentTimestamp - lastUpdate
+	const isStale = timeSinceUpdate > MAX_STALENESS_SECONDS
+
+	// Check allowance direction
+	const allowanceDecreased = newAllowance < onChainAllowance
+	const allowanceIncreased = newAllowance > onChainAllowance
+
+	// Check if increase exceeds threshold
+	// Also consider any increase from 0 as significant
+	let significantIncrease = false
+	if (allowanceIncreased) {
+		if (onChainAllowance > 0n) {
+			const increaseAmount = newAllowance - onChainAllowance
+			const threshold = (onChainAllowance * ALLOWANCE_INCREASE_THRESHOLD_BPS) / 10000n
+			significantIncrease = increaseAmount > threshold
+		} else {
+			significantIncrease = newAllowance > 0n
+		}
+	}
+
+	// Determine if allowance update is needed based on rules:
+	// 1. Allowance went down (any decrease) -> always update
+	// 2. Allowance went up by more than threshold -> update
+	// 3. Stale for more than MAX_STALENESS_SECONDS -> update
+	const allowanceChanged = allowanceDecreased || significantIncrease || isStale
+
+	if (!allowanceChanged && !allowanceDecreased && !significantIncrease) {
+		if (allowanceIncreased) {
+			const increaseAmount = newAllowance - onChainAllowance
+			const increaseBps = onChainAllowance > 0n ? (increaseAmount * 10000n) / onChainAllowance : 0n
+			runtime.log(`  Allowance increase within threshold: ${onChainAllowance} -> ${newAllowance} (+${increaseBps}bps, threshold: ${ALLOWANCE_INCREASE_THRESHOLD_BPS}bps)`)
+		}
+	}
 
 	// Check if any acquired balances changed
 	const tokens: Address[] = []
@@ -1372,13 +1838,26 @@ const pushBatchUpdateForModule = (
 		}
 	}
 
-	// Skip if no changes
+	// Skip if no changes needed
 	if (!allowanceChanged && !acquiredChanged) {
-		runtime.log(`Skipping batch update - no changes (allowance: ${onChainAllowance} -> ${newAllowance}, tokens: ${tokens.length})`)
+		runtime.log(`Skipping batch update - no changes needed:`)
+		runtime.log(`  Allowance: ${onChainAllowance} -> ${newAllowance} (no decrease, increase <${ALLOWANCE_INCREASE_THRESHOLD_BPS / 100n}%)`)
+		runtime.log(`  Staleness: ${timeSinceUpdate}s (max: ${MAX_STALENESS_SECONDS}s)`)
+		runtime.log(`  Acquired tokens: ${tokens.length} (no changes)`)
 		return null
 	}
 
-	runtime.log(`Pushing batch update for module ${moduleAddress}: subAccount=${subAccount}, allowance=${newAllowance} (was ${onChainAllowance}), tokens=${tokens.length}`)
+	// Log reason for update
+	const reasons: string[] = []
+	if (acquiredChanged) reasons.push('acquired changed')
+	if (allowanceDecreased) reasons.push('allowance decreased')
+	if (significantIncrease) reasons.push(`allowance increased >${ALLOWANCE_INCREASE_THRESHOLD_BPS / 100n}%`)
+	if (isStale) reasons.push(`stale (${timeSinceUpdate}s > ${MAX_STALENESS_SECONDS}s)`)
+
+	runtime.log(`Pushing batch update for module ${moduleAddress}: subAccount=${subAccount}`)
+	runtime.log(`  Reason: ${reasons.join(', ')}`)
+	runtime.log(`  Allowance: ${onChainAllowance} -> ${newAllowance}`)
+	runtime.log(`  Tokens: ${tokens.length}`)
 
 	const callData = encodeFunctionData({
 		abi: DeFiInteractorModule,
@@ -1408,6 +1887,9 @@ const pushBatchUpdateForModule = (
 	if (resp.txStatus !== TxStatus.SUCCESS) {
 		throw new Error(`Failed to push batch update: ${resp.errorMessage || resp.txStatus}`)
 	}
+
+	// Update last update timestamp on success
+	lastUpdateTimestamp.set(subAccountKey, currentTimestamp)
 
 	const txHash = bytesToHex(resp.txHash || new Uint8Array(32))
 	runtime.log(`Batch update complete. TxHash: ${txHash}`)
@@ -1452,8 +1934,8 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		runtime.log(`  SpendingCost: ${newEvent.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
-		const historicalEvents = queryHistoricalEventsForModule(runtime, moduleAddress, newEvent.subAccount)
-		const transferEvents = queryTransferEventsForModule(runtime, moduleAddress, newEvent.subAccount)
+		const historicalEvents = retryOnce(runtime, () => queryHistoricalEventsForModule(runtime, moduleAddress, newEvent.subAccount), 'queryHistoricalEventsForModule')
+		const transferEvents = retryOnce(runtime, () => queryTransferEventsForModule(runtime, moduleAddress, newEvent.subAccount), 'queryTransferEventsForModule')
 
 		// Add the new event (deduplicate by blockNumber + logIndex which uniquely identifies each log)
 		const allEvents = [...historicalEvents]
@@ -1465,11 +1947,22 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 			allEvents.push(newEvent)
 		}
 
+		// Collect all tokens from events for price cache
+		const tokensInEvents = new Set<Address>()
+		for (const e of allEvents) {
+			for (const t of e.tokensIn) tokensInEvents.add(t.toLowerCase() as Address)
+			for (const t of e.tokensOut) tokensInEvents.add(t.toLowerCase() as Address)
+		}
+
+		// Build price cache for USD-weighted ratio calculations
+		const priceCache = buildTokenPriceCache(runtime, tokensInEvents)
+		runtime.log(`Built price cache for ${priceCache.size} tokens`)
+
 		// Get per-subaccount window duration
 		const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, newEvent.subAccount)
 
 		// Build state from all events using per-subaccount window duration
-		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp, windowDuration)
+		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp, windowDuration, priceCache)
 
 		// Calculate new spending allowance
 		const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, newEvent.subAccount, state)
@@ -1499,7 +1992,7 @@ const processModuleSubaccounts = (
 	const results: string[] = []
 
 	// Get subaccounts for this module
-	const subaccounts = getActiveSubaccountsForModule(runtime, moduleAddress)
+	const subaccounts = retryOnce(runtime, () => getActiveSubaccountsForModule(runtime, moduleAddress), 'getActiveSubaccountsForModule')
 	runtime.log(`Found ${subaccounts.length} active subaccounts for module ${moduleAddress}`)
 
 	if (subaccounts.length === 0) {
@@ -1507,8 +2000,19 @@ const processModuleSubaccounts = (
 	}
 
 	// Query events for this module
-	const allEvents = queryHistoricalEventsForModule(runtime, moduleAddress)
-	const allTransfers = queryTransferEventsForModule(runtime, moduleAddress)
+	const allEvents = retryOnce(runtime, () => queryHistoricalEventsForModule(runtime, moduleAddress), 'queryHistoricalEventsForModule')
+	const allTransfers = retryOnce(runtime, () => queryTransferEventsForModule(runtime, moduleAddress), 'queryTransferEventsForModule')
+
+	// Collect all tokens from events for price cache
+	const tokensInEvents = new Set<Address>()
+	for (const e of allEvents) {
+		for (const t of e.tokensIn) tokensInEvents.add(t.toLowerCase() as Address)
+		for (const t of e.tokensOut) tokensInEvents.add(t.toLowerCase() as Address)
+	}
+
+	// Build price cache for USD-weighted ratio calculations
+	const priceCache = buildTokenPriceCache(runtime, tokensInEvents)
+	runtime.log(`Built price cache for ${priceCache.size} tokens`)
 
 	// Process each subaccount
 	for (const subAccount of subaccounts) {
@@ -1518,8 +2022,8 @@ const processModuleSubaccounts = (
 			// Get per-subaccount window duration
 			const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, subAccount)
 
-			// Build state for this subaccount
-			const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration)
+			// Build state for this subaccount with priceCache for USD-weighted ratios
+			const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration, priceCache)
 
 			// Calculate new spending allowance using module-aware functions
 			const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, subAccount, state)
@@ -1548,7 +2052,7 @@ const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string 
 		const currentTimestamp = getCurrentBlockTimestamp()
 
 		// Get all active modules from registry (or single module if no registry)
-		const modules = getActiveModulesFromRegistry(runtime)
+		const modules = retryOnce(runtime, () => getActiveModulesFromRegistry(runtime), 'getActiveModulesFromRegistry')
 		runtime.log(`Processing ${modules.length} module(s)`)
 
 		if (modules.length === 0) {
@@ -1611,8 +2115,8 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 		runtime.log(`  SpendingCost: ${newTransfer.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
-		const historicalEvents = queryHistoricalEventsForModule(runtime, moduleAddress, newTransfer.subAccount)
-		const transferEvents = queryTransferEventsForModule(runtime, moduleAddress, newTransfer.subAccount)
+		const historicalEvents = retryOnce(runtime, () => queryHistoricalEventsForModule(runtime, moduleAddress, newTransfer.subAccount), 'queryHistoricalEventsForModule')
+		const transferEvents = retryOnce(runtime, () => queryTransferEventsForModule(runtime, moduleAddress, newTransfer.subAccount), 'queryTransferEventsForModule')
 
 		// Add the new transfer event (deduplicate by blockNumber + logIndex)
 		const allTransfers = [...transferEvents]
@@ -1624,11 +2128,23 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 			allTransfers.push(newTransfer)
 		}
 
+		// Collect all tokens from events for price cache
+		const tokensInEvents = new Set<Address>()
+		for (const e of historicalEvents) {
+			for (const t of e.tokensIn) tokensInEvents.add(t.toLowerCase() as Address)
+			for (const t of e.tokensOut) tokensInEvents.add(t.toLowerCase() as Address)
+		}
+		tokensInEvents.add(newTransfer.token.toLowerCase() as Address)
+
+		// Build price cache for USD-weighted ratio calculations
+		const priceCache = buildTokenPriceCache(runtime, tokensInEvents)
+		runtime.log(`Built price cache for ${priceCache.size} tokens`)
+
 		// Get per-subaccount window duration
 		const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, newTransfer.subAccount)
 
 		// Build state from all events using per-subaccount window duration
-		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp, windowDuration)
+		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp, windowDuration, priceCache)
 
 		// Calculate new spending allowance
 		const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, newTransfer.subAccount, state)
