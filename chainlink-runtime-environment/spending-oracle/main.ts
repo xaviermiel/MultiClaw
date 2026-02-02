@@ -232,16 +232,6 @@ const getContractAcquiredBalanceForModule = (
 	}
 }
 
-/**
- * Get current acquired balance from contract (legacy - uses config moduleAddress)
- */
-const getContractAcquiredBalance = (
-	runtime: Runtime<Config>,
-	subAccount: Address,
-	token: Address,
-): bigint => {
-	return getContractAcquiredBalanceForModule(runtime, runtime.config.moduleAddress as Address, subAccount, token)
-}
 
 const getSubAccountLimitsForModule = (
 	runtime: Runtime<Config>,
@@ -285,15 +275,6 @@ const getSubAccountLimitsForModule = (
 	}
 }
 
-/**
- * Get subaccount limits (legacy - uses config moduleAddress)
- */
-const getSubAccountLimits = (
-	runtime: Runtime<Config>,
-	subAccount: Address,
-): { maxSpendingBps: bigint; windowDuration: bigint } => {
-	return getSubAccountLimitsForModule(runtime, runtime.config.moduleAddress as Address, subAccount)
-}
 
 /**
  * Get Safe's total USD value from contract for a specific module
@@ -335,12 +316,6 @@ const getSafeValueForModule = (runtime: Runtime<Config>, moduleAddress: Address)
 	}
 }
 
-/**
- * Get Safe's total USD value (legacy - uses config moduleAddress)
- */
-const getSafeValue = (runtime: Runtime<Config>): bigint => {
-	return getSafeValueForModule(runtime, runtime.config.moduleAddress as Address)
-}
 
 /**
  * Get all active modules from the registry
@@ -430,12 +405,6 @@ const getActiveSubaccountsForModule = (runtime: Runtime<Config>, moduleAddress: 
 	}
 }
 
-/**
- * Get all subaccounts with DEFI_EXECUTE_ROLE (legacy - uses config moduleAddress)
- */
-const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
-	return getActiveSubaccountsForModule(runtime, runtime.config.moduleAddress as Address)
-}
 
 /**
  * Convert SDK BigInt (Uint8Array absVal) to native bigint
@@ -604,90 +573,6 @@ const queryHistoricalEventsForModule = (
 	return events
 }
 
-/**
- * Query historical ProtocolExecution events from the past 24h (legacy - uses config moduleAddress)
- * Uses 2x the lookback range to discover tokens that may have acquired balance
- * even if the original acquisition is outside the current window
- */
-const queryHistoricalEvents = (
-	runtime: Runtime<Config>,
-	subAccount?: Address,
-): ProtocolExecutionEvent[] => {
-	const evmClient = createEvmClient(runtime)
-	const events: ProtocolExecutionEvent[] = []
-
-	runtime.log(`Querying historical events (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
-
-	try {
-		// Get current finalized block number
-		const currentBlock = getCurrentBlockNumber(runtime)
-		if (currentBlock === 0n) {
-			runtime.log('Could not determine current block number')
-			return events
-		}
-
-		// Use 2x the lookback range to discover tokens that may have acquired balance
-		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
-		runtime.log(`Block range: ${fromBlock} to ${currentBlock}`)
-
-		// Build topics array for filterLogs
-		// topics[0] = event signature, topics[1] = indexed subAccount (optional)
-		const topics: Array<{ topic: string[] }> = [
-			{ topic: [PROTOCOL_EXECUTION_EVENT_SIG] },
-		]
-
-		if (subAccount) {
-			topics.push({ topic: [addressToTopicBytes(subAccount)] })
-		}
-
-		// Query logs using filterLogs with proper FilterLogsRequest structure
-		const logsResult = evmClient
-			.filterLogs(runtime, {
-				filterQuery: {
-					addresses: [runtime.config.moduleAddress],
-					topics: topics,
-					fromBlock: { absVal: fromBlock.toString(), sign: '' },
-					toBlock: { absVal: currentBlock.toString(), sign: '' },
-				},
-			})
-			.result()
-
-		if (!logsResult.logs || logsResult.logs.length === 0) {
-			runtime.log('No historical events found')
-			return events
-		}
-
-		runtime.log(`Found ${logsResult.logs.length} historical events`)
-
-		// Parse events first to extract block numbers
-		const parsedEvents: Array<{ log: any; event: ProtocolExecutionEvent }> = []
-		for (const log of logsResult.logs) {
-			try {
-				const event = parseProtocolExecutionEvent(log)
-				parsedEvents.push({ log, event })
-			} catch (error) {
-				runtime.log(`Error parsing event: ${error}`)
-			}
-		}
-
-		// Batch fetch block timestamps for accurate window calculations
-		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
-		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
-
-		// Update events with actual block timestamps
-		for (const { event } of parsedEvents) {
-			const actualTimestamp = blockTimestamps.get(event.blockNumber)
-			if (actualTimestamp) {
-				event.timestamp = actualTimestamp
-			}
-			events.push(event)
-		}
-	} catch (error) {
-		runtime.log(`Error querying historical events: ${error}`)
-	}
-
-	return events
-}
 
 /**
  * Convert Uint8Array to hex string
@@ -921,85 +806,6 @@ const queryTransferEventsForModule = (
 	return events
 }
 
-/**
- * Query historical TransferExecuted events from the past 24h (legacy - uses config moduleAddress)
- * Uses 2x the lookback range to discover tokens that may have acquired balance
- * even if the original acquisition is outside the current window
- */
-const queryTransferEvents = (
-	runtime: Runtime<Config>,
-	subAccount?: Address,
-): TransferExecutedEvent[] => {
-	const evmClient = createEvmClient(runtime)
-	const events: TransferExecutedEvent[] = []
-
-	runtime.log(`Querying transfer events (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
-
-	try {
-		const currentBlock = getCurrentBlockNumber(runtime)
-		if (currentBlock === 0n) {
-			runtime.log('Could not determine current block number')
-			return events
-		}
-
-		// Use 2x the lookback range to discover tokens that may have acquired balance
-		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
-
-		const topics: Array<{ topic: string[] }> = [
-			{ topic: [TRANSFER_EXECUTED_EVENT_SIG] },
-		]
-
-		if (subAccount) {
-			topics.push({ topic: [addressToTopicBytes(subAccount)] })
-		}
-
-		const logsResult = evmClient
-			.filterLogs(runtime, {
-				filterQuery: {
-					addresses: [runtime.config.moduleAddress],
-					topics: topics,
-					fromBlock: { absVal: fromBlock.toString(), sign: '' },
-					toBlock: { absVal: currentBlock.toString(), sign: '' },
-				},
-			})
-			.result()
-
-		if (!logsResult.logs || logsResult.logs.length === 0) {
-			runtime.log('No transfer events found')
-			return events
-		}
-
-		runtime.log(`Found ${logsResult.logs.length} transfer events`)
-
-		// Parse events first to extract block numbers
-		const parsedEvents: Array<{ log: any; event: TransferExecutedEvent }> = []
-		for (const log of logsResult.logs) {
-			try {
-				const event = parseTransferExecutedEvent(log)
-				parsedEvents.push({ log, event })
-			} catch (error) {
-				runtime.log(`Error parsing transfer event: ${error}`)
-			}
-		}
-
-		// Batch fetch block timestamps for accurate window calculations
-		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
-		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
-
-		// Update events with actual block timestamps
-		for (const { event } of parsedEvents) {
-			const actualTimestamp = blockTimestamps.get(event.blockNumber)
-			if (actualTimestamp) {
-				event.timestamp = actualTimestamp
-			}
-			events.push(event)
-		}
-	} catch (error) {
-		runtime.log(`Error querying transfer events: ${error}`)
-	}
-
-	return events
-}
 
 /**
  * Query historical AcquiredBalanceUpdated events for a specific module to find all tokens
@@ -1052,15 +858,6 @@ const queryHistoricalAcquiredTokensForModule = (
 	return tokens
 }
 
-/**
- * Query historical AcquiredBalanceUpdated events (legacy - uses config moduleAddress)
- */
-const queryHistoricalAcquiredTokens = (
-	runtime: Runtime<Config>,
-	subAccount: Address,
-): Set<Address> => {
-	return queryHistoricalAcquiredTokensForModule(runtime, runtime.config.moduleAddress as Address, subAccount)
-}
 
 // ============ FIFO Queue Helpers ============
 
@@ -1475,16 +1272,6 @@ const calculateSpendingAllowanceForModule = (
 	return newAllowance
 }
 
-/**
- * Calculate new spending allowance for a subaccount (legacy - uses config moduleAddress)
- */
-const calculateSpendingAllowance = (
-	runtime: Runtime<Config>,
-	subAccount: Address,
-	state: SubAccountState,
-): bigint => {
-	return calculateSpendingAllowanceForModule(runtime, runtime.config.moduleAddress as Address, subAccount, state)
-}
 
 /**
  * Get current on-chain spending allowance for a specific module
@@ -1529,15 +1316,6 @@ const getOnChainSpendingAllowanceForModule = (
 	}
 }
 
-/**
- * Get current on-chain spending allowance (legacy - uses config moduleAddress)
- */
-const getOnChainSpendingAllowance = (
-	runtime: Runtime<Config>,
-	subAccount: Address,
-): bigint => {
-	return getOnChainSpendingAllowanceForModule(runtime, runtime.config.moduleAddress as Address, subAccount)
-}
 
 // Threshold for considering allowance values "equal" (0% tolerance for allowances)
 const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
@@ -1636,26 +1414,18 @@ const pushBatchUpdateForModule = (
 	return txHash
 }
 
-/**
- * Push batch update to contract (legacy - uses config moduleAddress)
- */
-const pushBatchUpdate = (
-	runtime: Runtime<Config>,
-	subAccount: Address,
-	newAllowance: bigint,
-	acquiredBalances: Map<Address, bigint>,
-): string | null => {
-	return pushBatchUpdateForModule(runtime, runtime.config.moduleAddress as Address, subAccount, newAllowance, acquiredBalances)
-}
 
 // ============ Event Handler ============
 
 /**
  * Handle ProtocolExecution event
  * Triggered on each new protocol interaction
+ * Note: Event trigger only monitors config.moduleAddress, so we use it explicitly
  */
 const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => {
 	runtime.log('=== Spending Oracle: ProtocolExecution Event ===')
+
+	const moduleAddress = runtime.config.moduleAddress as Address
 
 	try {
 		const log = payload.log
@@ -1673,6 +1443,7 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		const currentTimestamp = getCurrentBlockTimestamp()
 
 		runtime.log(`New event: ${OperationType[newEvent.opType]} by ${newEvent.subAccount}`)
+		runtime.log(`  Module: ${moduleAddress}`)
 		runtime.log(`  Block: ${newEvent.blockNumber}, Timestamp: ${newEvent.timestamp}`)
 		runtime.log(`  TokensIn: [${newEvent.tokensIn.join(', ')}]`)
 		runtime.log(`  AmountsIn: [${newEvent.amountsIn.map(a => a.toString()).join(', ')}]`)
@@ -1681,8 +1452,8 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		runtime.log(`  SpendingCost: ${newEvent.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
-		const historicalEvents = queryHistoricalEvents(runtime, newEvent.subAccount)
-		const transferEvents = queryTransferEvents(runtime, newEvent.subAccount)
+		const historicalEvents = queryHistoricalEventsForModule(runtime, moduleAddress, newEvent.subAccount)
+		const transferEvents = queryTransferEventsForModule(runtime, moduleAddress, newEvent.subAccount)
 
 		// Add the new event (deduplicate by blockNumber + logIndex which uniquely identifies each log)
 		const allEvents = [...historicalEvents]
@@ -1695,16 +1466,16 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		}
 
 		// Get per-subaccount window duration
-		const { windowDuration } = getSubAccountLimits(runtime, newEvent.subAccount)
+		const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, newEvent.subAccount)
 
 		// Build state from all events using per-subaccount window duration
 		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp, windowDuration)
 
 		// Calculate new spending allowance
-		const newAllowance = calculateSpendingAllowance(runtime, newEvent.subAccount, state)
+		const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, newEvent.subAccount, state)
 
 		// Push update to contract
-		const txHash = pushBatchUpdate(runtime, newEvent.subAccount, newAllowance, state.acquiredBalances)
+		const txHash = pushBatchUpdateForModule(runtime, moduleAddress, newEvent.subAccount, newAllowance, state.acquiredBalances)
 
 		runtime.log(`=== Event Processing Complete ===`)
 		return txHash || 'Skipped - no changes'
@@ -1812,9 +1583,12 @@ const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string 
 /**
  * Handle TransferExecuted event
  * Triggered on each token transfer from the Safe
+ * Note: Event trigger only monitors config.moduleAddress, so we use it explicitly
  */
 const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 	runtime.log('=== Spending Oracle: TransferExecuted Event ===')
+
+	const moduleAddress = runtime.config.moduleAddress as Address
 
 	try {
 		const log = payload.log
@@ -1832,12 +1606,13 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 		const currentTimestamp = getCurrentBlockTimestamp()
 
 		runtime.log(`New transfer: ${newTransfer.amount} of ${newTransfer.token} to ${newTransfer.recipient}`)
+		runtime.log(`  Module: ${moduleAddress}`)
 		runtime.log(`  Block: ${newTransfer.blockNumber}, Timestamp: ${newTransfer.timestamp}`)
 		runtime.log(`  SpendingCost: ${newTransfer.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
-		const historicalEvents = queryHistoricalEvents(runtime, newTransfer.subAccount)
-		const transferEvents = queryTransferEvents(runtime, newTransfer.subAccount)
+		const historicalEvents = queryHistoricalEventsForModule(runtime, moduleAddress, newTransfer.subAccount)
+		const transferEvents = queryTransferEventsForModule(runtime, moduleAddress, newTransfer.subAccount)
 
 		// Add the new transfer event (deduplicate by blockNumber + logIndex)
 		const allTransfers = [...transferEvents]
@@ -1850,16 +1625,16 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 		}
 
 		// Get per-subaccount window duration
-		const { windowDuration } = getSubAccountLimits(runtime, newTransfer.subAccount)
+		const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, newTransfer.subAccount)
 
 		// Build state from all events using per-subaccount window duration
 		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp, windowDuration)
 
 		// Calculate new spending allowance
-		const newAllowance = calculateSpendingAllowance(runtime, newTransfer.subAccount, state)
+		const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, newTransfer.subAccount, state)
 
 		// Push update to contract
-		const txHash = pushBatchUpdate(runtime, newTransfer.subAccount, newAllowance, state.acquiredBalances)
+		const txHash = pushBatchUpdateForModule(runtime, moduleAddress, newTransfer.subAccount, newAllowance, state.acquiredBalances)
 
 		runtime.log(`=== Transfer Event Processing Complete ===`)
 		return txHash || 'Skipped - no changes'
