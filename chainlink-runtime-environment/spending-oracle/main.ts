@@ -1189,6 +1189,8 @@ const getValidQueueBalance = (
 
 /**
  * Remove expired entries from queue
+ * Note: Queue may not be sorted by timestamp (e.g., inherited tokens from swaps
+ * can have older timestamps than newly acquired tokens), so we filter all entries
  */
 const pruneExpiredEntries = (
 	queue: AcquiredBalanceQueue,
@@ -1196,9 +1198,17 @@ const pruneExpiredEntries = (
 	windowDuration: bigint
 ): void => {
 	const expiryThreshold = currentTimestamp - windowDuration
-	while (queue.length > 0 && queue[0].originalTimestamp < expiryThreshold) {
-		queue.shift()
+
+	// Filter in-place: remove ALL expired entries, not just from front
+	// Queue may be unsorted due to inherited timestamps from swaps
+	let writeIndex = 0
+	for (let readIndex = 0; readIndex < queue.length; readIndex++) {
+		if (queue[readIndex].originalTimestamp >= expiryThreshold) {
+			queue[writeIndex] = queue[readIndex]
+			writeIndex++
+		}
 	}
+	queue.length = writeIndex
 }
 
 // ============ State Building ============
@@ -1888,7 +1898,9 @@ const pushBatchUpdateForModule = (
 		throw new Error(`Failed to push batch update: ${resp.errorMessage || resp.txStatus}`)
 	}
 
-	// Update last update timestamp on success
+	// Update last update timestamp only after confirmed success
+	// Note: writeReport().result() is a blocking call that waits for transaction confirmation
+	// CRE handles confirmation synchronously via the SDK
 	lastUpdateTimestamp.set(subAccountKey, currentTimestamp)
 
 	const txHash = bytesToHex(resp.txHash || new Uint8Array(32))
