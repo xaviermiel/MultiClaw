@@ -93,11 +93,12 @@ Day Start:
 | **Withdraw** | No (FREE) | Conditional* |
 | **Claim Rewards** | No (FREE) | Conditional** |
 | **Approve** | No (capped***) | N/A |
-| **Transfer Out** | Always | N/A |
+| **Transfer Out** | Yes (original only****) | N/A |
 
 \* Only if deposit matched by the same subaccount to the same protocol in the time window.
 \*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
 \*\*\* Approve doesn't consume spending, but is capped: acquired tokens can be approved freely, original tokens approval is capped by spending allowance. Actual spending is deducted at execution (swap/deposit).
+\*\*\*\* Transfers use acquired balance first (free), then original tokens cost spending for the remainder.
 
 ---
 
@@ -167,7 +168,7 @@ Aave withdraw selector: 0x69328dec → WITHDRAW (free)
 
 ### 2. Calldata Verification
 
-The contract extracts token and amount directly from calldata and verifies they match what the wallet claims. **Cannot lie about what's being spent.**
+The contract extracts token and amount directly from calldata via registered parsers. The wallet cannot specify different values—they are parsed from the actual calldata being executed. **Cannot lie about what's being spent.**
 
 ### 3. Allowlist Enforcement
 
@@ -175,7 +176,7 @@ Sub-accounts can only interact with **whitelisted protocols**. Even if compromis
 
 ### 4. Oracle Freshness Check
 
-Operations are blocked if oracle data is stale (>15 minutes). Prevents operating with outdated allowances.
+Operations are blocked if oracle data is stale (default: >60 minutes, configurable via `maxOracleAge`). Prevents operating with outdated allowances.
 
 ### 5. Hard Safety Cap
 
@@ -192,7 +193,7 @@ Oracle cannot set allowances above an absolute maximum (e.g., 20% of portfolio).
 | Transfers cost spending? | **Always** | Value leaves Safe, must be controlled |
 | Approve consume spending? | **No (capped)** | Capped by allowance for original tokens, by amount acquired for acquired tokens, deducted at execution |
 | Window type | **Rolling 24h** | Smoother than fixed reset, harder to game |
-| Selector unknown? | **Revert** | Must use typed fallback function |
+| Selector unknown? | **Revert** | Must register selector and parser for the protocol |
 
 ---
 

@@ -101,7 +101,7 @@ Where:
 | **Swap A→B** | USD value of A used from Original | B received is Acquired |
 | **Deposit to Protocol** | USD value of token from Original | Tracked for withdrawal matching |
 | **Withdraw from Protocol** | None (FREE) | Conditional* |
-| **Transfer Out of Safe** | Always full USD value | N/A (leaves Safe) |
+| **Transfer Out of Safe** | USD value of token from Original**** | N/A (leaves Safe) |
 | **Receive External** | None | Acquired |
 | **Claim Rewards** | None | Conditional** |
 | **Approve** | None (capped***) | N/A |
@@ -109,6 +109,7 @@ Where:
 \* Only if deposit matched by the same subaccount to the same protocol in the time window.
 \*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
 \*\*\* Approve doesn't consume spending, but is capped: acquired tokens can be approved freely, original tokens approval is capped by spending allowance.
+\*\*\*\* Transfers use acquired balance first (free), then cost spending for the remainder from original tokens.
 
 ### 2.4 Spending Calculation Logic
 
@@ -265,11 +266,12 @@ Operations are classified by their function selector and routed accordingly:
 | **WITHDRAW** | No (FREE) | Conditional* |
 | **CLAIM** | No (FREE) | Conditional** |
 | **APPROVE** | No (capped***) | N/A |
-| **TRANSFER** | Always (full amount) | N/A |
 
 \* Only if deposit matched by the same subaccount to the same protocol in the time window.
 \*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
 \*\*\* Approve doesn't consume spending, but is capped by (acquiredBalance + spendingAllowance) for the token.
+
+> **Note**: Token transfers out of the Safe are handled separately via `transferToken()` with `DEFI_TRANSFER_ROLE`.
 
 ### 4.2 Main Entry Point
 
@@ -494,7 +496,7 @@ function _executeApproveWithCap(
 
 ### 4.6 Transfer Out (Separate Function)
 
-Transfers always cost spending regardless of acquired balance:
+Transfers use acquired balance first, then cost spending for the remainder:
 
 ```solidity
 function transferToken(
@@ -506,20 +508,19 @@ function transferToken(
     if (token == address(0) || recipient == address(0)) revert InvalidAddress();
     _requireFreshOracle(msg.sender);
 
-    // Transfers always cost full spending (value leaves Safe)
-    uint256 spendingCost = _estimateTokenValueUSD(token, amount);
+    // Calculate spending cost only for non-acquired tokens
+    uint256 acquired = acquiredBalance[msg.sender][token];
+    uint256 usedFromAcquired = amount > acquired ? acquired : amount;
+    uint256 fromOriginal = amount - usedFromAcquired;
+    uint256 spendingCost = _estimateTokenValueUSD(token, fromOriginal);
+
     if (spendingCost > spendingAllowance[msg.sender]) {
         revert ExceedsSpendingLimit();
     }
 
+    // Deduct spending allowance and acquired balance
     spendingAllowance[msg.sender] -= spendingCost;
-
-    // Also deduct from acquired if available
-    uint256 acquired = acquiredBalance[msg.sender][token];
-    if (acquired > 0) {
-        uint256 deductFromAcquired = amount > acquired ? acquired : amount;
-        acquiredBalance[msg.sender][token] -= deductFromAcquired;
-    }
+    acquiredBalance[msg.sender][token] -= usedFromAcquired;
 
     // Execute transfer
     bytes memory transferData = abi.encodeWithSelector(
@@ -2443,6 +2444,8 @@ bytes4 constant COMPOUND_CLAIM = bytes4(keccak256("claim(address,address,bool)")
 
 ### 13.4 Main Entry Point
 
+The actual implementation takes only 2 parameters—token and amount are extracted from calldata via parsers:
+
 ```solidity
 /// @notice Execute any protocol interaction with automatic classification
 /// @param target Protocol address (must be in allowedAddresses for non-APPROVE ops)
@@ -2481,9 +2484,13 @@ function executeOnProtocol(
 }
 ```
 
+There is also an `executeOnProtocolWithValue` variant for operations involving native ETH.
+
 ### 13.5 Execution Handlers
 
 #### 13.5.1 No Spending Check (Withdrawals, Claims)
+
+> **Note**: The implementation uses arrays for tokens and amounts to support multi-token operations.
 
 ```solidity
 function _executeNoSpendingCheck(
@@ -2504,18 +2511,26 @@ function _executeNoSpendingCheck(
         revert InvalidRecipient(recipient, avatar);
     }
 
-    // 3. Get output token from parser (parser may query vault for ERC4626)
-    address tokenOut = parser.extractOutputToken(target, data);
-    uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+    // 3. Get output tokens from parser (arrays for multi-token support)
+    address[] memory tokensOut = parser.extractOutputTokens(target, data);
+    uint256[] memory balancesBefore = new uint256[](tokensOut.length);
+    for (uint256 i = 0; i < tokensOut.length; i++) {
+        balancesBefore[i] = tokensOut[i] != address(0)
+            ? IERC20(tokensOut[i]).balanceOf(avatar)
+            : avatar.balance;
+    }
 
     // 4. Execute (NO spending check - withdrawals and claims are free)
     bool success = exec(target, 0, data, ISafe.Operation.Call);
     if (!success) revert TransactionFailed();
 
-    // 5. Calculate received amount
-    uint256 amountOut = 0;
-    if (tokenOut != address(0)) {
-        amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+    // 5. Calculate received amounts for all tokens
+    uint256[] memory amountsOut = new uint256[](tokensOut.length);
+    for (uint256 i = 0; i < tokensOut.length; i++) {
+        uint256 balanceAfter = tokensOut[i] != address(0)
+            ? IERC20(tokensOut[i]).balanceOf(avatar)
+            : avatar.balance;
+        amountsOut[i] = balanceAfter - balancesBefore[i];
     }
 
     // 6. Emit event for oracle to:
@@ -2524,11 +2539,11 @@ function _executeNoSpendingCheck(
         subAccount,
         target,
         opType,
-        address(0), // no tokenIn for withdraw/claim
-        0,          // no amountIn
-        tokenOut,
-        amountOut,
-        0           // no spending cost
+        new address[](0), // no tokensIn for withdraw/claim
+        new uint256[](0), // no amountsIn
+        tokensOut,
+        amountsOut,
+        0                 // no spending cost
     );
 
     return "";
@@ -2536,6 +2551,8 @@ function _executeNoSpendingCheck(
 ```
 
 #### 13.5.2 With Spending Check (Deposits, Swaps)
+
+> **Note**: The implementation uses arrays for tokens and amounts to support multi-token operations.
 
 ```solidity
 function _executeWithSpendingCheck(
@@ -2556,41 +2573,67 @@ function _executeWithSpendingCheck(
         revert InvalidRecipient(recipient, avatar);
     }
 
-    // 3. Extract token and amount from calldata via parser
-    address tokenIn = parser.extractInputToken(target, data);
-    uint256 amountIn = parser.extractInputAmount(target, data);
+    // 3. Extract tokens and amounts from calldata via parser (arrays for multi-token)
+    address[] memory tokensIn = parser.extractInputTokens(target, data);
+    uint256[] memory amountsIn = parser.extractInputAmounts(target, data);
+    if (tokensIn.length != amountsIn.length) revert LengthMismatch();
 
-    // 4. Calculate spending cost (acquired balance is free)
-    uint256 acquired = acquiredBalance[subAccount][tokenIn];
-    uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
-    uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
+    // 4. Calculate total spending cost across all input tokens (acquired balance is free)
+    uint256 spendingCost = 0;
+    for (uint256 i = 0; i < tokensIn.length; i++) {
+        uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
+        uint256 fromOriginal = amountsIn[i] > acquired ? amountsIn[i] - acquired : 0;
+        spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
+    }
 
     // 5. Check spending allowance
     if (spendingCost > spendingAllowance[subAccount]) {
         revert ExceedsSpendingLimit();
     }
 
-    // 6. Deduct spending and acquired balance
+    // 6. Deduct spending allowance
     spendingAllowance[subAccount] -= spendingCost;
-    uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
-    acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-    // 7. Capture balance before for output tracking
-    address tokenOut = _getOutputToken(target, data, parser);
-    uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+    // 7. Deduct acquired balance for each input token
+    for (uint256 i = 0; i < tokensIn.length; i++) {
+        uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
+        uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
+        acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
+    }
 
-    // 8. Execute
+    // 8. Capture balances before for output tracking (multiple tokens)
+    address[] memory tokensOut = _getOutputTokens(target, data, parser);
+    uint256[] memory balancesBefore = new uint256[](tokensOut.length);
+    for (uint256 i = 0; i < tokensOut.length; i++) {
+        balancesBefore[i] = tokensOut[i] != address(0)
+            ? IERC20(tokensOut[i]).balanceOf(avatar)
+            : avatar.balance;
+    }
+
+    // 9. Execute
     bool success = exec(target, 0, data, ISafe.Operation.Call);
     if (!success) revert TransactionFailed();
 
-    // 9. Calculate output amount
-    uint256 amountOut = 0;
-    if (tokenOut != address(0)) {
-        amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+    // 10. Calculate output amounts for all tokens
+    uint256[] memory amountsOut = new uint256[](tokensOut.length);
+    for (uint256 i = 0; i < tokensOut.length; i++) {
+        uint256 balanceAfter = tokensOut[i] != address(0)
+            ? IERC20(tokensOut[i]).balanceOf(avatar)
+            : avatar.balance;
+        amountsOut[i] = balanceAfter - balancesBefore[i];
     }
 
-    // 10. Emit event for oracle
-    emit ProtocolExecution(subAccount, target, opType, tokenIn, amountIn, tokenOut, amountOut, spendingCost);
+    // 11. Emit event for oracle
+    emit ProtocolExecution(
+        subAccount,
+        target,
+        opType,
+        tokensIn,
+        amountsIn,
+        tokensOut,
+        amountsOut,
+        spendingCost
+    );
 
     return "";
 }
@@ -2598,24 +2641,30 @@ function _executeWithSpendingCheck(
 
 ### 13.6 Calldata Parsers
 
-Each supported protocol needs a parser to extract token/amount from calldata:
+Each supported protocol needs a parser to extract token/amount from calldata. The interface uses arrays to support multi-token operations (e.g., LP positions, multi-token swaps):
 
 ```solidity
 interface ICalldataParser {
-    /// @notice Extract the input token from calldata
+    /// @notice Extract the input tokens from calldata
     /// @param target The protocol/vault address being called
     /// @param data The calldata to parse
-    function extractInputToken(address target, bytes calldata data) external view returns (address token);
+    /// @return tokens Array of input token addresses (empty array if no input tokens)
+    /// @dev For single-token inputs (swaps), returns array with 1 element.
+    ///      For multi-token inputs (LP mint/increase), returns all input tokens.
+    function extractInputTokens(address target, bytes calldata data) external view returns (address[] memory tokens);
 
-    /// @notice Extract the input amount from calldata
+    /// @notice Extract the input amounts from calldata
     /// @param target The protocol/vault address being called
     /// @param data The calldata to parse
-    function extractInputAmount(address target, bytes calldata data) external view returns (uint256 amount);
+    /// @return amounts Array of input amounts (empty array if no input amounts)
+    /// @dev Array length must match extractInputTokens result.
+    function extractInputAmounts(address target, bytes calldata data) external view returns (uint256[] memory amounts);
 
-    /// @notice Extract the output token from calldata (for swaps/withdrawals)
+    /// @notice Extract the output tokens from calldata (for swaps/withdrawals)
     /// @param target The protocol/vault address being called
     /// @param data The calldata to parse
-    function extractOutputToken(address target, bytes calldata data) external view returns (address token);
+    /// @return tokens Array of output token addresses (empty array if no output tokens)
+    function extractOutputTokens(address target, bytes calldata data) external view returns (address[] memory tokens);
 
     /// @notice Extract the recipient address from calldata
     /// @param target The protocol/vault address being called
@@ -2639,6 +2688,8 @@ mapping(address => ICalldataParser) public protocolParsers;
 
 #### 13.6.1 Example: Aave V3 Parser
 
+> **Note**: This is simplified pseudocode. The actual implementation returns arrays.
+
 ```solidity
 contract AaveV3CalldataParser is ICalldataParser {
 
@@ -2648,42 +2699,50 @@ contract AaveV3CalldataParser is ICalldataParser {
     // withdraw(address asset, uint256 amount, address to)
     bytes4 constant WITHDRAW_SELECTOR = 0x69328dec;
 
-    function extractInputToken(bytes calldata data) external pure returns (address) {
+    function extractInputTokens(address, bytes calldata data) external pure returns (address[] memory) {
         bytes4 selector = bytes4(data[:4]);
+        address[] memory tokens = new address[](1);
 
         if (selector == SUPPLY_SELECTOR) {
             // First parameter is asset address
-            return address(bytes20(data[16:36]));
+            tokens[0] = address(bytes20(data[16:36]));
+            return tokens;
         }
 
-        revert("Unknown selector for input token");
+        return new address[](0);
     }
 
-    function extractInputAmount(bytes calldata data) external pure returns (uint256) {
+    function extractInputAmounts(address, bytes calldata data) external pure returns (uint256[] memory) {
         bytes4 selector = bytes4(data[:4]);
+        uint256[] memory amounts = new uint256[](1);
 
         if (selector == SUPPLY_SELECTOR) {
             // Second parameter is amount
-            return uint256(bytes32(data[36:68]));
+            amounts[0] = uint256(bytes32(data[36:68]));
+            return amounts;
         }
 
-        revert("Unknown selector for input amount");
+        return new uint256[](0);
     }
 
-    function extractOutputToken(bytes calldata data) external pure returns (address) {
+    function extractOutputTokens(address, bytes calldata data) external pure returns (address[] memory) {
         bytes4 selector = bytes4(data[:4]);
+        address[] memory tokens = new address[](1);
 
         if (selector == WITHDRAW_SELECTOR) {
             // First parameter is asset address (being withdrawn)
-            return address(bytes20(data[16:36]));
+            tokens[0] = address(bytes20(data[16:36]));
+            return tokens;
         }
 
-        revert("Unknown selector for output token");
+        return new address[](0);
     }
 }
 ```
 
 #### 13.6.2 Example: Uniswap V3 Parser
+
+> **Note**: This is simplified pseudocode. The actual implementation returns arrays.
 
 ```solidity
 contract UniswapV3CalldataParser is ICalldataParser {
@@ -2692,111 +2751,70 @@ contract UniswapV3CalldataParser is ICalldataParser {
     //                   uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96))
     bytes4 constant EXACT_INPUT_SINGLE = 0x414bf389;
 
-    function extractInputToken(bytes calldata data) external pure returns (address) {
+    function extractInputTokens(address, bytes calldata data) external pure returns (address[] memory) {
         bytes4 selector = bytes4(data[:4]);
+        address[] memory tokens = new address[](1);
 
         if (selector == EXACT_INPUT_SINGLE) {
             // Struct starts at offset 4, tokenIn is first field
-            return address(bytes20(data[16:36]));
+            tokens[0] = address(bytes20(data[16:36]));
+            return tokens;
         }
 
-        revert("Unknown selector");
+        return new address[](0);
     }
 
-    function extractInputAmount(bytes calldata data) external pure returns (uint256) {
+    function extractInputAmounts(address, bytes calldata data) external pure returns (uint256[] memory) {
         bytes4 selector = bytes4(data[:4]);
+        uint256[] memory amounts = new uint256[](1);
 
         if (selector == EXACT_INPUT_SINGLE) {
             // amountIn is 5th field in struct (offset 4 + 4*32 = 132)
-            return uint256(bytes32(data[132:164]));
+            amounts[0] = uint256(bytes32(data[132:164]));
+            return amounts;
         }
 
-        revert("Unknown selector");
+        return new uint256[](0);
     }
 
-    function extractOutputToken(bytes calldata data) external pure returns (address) {
+    function extractOutputTokens(address, bytes calldata data) external pure returns (address[] memory) {
         bytes4 selector = bytes4(data[:4]);
+        address[] memory tokens = new address[](1);
 
         if (selector == EXACT_INPUT_SINGLE) {
             // tokenOut is 2nd field in struct
-            return address(bytes20(data[48:68]));
+            tokens[0] = address(bytes20(data[48:68]));
+            return tokens;
         }
 
-        revert("Unknown selector");
+        return new address[](0);
     }
 }
 ```
 
-### 13.7 Typed Fallback Functions
+### 13.7 Typed Fallback Functions (Design Alternative)
 
-For protocols/selectors not in the registry:
+> **Note**: The current implementation does NOT include typed fallback functions. All operations must go through `executeOnProtocol()` with registered selectors and parsers. This section describes a potential extension that could be added for handling unregistered protocols.
+
+The implementation requires parsers to be registered for each protocol. If support for unregistered protocols is needed in the future, typed fallback functions could be added:
 
 ```solidity
+// POTENTIAL EXTENSION - NOT CURRENTLY IMPLEMENTED
+
 /// @notice Deposit to protocol when selector is not registered
-/// @dev Use this for new/unregistered protocols
 function depositTyped(
     address token,
     uint256 amount,
     address protocol,
     bytes calldata data
-) external nonReentrant whenNotPaused {
-    require(hasRole(msg.sender, DEFI_EXECUTE_ROLE), "Unauthorized");
-    require(allowedAddresses[msg.sender][protocol], "Protocol not allowed");
-
-    // Verify token is actually being transferred
-    uint256 balanceBefore = IERC20(token).balanceOf(avatar);
-
-    // Calculate spending
-    uint256 acquired = acquiredBalance[msg.sender][token];
-    uint256 fromOriginal = amount > acquired ? amount - acquired : 0;
-    uint256 spendingCost = _estimateTokenValueUSD(token, fromOriginal);
-
-    require(spendingCost <= spendingAllowance[msg.sender], "Exceeds allowance");
-    spendingAllowance[msg.sender] -= spendingCost;
-
-    // Deduct from acquired
-    if (amount <= acquired) {
-        acquiredBalance[msg.sender][token] -= amount;
-    } else {
-        acquiredBalance[msg.sender][token] = 0;
-    }
-
-    // Execute
-    exec(protocol, 0, data, Enum.Operation.Call);
-
-    // Verify token was actually spent
-    uint256 balanceAfter = IERC20(token).balanceOf(avatar);
-    uint256 actualSpent = balanceBefore - balanceAfter;
-    require(actualSpent <= amount, "Spent more than declared");
-
-    emit ProtocolExecution(
-        msg.sender, protocol, OperationType.DEPOSIT,
-        token, actualSpent, address(0), 0, spendingCost, block.timestamp
-    );
-}
+) external nonReentrant whenNotPaused;
 
 /// @notice Withdraw from protocol when selector is not registered
-/// @dev Use this for new/unregistered protocols
 function withdrawTyped(
     address token,
     address protocol,
     bytes calldata data
-) external nonReentrant whenNotPaused {
-    require(hasRole(msg.sender, DEFI_EXECUTE_ROLE), "Unauthorized");
-    require(allowedAddresses[msg.sender][protocol], "Protocol not allowed");
-
-    uint256 balanceBefore = IERC20(token).balanceOf(avatar);
-
-    // Execute - NO spending check
-    exec(protocol, 0, data, Enum.Operation.Call);
-
-    uint256 received = IERC20(token).balanceOf(avatar) - balanceBefore;
-
-    emit ProtocolExecution(
-        msg.sender, protocol, OperationType.WITHDRAW,
-        address(0), 0, token, received, 0, block.timestamp
-    );
-}
+) external nonReentrant whenNotPaused;
 
 /// @notice Execute swap when selector is not registered
 function swapTyped(
@@ -2805,38 +2823,10 @@ function swapTyped(
     address tokenOut,
     address protocol,
     bytes calldata data
-) external nonReentrant whenNotPaused {
-    require(hasRole(msg.sender, DEFI_EXECUTE_ROLE), "Unauthorized");
-    require(allowedAddresses[msg.sender][protocol], "Protocol not allowed");
-
-    // Spending check for tokenIn
-    uint256 acquired = acquiredBalance[msg.sender][tokenIn];
-    uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
-    uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
-
-    require(spendingCost <= spendingAllowance[msg.sender], "Exceeds allowance");
-    spendingAllowance[msg.sender] -= spendingCost;
-
-    if (amountIn <= acquired) {
-        acquiredBalance[msg.sender][tokenIn] -= amountIn;
-    } else {
-        acquiredBalance[msg.sender][tokenIn] = 0;
-    }
-
-    // Snapshot output
-    uint256 outputBefore = IERC20(tokenOut).balanceOf(avatar);
-
-    // Execute
-    exec(protocol, 0, data, Enum.Operation.Call);
-
-    uint256 outputReceived = IERC20(tokenOut).balanceOf(avatar) - outputBefore;
-
-    emit ProtocolExecution(
-        msg.sender, protocol, OperationType.SWAP,
-        tokenIn, amountIn, tokenOut, outputReceived, spendingCost, block.timestamp
-    );
-}
+) external nonReentrant whenNotPaused;
 ```
+
+These would allow sub-accounts to interact with new protocols before parsers are registered, with the wallet explicitly specifying token/amount parameters that would be verified post-execution via balance changes.
 
 ### 13.8 Registry Management
 
@@ -2904,11 +2894,12 @@ function unregisterSelector(bytes4 selector) external onlyOwner {
 
 ### 13.11 Wallet Integration
 
-The wallet needs to:
+The wallet only needs to:
 
-1. **Know the protocol being called** → determines parser
-2. **Build the calldata** → standard for each protocol
-3. **Pass tokenIn/amountIn** → extracted from same calldata it built
+1. **Know the protocol being called** → determines which parser is used
+2. **Build the calldata** → standard encoding for each protocol
+
+Token and amount are automatically extracted from calldata by the registered parser:
 
 ```typescript
 // Example: Deposit 1000 USDC to Aave
@@ -2920,27 +2911,25 @@ const amount = parseUnits("1000", 6);
 const calldata = aavePool.interface.encodeFunctionData("supply", [
   usdc,      // asset
   amount,    // amount
-  safe,      // onBehalfOf
+  safe,      // onBehalfOf (must be Safe address!)
   0          // referralCode
 ]);
 
-// Call executeOnProtocol
+// Call executeOnProtocol - token/amount extracted from calldata via parser
 await module.executeOnProtocol(
   aavePool,   // target
-  calldata,   // data
-  usdc,       // tokenIn (same as in calldata)
-  amount      // amountIn (same as in calldata)
+  calldata    // data (parser extracts USDC/1000e6 from this)
 );
 ```
 
-The contract verifies that `tokenIn` and `amountIn` match what's in `calldata`, so the wallet can't lie.
+The parser extracts token and amount directly from the calldata, so the wallet cannot lie about what's being spent. The recipient is also extracted and validated to ensure it equals the Safe address (prevents fund theft).
 
 ---
 
 ## Appendix A: Full Interface
 
 ```solidity
-interface ISpendingLimitModule {
+interface IDeFiInteractorModule {
 
     // ============ Enums ============
 
@@ -2966,49 +2955,58 @@ interface ISpendingLimitModule {
         uint256 spendingCost
     );
 
-    event SpendingAllowanceUpdated(address indexed subAccount, uint256 newAllowance, uint256 timestamp);
-    event AcquiredBalanceUpdated(address indexed subAccount, address token, uint256 newBalance, uint256 timestamp);
-    event BatchUpdate(address indexed subAccount, uint256 newAllowance, address[] tokens, uint256[] balances, uint256 timestamp);
+    event TransferExecuted(
+        address indexed subAccount,
+        address indexed token,
+        address indexed recipient,
+        uint256 amount,
+        uint256 spendingCost
+    );
+
+    event SpendingAllowanceUpdated(address indexed subAccount, uint256 newAllowance);
+    event AcquiredBalanceUpdated(address indexed subAccount, address indexed token, uint256 newBalance);
     event SelectorRegistered(bytes4 indexed selector, OperationType opType);
+    event SelectorUnregistered(bytes4 indexed selector);
     event ParserRegistered(address indexed protocol, address parser);
-    event SafeValueUpdated(uint256 totalValueUSD, uint256 timestamp);
+    event SafeValueUpdated(uint256 totalValueUSD, uint256 updateCount);
+    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event EmergencyPaused(address indexed by);
+    event EmergencyUnpaused(address indexed by);
 
     // ============ Main Execution ============
 
     /// @notice Execute any protocol interaction with selector-based classification
+    /// @dev Token/amount extracted from calldata via registered parser
     function executeOnProtocol(
         address target,
-        bytes calldata data,
-        address tokenIn,
-        uint256 amountIn
-    ) external;
+        bytes calldata data
+    ) external returns (bytes memory);
 
-    /// @notice Transfer tokens out of Safe (always costs spending)
+    /// @notice Execute protocol interaction with ETH value
+    function executeOnProtocolWithValue(
+        address target,
+        bytes calldata data
+    ) external payable returns (bytes memory);
+
+    /// @notice Transfer tokens out of Safe - acquired tokens free, original costs spending
     function transferToken(
         address token,
         address recipient,
         uint256 amount
-    ) external;
-
-    // ============ Typed Fallbacks (for unregistered selectors) ============
-
-    function depositTyped(address token, uint256 amount, address protocol, bytes calldata data) external;
-    function withdrawTyped(address token, address protocol, bytes calldata data) external;
-    function swapTyped(address tokenIn, uint256 amountIn, address tokenOut, address protocol, bytes calldata data) external;
+    ) external returns (bool);
 
     // ============ Oracle Functions ============
 
+    function updateSafeValue(uint256 totalValueUSD) external;
     function updateSpendingAllowance(address subAccount, uint256 newAllowance) external;
     function updateAcquiredBalance(address subAccount, address token, uint256 newBalance) external;
     function batchUpdate(address subAccount, uint256 newAllowance, address[] calldata tokens, uint256[] calldata balances) external;
-    function updateSafeValue(uint256 totalValueUSD) external;
 
     // ============ Registry Management (Owner) ============
 
     function registerSelector(bytes4 selector, OperationType opType) external;
-    function registerSelectors(bytes4[] calldata selectors, OperationType[] calldata opTypes) external;
     function unregisterSelector(bytes4 selector) external;
-    function registerParser(address protocol, ICalldataParser parser) external;
+    function registerParser(address protocol, address parser) external;
 
     // ============ View Functions ============
 
@@ -3017,21 +3015,19 @@ interface ISpendingLimitModule {
     function selectorType(bytes4 selector) external view returns (OperationType);
     function protocolParsers(address protocol) external view returns (ICalldataParser);
     function lastOracleUpdate(address subAccount) external view returns (uint256);
-    function safeValue() external view returns (uint256 totalValueUSD, uint256 lastUpdated);
-
-    function canSpend(
-        address subAccount,
-        address token,
-        uint256 amount
-    ) external view returns (bool allowed, uint256 spendingCost, uint256 fromAcquired);
-
-    function getOperationType(bytes4 selector) external view returns (OperationType);
+    function getSafeValue() external view returns (uint256 totalValueUSD, uint256 lastUpdated, uint256 updateCount);
+    function getAcquiredBalance(address subAccount, address token) external view returns (uint256);
+    function getSpendingAllowance(address subAccount) external view returns (uint256);
+    function hasRole(address member, uint16 roleId) external view returns (bool);
 }
 
 interface ICalldataParser {
-    function extractInputToken(bytes calldata data) external pure returns (address);
-    function extractInputAmount(bytes calldata data) external pure returns (uint256);
-    function extractOutputToken(bytes calldata data) external pure returns (address);
+    function extractInputTokens(address target, bytes calldata data) external view returns (address[] memory tokens);
+    function extractInputAmounts(address target, bytes calldata data) external view returns (uint256[] memory amounts);
+    function extractOutputTokens(address target, bytes calldata data) external view returns (address[] memory tokens);
+    function extractRecipient(address target, bytes calldata data, address defaultRecipient) external view returns (address recipient);
+    function supportsSelector(bytes4 selector) external pure returns (bool supported);
+    function getOperationType(bytes calldata data) external pure returns (uint8 opType);
 }
 ```
 
