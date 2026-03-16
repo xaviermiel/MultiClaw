@@ -45,7 +45,7 @@ import {
 	zeroAddress,
 } from 'viem'
 import { z } from 'zod'
-import { DeFiInteractorModule, OperationType } from '../contracts/abi'
+import { DeFiInteractorModule, ModuleRegistry, OperationType } from '../contracts/abi'
 
 // ============ Configuration Schema ============
 
@@ -56,7 +56,13 @@ const TokenSchema = z.object({
 })
 
 const configSchema = z.object({
-	moduleAddress: z.string(),
+	// Single module address (legacy/fallback mode - deprecated, use moduleAddresses)
+	moduleAddress: z.string().optional(),
+	// Multiple module addresses for instant log triggers (hybrid approach)
+	// These modules get real-time event monitoring via logTrigger
+	moduleAddresses: z.array(z.string()).optional(),
+	// Registry address for multi-module support (optional - cron will discover new modules from registry)
+	registryAddress: z.string().optional(),
 	chainSelectorName: z.string(),
 	gasLimit: z.string(),
 	proxyAddress: z.string(),
@@ -68,6 +74,10 @@ const configSchema = z.object({
 	// How many blocks to look back for events (approximate 24h worth)
 	// Ethereum: ~7200 blocks/day, Arbitrum: ~300000 blocks/day
 	blocksToLookBack: z.number(),
+	// Maximum blocks per log query to prevent RPC timeouts
+	maxBlocksPerQuery: z.number(),
+	// Maximum total blocks to search for historical tokens
+	maxHistoricalBlocks: z.number(),
 })
 
 type Config = z.infer<typeof configSchema>
@@ -105,9 +115,21 @@ interface DepositRecord {
 	tokenIn: Address
 	amountIn: bigint
 	remainingAmount: bigint  // Tracks how much of the deposit hasn't been withdrawn yet
+	tokenOut: Address        // Output token received from deposit (e.g., aToken, LP token)
+	amountOut: bigint        // Amount of output token received
+	remainingOutputAmount: bigint  // Tracks how much output hasn't been consumed by withdrawal
 	timestamp: bigint  // When the deposit happened
 	originalAcquisitionTimestamp: bigint  // When the tokens were originally acquired (for FIFO inheritance)
 }
+
+// ============ Token Price Cache ============
+
+interface TokenPriceInfo {
+	priceUSD: bigint      // Price in USD with 18 decimals
+	decimals: number      // Token decimals
+}
+
+type TokenPriceCache = Map<Address, TokenPriceInfo>
 
 /**
  * FIFO queue entry for acquired balances
@@ -184,12 +206,257 @@ const getCurrentBlockTimestamp = (): bigint => {
 	return BigInt(Math.floor(Date.now() / 1000))
 }
 
+// ============ Retry Logic ============
+
 /**
- * Get current acquired balance from contract
+ * Retry an operation once on failure
+ */
+const retryOnce = <T>(
+	runtime: Runtime<Config>,
+	operation: () => T,
+	operationName: string
+): T => {
+	try {
+		return operation()
+	} catch (firstError) {
+		runtime.log(`${operationName} failed, retrying once: ${firstError}`)
+		try {
+			return operation()
+		} catch (secondError) {
+			runtime.log(`${operationName} failed after retry: ${secondError}`)
+			throw secondError
+		}
+	}
+}
+
+// ============ Chainlink Price Feed ABI ============
+
+const ChainlinkPriceFeedABI = [
+	{
+		inputs: [],
+		name: 'latestRoundData',
+		outputs: [
+			{ name: 'roundId', type: 'uint80' },
+			{ name: 'answer', type: 'int256' },
+			{ name: 'startedAt', type: 'uint256' },
+			{ name: 'updatedAt', type: 'uint256' },
+			{ name: 'answeredInRound', type: 'uint80' },
+		],
+		stateMutability: 'view',
+		type: 'function',
+	},
+	{
+		inputs: [],
+		name: 'decimals',
+		outputs: [{ name: '', type: 'uint8' }],
+		stateMutability: 'view',
+		type: 'function',
+	},
+] as const
+
+// ERC20 ABI for decimals
+const ERC20DecimalsABI = [
+	{
+		inputs: [],
+		name: 'decimals',
+		outputs: [{ name: '', type: 'uint8' }],
+		stateMutability: 'view',
+		type: 'function',
+	},
+] as const
+
+// ============ Token Price Functions ============
+
+/**
+ * Get price feed address for a token from config
+ */
+const getPriceFeedForToken = (runtime: Runtime<Config>, tokenAddress: Address): Address | null => {
+	const tokenLower = tokenAddress.toLowerCase()
+	const tokenConfig = runtime.config.tokens.find(t => t.address.toLowerCase() === tokenLower)
+	if (tokenConfig?.priceFeedAddress) {
+		return tokenConfig.priceFeedAddress as Address
+	}
+	return null
+}
+
+/**
+ * Get token decimals from contract
+ */
+const getTokenDecimals = (runtime: Runtime<Config>, tokenAddress: Address): number => {
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: ERC20DecimalsABI,
+		functionName: 'decimals',
+	})
+
+	try {
+		const result = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: tokenAddress,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!result.data || result.data.length === 0) {
+			return 18
+		}
+
+		const decimals = decodeFunctionResult({
+			abi: ERC20DecimalsABI,
+			functionName: 'decimals',
+			data: bytesToHex(result.data),
+		})
+
+		return Number(decimals)
+	} catch (error) {
+		runtime.log(`Error getting decimals for ${tokenAddress}: ${error}`)
+		return 18
+	}
+}
+
+/**
+ * Get price from Chainlink price feed (normalized to 18 decimals)
+ */
+const getChainlinkPriceUSD = (runtime: Runtime<Config>, priceFeedAddress: Address): bigint => {
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: ChainlinkPriceFeedABI,
+		functionName: 'latestRoundData',
+	})
+
+	try {
+		const priceResult = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: priceFeedAddress,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!priceResult.data || priceResult.data.length === 0) {
+			return 0n
+		}
+
+		const [, answer] = decodeFunctionResult({
+			abi: ChainlinkPriceFeedABI,
+			functionName: 'latestRoundData',
+			data: bytesToHex(priceResult.data),
+		})
+
+		// Get feed decimals
+		const decimalsCallData = encodeFunctionData({
+			abi: ChainlinkPriceFeedABI,
+			functionName: 'decimals',
+		})
+
+		const decimalsResult = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: priceFeedAddress,
+					data: decimalsCallData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		let feedDecimals = 8
+		if (decimalsResult.data && decimalsResult.data.length > 0) {
+			feedDecimals = Number(decodeFunctionResult({
+				abi: ChainlinkPriceFeedABI,
+				functionName: 'decimals',
+				data: bytesToHex(decimalsResult.data),
+			}))
+		}
+
+		// Normalize to 18 decimals
+		const price18 = BigInt(answer) * BigInt(10 ** (18 - feedDecimals))
+		return price18
+	} catch (error) {
+		runtime.log(`Error getting price from ${priceFeedAddress}: ${error}`)
+		return 0n
+	}
+}
+
+/**
+ * Build a price cache for all tokens involved in events
+ * Returns a map of token address -> { priceUSD (18 decimals), decimals }
+ */
+const buildTokenPriceCache = (runtime: Runtime<Config>, tokens: Set<Address>): TokenPriceCache => {
+	const cache: TokenPriceCache = new Map()
+
+	for (const token of tokens) {
+		const tokenLower = token.toLowerCase() as Address
+		const priceFeed = getPriceFeedForToken(runtime, tokenLower)
+
+		if (!priceFeed) {
+			// No price feed configured - skip
+			continue
+		}
+
+		try {
+			const priceUSD = getChainlinkPriceUSD(runtime, priceFeed)
+			const decimals = getTokenDecimals(runtime, tokenLower)
+
+			if (priceUSD > 0n) {
+				cache.set(tokenLower, { priceUSD, decimals })
+			}
+		} catch (error) {
+			runtime.log(`Error fetching price for ${token}: ${error}`)
+		}
+	}
+
+	return cache
+}
+
+/**
+ * Calculate USD value for a token amount using the price cache
+ * Returns value in 18 decimals, or null if price not available
+ */
+const getTokenValueUSD = (
+	token: Address,
+	amount: bigint,
+	priceCache: TokenPriceCache
+): bigint | null => {
+	const tokenLower = token.toLowerCase() as Address
+	const priceInfo = priceCache.get(tokenLower)
+
+	if (!priceInfo || priceInfo.priceUSD === 0n) {
+		return null
+	}
+
+	// value = amount * price / 10^decimals
+	// Both price and result are in 18 decimals
+	return (amount * priceInfo.priceUSD) / BigInt(10 ** priceInfo.decimals)
+}
+
+// ============ Update Thresholds ============
+
+// Only update if allowance INCREASED by more than this percentage
+const ALLOWANCE_INCREASE_THRESHOLD_BPS = 200n // 2%
+
+// Always update if last update was more than this many seconds ago
+const MAX_STALENESS_SECONDS = 2700n // 45 minutes
+
+// Track last update timestamp per subaccount (module:subaccount -> timestamp)
+const lastUpdateTimestamp = new Map<string, bigint>()
+
+/**
+ * Get current acquired balance from contract for a specific module
  * This is the source of truth for what's currently available
  */
-const getContractAcquiredBalance = (
+const getContractAcquiredBalanceForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 	token: Address,
 ): bigint => {
@@ -206,7 +473,7 @@ const getContractAcquiredBalance = (
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -223,13 +490,15 @@ const getContractAcquiredBalance = (
 			data: bytesToHex(result.data),
 		})
 	} catch (error) {
-		runtime.log(`Error getting acquired balance: ${error}`)
+		runtime.log(`Error getting acquired balance for module ${moduleAddress}: ${error}`)
 		return 0n
 	}
 }
 
-const getSubAccountLimits = (
+
+const getSubAccountLimitsForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 ): { maxSpendingBps: bigint; windowDuration: bigint } => {
 	const evmClient = createEvmClient(runtime)
@@ -245,7 +514,7 @@ const getSubAccountLimits = (
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -269,10 +538,11 @@ const getSubAccountLimits = (
 	}
 }
 
+
 /**
- * Get Safe's total USD value from contract
+ * Get Safe's total USD value from contract for a specific module
  */
-const getSafeValue = (runtime: Runtime<Config>): bigint => {
+const getSafeValueForModule = (runtime: Runtime<Config>, moduleAddress: Address): bigint => {
 	const evmClient = createEvmClient(runtime)
 
 	const callData = encodeFunctionData({
@@ -285,7 +555,7 @@ const getSafeValue = (runtime: Runtime<Config>): bigint => {
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -304,15 +574,99 @@ const getSafeValue = (runtime: Runtime<Config>): bigint => {
 
 		return totalValueUSD
 	} catch (error) {
-		runtime.log(`Error getting safe value: ${error}`)
+		runtime.log(`Error getting safe value for module ${moduleAddress}: ${error}`)
 		return 0n
 	}
 }
 
+
 /**
- * Get all subaccounts with DEFI_EXECUTE_ROLE
+ * Get configured module addresses from config
+ * Supports both legacy single moduleAddress and new moduleAddresses array
  */
-const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
+const getConfiguredModuleAddresses = (runtime: Runtime<Config>): Address[] => {
+	const addresses: Address[] = []
+
+	// Add moduleAddresses array if present
+	if (runtime.config.moduleAddresses && runtime.config.moduleAddresses.length > 0) {
+		addresses.push(...runtime.config.moduleAddresses as Address[])
+	}
+
+	// Add legacy moduleAddress if present and not already included
+	if (runtime.config.moduleAddress) {
+		const legacyAddr = runtime.config.moduleAddress.toLowerCase() as Address
+		if (!addresses.some(a => a.toLowerCase() === legacyAddr)) {
+			addresses.push(runtime.config.moduleAddress as Address)
+		}
+	}
+
+	return addresses
+}
+
+/**
+ * Get all active modules from the registry
+ * Returns array of module addresses, or falls back to configured modules if no registry
+ */
+const getActiveModulesFromRegistry = (runtime: Runtime<Config>): Address[] => {
+	const configuredModules = getConfiguredModuleAddresses(runtime)
+
+	// If no registry configured, use configured module addresses
+	if (!runtime.config.registryAddress) {
+		if (configuredModules.length === 0) {
+			runtime.log('Warning: No modules configured and no registry address')
+			return []
+		}
+		return configuredModules
+	}
+
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: ModuleRegistry,
+		functionName: 'getActiveModules',
+	})
+
+	try {
+		const result = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: runtime.config.registryAddress as Address,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!result.data || result.data.length === 0) {
+			runtime.log('No active modules found in registry, using configured modules')
+			return configuredModules
+		}
+
+		const registryModules = decodeFunctionResult({
+			abi: ModuleRegistry,
+			functionName: 'getActiveModules',
+			data: bytesToHex(result.data),
+		}) as Address[]
+
+		// Combine registry modules with configured modules (deduped)
+		const allModules = new Set<string>([
+			...registryModules.map(a => a.toLowerCase()),
+			...configuredModules.map(a => a.toLowerCase()),
+		])
+
+		runtime.log(`Found ${registryModules.length} registry modules + ${configuredModules.length} configured modules = ${allModules.size} unique modules`)
+		return Array.from(allModules) as Address[]
+	} catch (error) {
+		runtime.log(`Error querying registry: ${error}, using configured modules`)
+		return configuredModules
+	}
+}
+
+/**
+ * Get all subaccounts with DEFI_EXECUTE_ROLE for a specific module
+ */
+const getActiveSubaccountsForModule = (runtime: Runtime<Config>, moduleAddress: Address): Address[] => {
 	const evmClient = createEvmClient(runtime)
 
 	// DEFI_EXECUTE_ROLE = 1
@@ -327,7 +681,7 @@ const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -344,15 +698,34 @@ const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
 			data: bytesToHex(result.data),
 		}) as Address[]
 	} catch (error) {
-		runtime.log(`Error getting subaccounts: ${error}`)
+		runtime.log(`Error getting subaccounts for module ${moduleAddress}: ${error}`)
 		return []
 	}
+}
+
+
+/**
+ * SDK BigInt type with Uint8Array representation
+ */
+interface SdkBigInt {
+	absVal: Uint8Array
+	sign: bigint
+}
+
+/**
+ * Check if value is an SDK BigInt type (vs native bigint)
+ */
+const isSdkBigInt = (value: unknown): value is SdkBigInt => {
+	return value !== null &&
+		typeof value === 'object' &&
+		'absVal' in value &&
+		'sign' in value
 }
 
 /**
  * Convert SDK BigInt (Uint8Array absVal) to native bigint
  */
-const sdkBigIntToBigInt = (sdkBigInt: { absVal: Uint8Array; sign: bigint }): bigint => {
+const sdkBigIntToBigInt = (sdkBigInt: SdkBigInt): bigint => {
 	// absVal is big-endian bytes representing the absolute value
 	let result = 0n
 	for (const byte of sdkBigInt.absVal) {
@@ -360,6 +733,22 @@ const sdkBigIntToBigInt = (sdkBigInt: { absVal: Uint8Array; sign: bigint }): big
 	}
 	// Apply sign (negative if sign < 0)
 	return sdkBigInt.sign < 0n ? -result : result
+}
+
+/**
+ * Convert value to native bigint, handling both SDK BigInt and native bigint types
+ */
+const toBigInt = (value: bigint | SdkBigInt | number): bigint => {
+	if (typeof value === 'bigint') {
+		return value
+	}
+	if (typeof value === 'number') {
+		return BigInt(value)
+	}
+	if (isSdkBigInt(value)) {
+		return sdkBigIntToBigInt(value)
+	}
+	return 0n
 }
 
 /**
@@ -410,7 +799,7 @@ const getBlockTimestamp = (
 			.result()
 
 		if (headerResult.header?.timestamp) {
-			return sdkBigIntToBigInt(headerResult.header.timestamp)
+			return toBigInt(headerResult.header.timestamp)
 		}
 		// Fallback to current time if header fetch fails
 		runtime.log(`Warning: Could not get timestamp for block ${blockNumber}, using current time`)
@@ -441,33 +830,28 @@ const getBlockTimestamps = (
 }
 
 /**
- * Query historical ProtocolExecution events from the past 24h
- * Uses 2x the lookback range to discover tokens that may have acquired balance
- * even if the original acquisition is outside the current window
+ * Query historical ProtocolExecution events for a specific module
  */
-const queryHistoricalEvents = (
+const queryHistoricalEventsForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount?: Address,
 ): ProtocolExecutionEvent[] => {
 	const evmClient = createEvmClient(runtime)
 	const events: ProtocolExecutionEvent[] = []
 
-	runtime.log(`Querying historical events (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
+	runtime.log(`Querying historical events for module ${moduleAddress} (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
 
 	try {
-		// Get current finalized block number
 		const currentBlock = getCurrentBlockNumber(runtime)
 		if (currentBlock === 0n) {
 			runtime.log('Could not determine current block number')
 			return events
 		}
 
-		// Use 2x the lookback range to discover tokens that may have acquired balance
 		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
 		runtime.log(`Block range: ${fromBlock} to ${currentBlock}`)
 
-		// Build topics array for filterLogs
-		// topics[0] = event signature, topics[1] = indexed subAccount (optional)
 		const topics: Array<{ topic: string[] }> = [
 			{ topic: [PROTOCOL_EXECUTION_EVENT_SIG] },
 		]
@@ -476,11 +860,10 @@ const queryHistoricalEvents = (
 			topics.push({ topic: [addressToTopicBytes(subAccount)] })
 		}
 
-		// Query logs using filterLogs with proper FilterLogsRequest structure
 		const logsResult = evmClient
 			.filterLogs(runtime, {
 				filterQuery: {
-					addresses: [runtime.config.moduleAddress],
+					addresses: [moduleAddress],
 					topics: topics,
 					fromBlock: { absVal: fromBlock.toString(), sign: '' },
 					toBlock: { absVal: currentBlock.toString(), sign: '' },
@@ -495,7 +878,6 @@ const queryHistoricalEvents = (
 
 		runtime.log(`Found ${logsResult.logs.length} historical events`)
 
-		// Parse events first to extract block numbers
 		const parsedEvents: Array<{ log: any; event: ProtocolExecutionEvent }> = []
 		for (const log of logsResult.logs) {
 			try {
@@ -506,11 +888,9 @@ const queryHistoricalEvents = (
 			}
 		}
 
-		// Batch fetch block timestamps for accurate window calculations
 		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
 		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
 
-		// Update events with actual block timestamps
 		for (const { event } of parsedEvents) {
 			const actualTimestamp = blockTimestamps.get(event.blockNumber)
 			if (actualTimestamp) {
@@ -524,6 +904,7 @@ const queryHistoricalEvents = (
 
 	return events
 }
+
 
 /**
  * Convert Uint8Array to hex string
@@ -683,18 +1064,17 @@ const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 }
 
 /**
- * Query historical TransferExecuted events from the past 24h
- * Uses 2x the lookback range to discover tokens that may have acquired balance
- * even if the original acquisition is outside the current window
+ * Query historical TransferExecuted events for a specific module
  */
-const queryTransferEvents = (
+const queryTransferEventsForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount?: Address,
 ): TransferExecutedEvent[] => {
 	const evmClient = createEvmClient(runtime)
 	const events: TransferExecutedEvent[] = []
 
-	runtime.log(`Querying transfer events (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
+	runtime.log(`Querying transfer events for module ${moduleAddress} (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
 
 	try {
 		const currentBlock = getCurrentBlockNumber(runtime)
@@ -703,7 +1083,6 @@ const queryTransferEvents = (
 			return events
 		}
 
-		// Use 2x the lookback range to discover tokens that may have acquired balance
 		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
 
 		const topics: Array<{ topic: string[] }> = [
@@ -717,7 +1096,7 @@ const queryTransferEvents = (
 		const logsResult = evmClient
 			.filterLogs(runtime, {
 				filterQuery: {
-					addresses: [runtime.config.moduleAddress],
+					addresses: [moduleAddress],
 					topics: topics,
 					fromBlock: { absVal: fromBlock.toString(), sign: '' },
 					toBlock: { absVal: currentBlock.toString(), sign: '' },
@@ -732,7 +1111,6 @@ const queryTransferEvents = (
 
 		runtime.log(`Found ${logsResult.logs.length} transfer events`)
 
-		// Parse events first to extract block numbers
 		const parsedEvents: Array<{ log: any; event: TransferExecutedEvent }> = []
 		for (const log of logsResult.logs) {
 			try {
@@ -743,11 +1121,9 @@ const queryTransferEvents = (
 			}
 		}
 
-		// Batch fetch block timestamps for accurate window calculations
 		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
 		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
 
-		// Update events with actual block timestamps
 		for (const { event } of parsedEvents) {
 			const actualTimestamp = blockTimestamps.get(event.blockNumber)
 			if (actualTimestamp) {
@@ -762,55 +1138,89 @@ const queryTransferEvents = (
 	return events
 }
 
+
 /**
- * Query historical AcquiredBalanceUpdated events to find all tokens
+ * Query historical AcquiredBalanceUpdated events for a specific module to find all tokens
  * that have ever had acquired balance set for a subaccount.
  * This is used to detect and clear stale on-chain balances.
+ *
+ * Uses pagination to handle large block ranges without hitting RPC limits.
+ * Respects maxHistoricalBlocks to prevent unbounded growth as chain ages.
  */
-const queryHistoricalAcquiredTokens = (
+const queryHistoricalAcquiredTokensForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 ): Set<Address> => {
 	const tokens = new Set<Address>()
 	const evmClient = createEvmClient(runtime)
 
 	try {
-		// Query from a reasonable lookback - use extended range to catch all historical tokens
 		const currentBlock = getCurrentBlockNumber(runtime)
-		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
+
+		// Limit how far back we search to prevent unbounded growth
+		const maxHistoricalBlocks = BigInt(runtime.config.maxHistoricalBlocks)
+		const maxBlocksPerQuery = BigInt(runtime.config.maxBlocksPerQuery)
+
+		// Calculate the starting block (bounded by maxHistoricalBlocks)
+		const earliestBlock = currentBlock > maxHistoricalBlocks
+			? currentBlock - maxHistoricalBlocks
+			: 0n
+
+		runtime.log(`Querying historical tokens from block ${earliestBlock} to ${currentBlock} (${currentBlock - earliestBlock} blocks)`)
 
 		const topics: Array<{ topic: string[] }> = [
 			{ topic: [ACQUIRED_BALANCE_UPDATED_EVENT_SIG] },
 			{ topic: [addressToTopicBytes(subAccount)] },
 		]
 
-		const logsResult = evmClient
-			.filterLogs(runtime, {
-				filterQuery: {
-					addresses: [runtime.config.moduleAddress],
-					topics: topics,
-					fromBlock: { absVal: fromBlock.toString(), sign: '' },
-					toBlock: { absVal: currentBlock.toString(), sign: '' },
-				},
-			})
-			.result()
+		// Query in chunks to avoid RPC limits
+		let fromBlock = earliestBlock
+		let totalLogs = 0
 
-		if (logsResult.logs && logsResult.logs.length > 0) {
-			for (const log of logsResult.logs) {
-				// topics[2] is the token address (indexed)
-				const topic2 = log.topics[2]
-				const token = topicToAddress(topic2)
-				if (token) {
-					tokens.add(token.toLowerCase() as Address)
+		while (fromBlock < currentBlock) {
+			const toBlock = fromBlock + maxBlocksPerQuery > currentBlock
+				? currentBlock
+				: fromBlock + maxBlocksPerQuery
+
+			try {
+				const logsResult = evmClient
+					.filterLogs(runtime, {
+						filterQuery: {
+							addresses: [moduleAddress],
+							topics: topics,
+							fromBlock: { absVal: fromBlock.toString(), sign: '' },
+							toBlock: { absVal: toBlock.toString(), sign: '' },
+						},
+					})
+					.result()
+
+				if (logsResult.logs && logsResult.logs.length > 0) {
+					for (const log of logsResult.logs) {
+						// topics[2] is the token address (indexed)
+						const topic2 = log.topics[2]
+						const token = topicToAddress(topic2)
+						if (token) {
+							tokens.add(token.toLowerCase() as Address)
+						}
+					}
+					totalLogs += logsResult.logs.length
 				}
+			} catch (chunkError) {
+				runtime.log(`Error querying chunk ${fromBlock}-${toBlock}, skipping: ${chunkError}`)
 			}
+
+			fromBlock = toBlock + 1n
 		}
+
+		runtime.log(`Historical token query complete: ${tokens.size} unique tokens found in ${totalLogs} events`)
 	} catch (error) {
-		runtime.log(`Error querying historical acquired tokens: ${error}`)
+		runtime.log(`Error querying historical acquired tokens for module ${moduleAddress}: ${error}`)
 	}
 
 	return tokens
 }
+
 
 // ============ FIFO Queue Helpers ============
 
@@ -886,6 +1296,8 @@ const getValidQueueBalance = (
 
 /**
  * Remove expired entries from queue
+ * Note: Queue may not be sorted by timestamp (e.g., inherited tokens from swaps
+ * can have older timestamps than newly acquired tokens), so we filter all entries
  */
 const pruneExpiredEntries = (
 	queue: AcquiredBalanceQueue,
@@ -893,12 +1305,24 @@ const pruneExpiredEntries = (
 	windowDuration: bigint
 ): void => {
 	const expiryThreshold = currentTimestamp - windowDuration
-	while (queue.length > 0 && queue[0].originalTimestamp < expiryThreshold) {
-		queue.shift()
+
+	// Filter in-place: remove ALL expired entries, not just from front
+	// Queue may be unsorted due to inherited timestamps from swaps
+	let writeIndex = 0
+	for (let readIndex = 0; readIndex < queue.length; readIndex++) {
+		if (queue[readIndex].originalTimestamp >= expiryThreshold) {
+			queue[writeIndex] = queue[readIndex]
+			writeIndex++
+		}
 	}
+	queue.length = writeIndex
 }
 
 // ============ State Building ============
+
+// High precision for ratio calculations to minimize truncation errors
+// Using 1e18 instead of 10000 (basis points) for much higher accuracy
+const PRECISION = 10n ** 18n
 
 // Unified event type for chronological processing
 type UnifiedEvent =
@@ -911,8 +1335,9 @@ type UnifiedEvent =
  * Key Design:
  * - FIFO queues track (amount, originalTimestamp) for each token
  * - When swapping/depositing, consumed acquired tokens' timestamps are inherited
- * - Mixed acquired/non-acquired inputs are proportionally split in outputs
+ * - Mixed acquired/non-acquired inputs are proportionally split in outputs (USD-weighted if priceCache available)
  * - Deposits store originalAcquisitionTimestamp so withdrawals inherit correctly
+ * - Deposits also track output tokens (e.g., aToken, LP token) for proper withdrawal matching
  */
 const buildSubAccountState = (
 	runtime: Runtime<Config>,
@@ -921,6 +1346,7 @@ const buildSubAccountState = (
 	subAccount: Address,
 	currentTimestamp: bigint,
 	subAccountWindowDuration?: bigint,
+	priceCache?: TokenPriceCache,
 ): SubAccountState => {
 	// Use per-subaccount window duration if provided, otherwise fall back to config
 	const windowDuration = subAccountWindowDuration ?? BigInt(runtime.config.windowDurationSeconds)
@@ -995,6 +1421,9 @@ const buildSubAccountState = (
 			// NOTE: Now handles multiple input tokens (e.g., LP position minting uses 2 tokens)
 			let consumedEntries: AcquiredBalanceEntry[] = []
 			let totalAmountIn = 0n
+			let totalValueInUSD = 0n       // USD value of all inputs (for weighted ratio)
+			let consumedValueUSD = 0n      // USD value of consumed acquired tokens
+			let hasAllPrices = true        // Whether we have prices for all input tokens
 			if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
 				// Process each input token
 				for (let i = 0; i < event.tokensIn.length; i++) {
@@ -1008,49 +1437,255 @@ const buildSubAccountState = (
 					const result = consumeFromQueue(inputQueue, amountIn, event.timestamp, windowDuration)
 					consumedEntries.push(...result.consumed)
 					tokensWithAcquiredHistory.add(tokenInLower)
+
+					// Track USD values for weighted ratio calculation
+					if (priceCache) {
+						const inputValueUSD = getTokenValueUSD(tokenIn, amountIn, priceCache)
+						if (inputValueUSD !== null) {
+							totalValueInUSD += inputValueUSD
+							// Calculate USD value of consumed portion for this token
+							const consumedAmount = result.consumed.reduce((sum, e) => sum + e.amount, 0n)
+							const consumedTokenValueUSD = getTokenValueUSD(tokenIn, consumedAmount, priceCache)
+							if (consumedTokenValueUSD !== null) {
+								consumedValueUSD += consumedTokenValueUSD
+							}
+						} else {
+							hasAllPrices = false
+						}
+					}
 				}
 			}
 
 			// Track deposits for withdrawal matching
 			// Store the original acquisition timestamp so withdrawals inherit it correctly
-			// For multi-token deposits (LP), create a record for each input token
+			// For multi-token deposits (LP), create a record for each input/output token pair
+			// For mixed acquired/non-acquired inputs, we create SEPARATE deposit records
+			// so that the acquired portion inherits the proper timestamp and non-acquired gets event timestamp
 			if (event.opType === OperationType.DEPOSIT) {
-				// Find the oldest original timestamp from consumed acquired tokens
-				// If no acquired tokens were consumed, use the deposit timestamp (it's new spending)
-				let originalAcquisitionTimestamp = event.timestamp
+				// Calculate acquired ratio for splitting deposit records
+				const totalConsumedForDeposit = consumedEntries.reduce((sum, e) => sum + e.amount, 0n)
+				const fromNonAcquiredForDeposit = totalAmountIn - totalConsumedForDeposit
+
+				// Find the oldest original timestamp from consumed acquired tokens (for acquired portion)
+				let acquiredTimestamp = event.timestamp
 				if (consumedEntries.length > 0) {
-					originalAcquisitionTimestamp = consumedEntries.reduce(
+					acquiredTimestamp = consumedEntries.reduce(
 						(oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
 						consumedEntries[0].originalTimestamp
 					)
-					runtime.log(`  DEPOSIT: storing original acquisition timestamp ${originalAcquisitionTimestamp} for future withdrawal`)
+					runtime.log(`  DEPOSIT: acquired portion will inherit timestamp ${acquiredTimestamp}`)
 				}
 
-				// Create a deposit record for each input token
-				for (let i = 0; i < event.tokensIn.length; i++) {
-					const tokenIn = event.tokensIn[i]
-					const amountIn = event.amountsIn[i]
-					if (amountIn <= 0n) continue
+				// Create a deposit record linking input token to output token
+				// This allows us to consume the output token (e.g., aLINK) when withdrawing the input token (LINK)
 
-					state.depositRecords.push({
-						subAccount: event.subAccount,
-						target: event.target,
-						tokenIn: tokenIn,
-						amountIn: amountIn,
-						remainingAmount: amountIn,
-						timestamp: event.timestamp,
-						originalAcquisitionTimestamp,
-					})
+				// For multi-token LP deposits (N inputs → 1 output), we need to divide the output
+				// proportionally among input tokens to avoid double-counting remainingOutputAmount
+				const validInputCount = event.tokensIn.filter((_, i) => event.amountsIn[i] > 0n).length
+				const validOutputCount = event.tokensOut.filter((_, i) => event.amountsOut[i] > 0n).length
+				const isMultiInputSingleOutput = validInputCount > 1 && event.tokensOut.length === 1
+				const isSingleInputMultiOutput = validInputCount === 1 && validOutputCount > 1
+
+				// Calculate USD-weighted ratio for acquired vs non-acquired (needed for mixed deposits)
+				let acquiredRatioForDeposit = 0n
+				if (totalAmountIn > 0n) {
+					if (priceCache && hasAllPrices && totalValueInUSD > 0n) {
+						// USD-weighted ratio
+						acquiredRatioForDeposit = (consumedValueUSD * PRECISION) / totalValueInUSD
+					} else {
+						// Amount-weighted ratio
+						acquiredRatioForDeposit = (totalConsumedForDeposit * PRECISION) / totalAmountIn
+					}
+				}
+
+				if (isSingleInputMultiOutput) {
+					// Single input → multiple outputs: create deposit records for each output
+					// Weight input allocation by output value (USD), not by count
+					const tokenIn = event.tokensIn.find((_, i) => event.amountsIn[i] > 0n)!
+					const amountIn = event.amountsIn.find(a => a > 0n)!
+
+					// Calculate total output value for USD weighting
+					let totalOutputValueUSD = 0n
+					const outputValuesUSD: bigint[] = []
+					for (let i = 0; i < event.tokensOut.length; i++) {
+						const amountOut = event.amountsOut[i]
+						if (amountOut <= 0n) {
+							outputValuesUSD.push(0n)
+							continue
+						}
+						const valueUSD = priceCache ? getTokenValueUSD(event.tokensOut[i], amountOut, priceCache) : null
+						if (valueUSD !== null) {
+							outputValuesUSD.push(valueUSD)
+							totalOutputValueUSD += valueUSD
+						} else {
+							outputValuesUSD.push(0n)
+						}
+					}
+
+					// Allocate input to each output
+					let allocatedInput = 0n
+					for (let i = 0; i < event.tokensOut.length; i++) {
+						const tokenOut = event.tokensOut[i]
+						const amountOut = event.amountsOut[i]
+						if (amountOut <= 0n) continue
+
+						// Calculate this output's share of the input
+						let inputShare: bigint
+						const remainingOutputs = event.tokensOut.slice(i).filter((_, idx) => event.amountsOut[i + idx] > 0n).length
+						if (remainingOutputs === 1) {
+							// Last output gets remainder to prevent dust loss
+							inputShare = amountIn - allocatedInput
+						} else if (totalOutputValueUSD > 0n && outputValuesUSD[i] > 0n) {
+							// USD-weighted share
+							inputShare = (amountIn * outputValuesUSD[i]) / totalOutputValueUSD
+						} else {
+							// Fallback: equal division
+							inputShare = amountIn / BigInt(validOutputCount)
+						}
+						allocatedInput += inputShare
+
+						runtime.log(`  DEPOSIT: single-input multi-output, allocating ${inputShare} ${tokenIn} to ${tokenOut} (value-weighted)`)
+
+						// For mixed acquired/non-acquired, create separate deposit records
+						if (totalConsumedForDeposit > 0n && fromNonAcquiredForDeposit > 0n) {
+							// Split into acquired and non-acquired portions
+							const acquiredInputShare = (inputShare * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredInputShare = inputShare - acquiredInputShare
+							const acquiredOutputShare = (amountOut * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredOutputShare = amountOut - acquiredOutputShare
+
+							if (acquiredInputShare > 0n) {
+								runtime.log(`    Acquired portion: ${acquiredInputShare} ${tokenIn} -> ${acquiredOutputShare} ${tokenOut}, timestamp ${acquiredTimestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: acquiredInputShare,
+									remainingAmount: acquiredInputShare,
+									tokenOut: tokenOut,
+									amountOut: acquiredOutputShare,
+									remainingOutputAmount: acquiredOutputShare,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: acquiredTimestamp,
+								})
+							}
+							if (nonAcquiredInputShare > 0n) {
+								runtime.log(`    Non-acquired portion: ${nonAcquiredInputShare} ${tokenIn} -> ${nonAcquiredOutputShare} ${tokenOut}, timestamp ${event.timestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: nonAcquiredInputShare,
+									remainingAmount: nonAcquiredInputShare,
+									tokenOut: tokenOut,
+									amountOut: nonAcquiredOutputShare,
+									remainingOutputAmount: nonAcquiredOutputShare,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: event.timestamp, // Non-acquired = new spending
+								})
+							}
+						} else {
+							// All acquired or all non-acquired - single record
+							const originalTimestamp = totalConsumedForDeposit > 0n ? acquiredTimestamp : event.timestamp
+							state.depositRecords.push({
+								subAccount: event.subAccount,
+								target: event.target,
+								tokenIn: tokenIn,
+								amountIn: inputShare,
+								remainingAmount: inputShare,
+								tokenOut: tokenOut,
+								amountOut: amountOut,
+								remainingOutputAmount: amountOut,
+								timestamp: event.timestamp,
+								originalAcquisitionTimestamp: originalTimestamp,
+							})
+						}
+					}
+				} else {
+					// Standard case: loop over inputs
+					for (let i = 0; i < event.tokensIn.length; i++) {
+						const tokenIn = event.tokensIn[i]
+						const amountIn = event.amountsIn[i]
+						if (amountIn <= 0n) continue
+
+						// Find corresponding output token (same index if available, otherwise first output)
+						const tokenOut = event.tokensOut[i] || event.tokensOut[0] || ('0x' as Address)
+						let amountOut = event.amountsOut[i] || event.amountsOut[0] || 0n
+
+						// For multi-input → single-output LP deposits, divide output equally among inputs
+						// This prevents double-counting: if 2 tokens deposit into 1 LP, each record gets 50% of LP
+						if (isMultiInputSingleOutput && amountOut > 0n) {
+							amountOut = amountOut / BigInt(validInputCount)
+							runtime.log(`  DEPOSIT: multi-input LP detected, allocating ${amountOut} ${tokenOut} to ${tokenIn} input (1/${validInputCount} share)`)
+						}
+
+						// For mixed acquired/non-acquired, create separate deposit records per input
+						// Note: We use the overall acquired ratio as approximation since consumedEntries
+						// contains entries from ALL input tokens.
+						if (totalConsumedForDeposit > 0n && fromNonAcquiredForDeposit > 0n) {
+							// Split into acquired and non-acquired portions
+							const acquiredAmountIn = (amountIn * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredAmountIn = amountIn - acquiredAmountIn
+							const acquiredAmountOut = (amountOut * acquiredRatioForDeposit) / PRECISION
+							const nonAcquiredAmountOut = amountOut - acquiredAmountOut
+
+							if (acquiredAmountIn > 0n) {
+								runtime.log(`  DEPOSIT: acquired portion ${acquiredAmountIn} ${tokenIn} -> ${acquiredAmountOut} ${tokenOut}, timestamp ${acquiredTimestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: acquiredAmountIn,
+									remainingAmount: acquiredAmountIn,
+									tokenOut: tokenOut,
+									amountOut: acquiredAmountOut,
+									remainingOutputAmount: acquiredAmountOut,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: acquiredTimestamp,
+								})
+							}
+							if (nonAcquiredAmountIn > 0n) {
+								runtime.log(`  DEPOSIT: non-acquired portion ${nonAcquiredAmountIn} ${tokenIn} -> ${nonAcquiredAmountOut} ${tokenOut}, timestamp ${event.timestamp}`)
+								state.depositRecords.push({
+									subAccount: event.subAccount,
+									target: event.target,
+									tokenIn: tokenIn,
+									amountIn: nonAcquiredAmountIn,
+									remainingAmount: nonAcquiredAmountIn,
+									tokenOut: tokenOut,
+									amountOut: nonAcquiredAmountOut,
+									remainingOutputAmount: nonAcquiredAmountOut,
+									timestamp: event.timestamp,
+									originalAcquisitionTimestamp: event.timestamp, // Non-acquired = new spending
+								})
+							}
+						} else {
+							// All acquired or all non-acquired - single record
+							const originalTimestamp = totalConsumedForDeposit > 0n ? acquiredTimestamp : event.timestamp
+							state.depositRecords.push({
+								subAccount: event.subAccount,
+								target: event.target,
+								tokenIn: tokenIn,
+								amountIn: amountIn,
+								remainingAmount: amountIn,
+								tokenOut: tokenOut,
+								amountOut: amountOut,
+								remainingOutputAmount: amountOut,
+								timestamp: event.timestamp,
+								originalAcquisitionTimestamp: originalTimestamp,
+							})
+						}
+					}
 				}
 			}
 
-			// Handle output tokens (add to acquired queue)
+			// Handle output tokens (add to acquired queue) - iterate over tokensOut/amountsOut arrays
 			// For SWAPs and DEPOSITs: proportionally split output between acquired (inherited timestamp) and new (current timestamp)
+			// Uses USD-weighted ratios when priceCache is available for accurate multi-token handling
 			// For WITHDRAW/CLAIM: output matched to deposits inherits their original acquisition timestamp
-			// NOTE: Now handles multiple output tokens (e.g., LP position withdrawals return 2 tokens)
 
 			if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
-				// Process each output token
+				// Process all output tokens in the array
 				for (let i = 0; i < event.tokensOut.length; i++) {
 					const tokenOut = event.tokensOut[i]
 					const amountOut = event.amountsOut[i]
@@ -1066,33 +1701,80 @@ const buildSubAccountState = (
 
 					if (totalConsumed > 0n && fromNonAcquired > 0n) {
 						// Mixed case: proportionally split the output
-						// Acquired portion inherits oldest timestamp, non-acquired portion is newly acquired
-						const acquiredRatio = (totalConsumed * 10000n) / totalAmountIn // basis points
-						const outputFromAcquired = (amountOut * acquiredRatio) / 10000n
+						// Acquired portion inherits timestamps proportionally, non-acquired portion is newly acquired
+
+						// Use USD-weighted ratio if we have prices for all input tokens
+						// This correctly handles multi-token inputs with different values (e.g., 1 WETH + 1000 USDC)
+						let acquiredRatio: bigint
+						let useUSDWeighting = false
+
+						if (priceCache && hasAllPrices && totalValueInUSD > 0n) {
+							// USD-weighted ratio: based on actual value, not raw amounts
+							// Using high precision (1e18) to minimize truncation errors
+							acquiredRatio = (consumedValueUSD * PRECISION) / totalValueInUSD
+							useUSDWeighting = true
+						} else {
+							// Fallback: amount-weighted ratio (original behavior)
+							acquiredRatio = (totalConsumed * PRECISION) / totalAmountIn
+						}
+
+						const outputFromAcquired = (amountOut * acquiredRatio) / PRECISION
 						const outputFromNonAcquired = amountOut - outputFromAcquired
 
-						// Find oldest timestamp from consumed entries
-						const oldestTimestamp = consumedEntries.reduce(
-							(oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
-							consumedEntries[0].originalTimestamp
-						)
-
 						const opName = OperationType[event.opType]
-						runtime.log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
-						runtime.log(`    ${outputFromAcquired} ${tokenOut} inherits timestamp ${oldestTimestamp}`)
-						runtime.log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
+						if (useUSDWeighting) {
+							runtime.log(`  ${opName}: mixed input (USD-weighted) - ${consumedValueUSD} acquired + ${totalValueInUSD - consumedValueUSD} non-acquired (USD)`)
+						} else {
+							runtime.log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
+						}
 
-						addToQueue(outputQueue, outputFromAcquired, oldestTimestamp)
+						// Proportionally split the acquired output among consumed entries by their amounts
+						// Each consumed entry's portion of the output inherits that entry's timestamp
+						// Track allocated amount to ensure no dust is lost
+						let allocatedFromAcquired = 0n
+						for (let idx = 0; idx < consumedEntries.length; idx++) {
+							const entry = consumedEntries[idx]
+							let entryOutput: bigint
+							if (idx === consumedEntries.length - 1) {
+								// Last entry gets remainder to prevent dust loss
+								entryOutput = outputFromAcquired - allocatedFromAcquired
+							} else {
+								const entryRatio = (entry.amount * PRECISION) / totalConsumed
+								entryOutput = (outputFromAcquired * entryRatio) / PRECISION
+							}
+							if (entryOutput > 0n) {
+								runtime.log(`    ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
+								addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+								allocatedFromAcquired += entryOutput
+							}
+						}
+
+						runtime.log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
 						addToQueue(outputQueue, outputFromNonAcquired, event.timestamp)
 					} else if (totalConsumed > 0n) {
-						// Entire input was acquired - output inherits oldest timestamp
-						const oldestTimestamp = consumedEntries.reduce(
-							(oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
-							consumedEntries[0].originalTimestamp
-						)
+						// Entire input was acquired - output inherits timestamps proportionally from consumed entries
 						const opName = OperationType[event.opType]
-						runtime.log(`  ${opName}: ${amountOut} ${tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
-						addToQueue(outputQueue, amountOut, oldestTimestamp)
+
+						// Proportionally split the output among consumed entries by their amounts
+						// Each consumed entry's portion of the output inherits that entry's timestamp
+						// Track allocated amount to ensure no dust is lost
+						let allocatedOutput = 0n
+						for (let idx = 0; idx < consumedEntries.length; idx++) {
+							const entry = consumedEntries[idx]
+							let entryOutput: bigint
+							if (idx === consumedEntries.length - 1) {
+								// Last entry gets remainder to prevent dust loss
+								entryOutput = amountOut - allocatedOutput
+							} else {
+								const entryRatio = (entry.amount * PRECISION) / totalConsumed
+								entryOutput = (amountOut * entryRatio) / PRECISION
+							}
+							if (entryOutput > 0n) {
+								runtime.log(`  ${opName}: ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
+								addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+								allocatedOutput += entryOutput
+							}
+						}
 					} else {
 						// No acquired input - output is newly acquired
 						const opName = OperationType[event.opType]
@@ -1101,7 +1783,7 @@ const buildSubAccountState = (
 					}
 				}
 			} else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
-				// Process each output token for withdrawals/claims
+				// Process all output tokens in the array
 				for (let i = 0; i < event.tokensOut.length; i++) {
 					const tokenOut = event.tokensOut[i]
 					const amountOut = event.amountsOut[i]
@@ -1109,9 +1791,15 @@ const buildSubAccountState = (
 
 					const tokenOutLower = tokenOut.toLowerCase() as Address
 
-					// Find matching deposits for this specific token
+					// Find matching deposits
 					let remainingToMatch = amountOut
-					let matchedOriginalTimestamp: bigint | null = null
+
+					// Track output tokens to consume from acquired queue (e.g., aLINK when withdrawing LINK)
+					// We track the deposit reference so we can update remainingOutputAmount after actual queue consumption
+					const outputTokensToConsume: { token: Address; amount: bigint; deposit: DepositRecord }[] = []
+
+					// Track matched amounts per timestamp - each deposit portion inherits its own timestamp
+					const matchedByTimestamp: { amount: bigint; timestamp: bigint }[] = []
 
 					for (const deposit of state.depositRecords) {
 						if (remainingToMatch <= 0n) break
@@ -1128,28 +1816,98 @@ const buildSubAccountState = (
 							deposit.remainingAmount -= consumeAmount
 							remainingToMatch -= consumeAmount
 
-							// Track the original acquisition timestamp for inheritance (not the deposit timestamp)
-							// This ensures the full chain of acquired status is preserved:
-							// Original swap → deposit → withdrawal all share the same original timestamp
-							if (matchedOriginalTimestamp === null || deposit.originalAcquisitionTimestamp < matchedOriginalTimestamp) {
-								matchedOriginalTimestamp = deposit.originalAcquisitionTimestamp
+							// Calculate proportional output token consumption (e.g., aLINK)
+							// If we're withdrawing 50% of the deposited amount, consume 50% of the output token
+							// NOTE: We don't reduce remainingOutputAmount here - we do it after actual queue consumption
+							// to handle cases where queue entries have expired
+							if (deposit.tokenOut && deposit.tokenOut !== '0x' && deposit.remainingOutputAmount > 0n) {
+								const ratio = (consumeAmount * 10000n) / deposit.amountIn
+								const outputToConsume = (deposit.amountOut * ratio) / 10000n
+								const maxConsume = outputToConsume > deposit.remainingOutputAmount
+									? deposit.remainingOutputAmount
+									: outputToConsume
+
+								if (maxConsume > 0n) {
+									outputTokensToConsume.push({
+										token: deposit.tokenOut.toLowerCase() as Address,
+										amount: maxConsume,
+										deposit: deposit
+									})
+									runtime.log(`  ${OperationType[event.opType]} will consume up to ${maxConsume} ${deposit.tokenOut} (deposit output token)`)
+								}
 							}
+
+							// Track this matched portion with its own timestamp (not the oldest across all deposits)
+							// This ensures each deposit's portion inherits its correct original acquisition timestamp
+							matchedByTimestamp.push({
+								amount: consumeAmount,
+								timestamp: deposit.originalAcquisitionTimestamp
+							})
 
 							runtime.log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (original acquisition: ${deposit.originalAcquisitionTimestamp})`)
 						}
 					}
 
-					const matchedAmount = amountOut - remainingToMatch
-					if (matchedAmount > 0n) {
+					// Consume the deposit's output tokens (e.g., aLINK) from the acquired queue
+					// These tokens were added when depositing and should be removed when withdrawing
+					// We update deposit.remainingOutputAmount based on actual consumption (not calculated)
+					// to handle cases where queue entries have expired
+					for (const { token, amount, deposit } of outputTokensToConsume) {
+						const outputTokenQueue = getQueue(token)
+						tokensWithAcquiredHistory.add(token)
+						const { consumed } = consumeFromQueue(outputTokenQueue, amount, event.timestamp, windowDuration)
+						const totalConsumedAmount = consumed.reduce((sum, e) => sum + e.amount, 0n)
+
+						// Update deposit record with actual amount consumed (may be less than requested if expired)
+						deposit.remainingOutputAmount -= totalConsumedAmount
+						runtime.log(`  ${OperationType[event.opType]} consumed ${totalConsumedAmount} ${token} from acquired queue (deposit receipt token)`)
+					}
+
+					// Add each matched portion to the queue with its own inherited timestamp
+					// This correctly preserves timestamp granularity from different deposits
+					const totalMatched = matchedByTimestamp.reduce((sum, m) => sum + m.amount, 0n)
+					if (totalMatched > 0n) {
 						tokensWithAcquiredHistory.add(tokenOutLower)
 						const outputQueue = getQueue(tokenOutLower)
 
-						// Withdrawal inherits the original acquisition timestamp (not deposit timestamp)
-						const outputTimestamp = matchedOriginalTimestamp || event.timestamp
-						runtime.log(`  ${OperationType[event.opType]} matched: ${matchedAmount} ${tokenOut} inherits original timestamp ${outputTimestamp}`)
-						addToQueue(outputQueue, matchedAmount, outputTimestamp)
-					} else {
-						runtime.log(`  ${OperationType[event.opType]} NOT matched: no matching deposit found for token ${tokenOut}`)
+						for (const { amount, timestamp } of matchedByTimestamp) {
+							runtime.log(`  ${OperationType[event.opType]} matched: ${amount} inherits original timestamp ${timestamp}`)
+							addToQueue(outputQueue, amount, timestamp)
+						}
+					}
+
+					// Handle unmatched amount
+					if (remainingToMatch > 0n) {
+						if (event.opType === OperationType.CLAIM) {
+							// CLAIM rewards should only be acquired if there's a matching deposit for this target
+							// (i.e., the subaccount created the position that generates rewards)
+							const hasMatchingDeposit = state.depositRecords.some(
+								d => d.target.toLowerCase() === event.target.toLowerCase() &&
+									 d.subAccount.toLowerCase() === event.subAccount.toLowerCase()
+							)
+
+							if (hasMatchingDeposit) {
+								// Find the oldest deposit timestamp for this target to inherit
+								const oldestDepositTimestamp = state.depositRecords
+									.filter(d => d.target.toLowerCase() === event.target.toLowerCase() &&
+												d.subAccount.toLowerCase() === event.subAccount.toLowerCase())
+									.reduce((oldest, d) => d.originalAcquisitionTimestamp < oldest ? d.originalAcquisitionTimestamp : oldest,
+											event.timestamp)
+
+								tokensWithAcquiredHistory.add(tokenOutLower)
+								const outputQueue = getQueue(tokenOutLower)
+								runtime.log(`  CLAIM: ${remainingToMatch} ${tokenOut} is acquired (has deposit at target), inherits timestamp ${oldestDepositTimestamp}`)
+								addToQueue(outputQueue, remainingToMatch, oldestDepositTimestamp)
+							} else {
+								// No matching deposit - claim is from multisig's position, not subaccount's
+								runtime.log(`  CLAIM: ${remainingToMatch} ${tokenOut} NOT acquired (no matching deposit from subaccount)`)
+							}
+						} else {
+							// Unmatched WITHDRAW - the LP/receipt tokens weren't acquired by subaccount
+							// This means either: external aTokens sent to Safe, or deposit was outside window/by multisig
+							// In either case, the withdrawn tokens belong to the multisig, not subaccount
+							runtime.log(`  WITHDRAW unmatched: ${remainingToMatch} ${tokenOut} NOT acquired (no matching deposit from subaccount)`)
+						}
 					}
 				}
 			}
@@ -1201,15 +1959,16 @@ const buildSubAccountState = (
 }
 
 /**
- * Calculate new spending allowance for a subaccount
+ * Calculate new spending allowance for a subaccount on a specific module
  */
-const calculateSpendingAllowance = (
+const calculateSpendingAllowanceForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 	state: SubAccountState,
 ): bigint => {
-	const safeValue = getSafeValue(runtime)
-	const { maxSpendingBps } = getSubAccountLimits(runtime, subAccount)
+	const safeValue = getSafeValueForModule(runtime, moduleAddress)
+	const { maxSpendingBps } = getSubAccountLimitsForModule(runtime, moduleAddress, subAccount)
 
 	// maxSpending = safeValue * maxSpendingBps / 10000
 	const maxSpending = (safeValue * maxSpendingBps) / 10000n
@@ -1224,11 +1983,13 @@ const calculateSpendingAllowance = (
 	return newAllowance
 }
 
+
 /**
- * Get current on-chain spending allowance
+ * Get current on-chain spending allowance for a specific module
  */
-const getOnChainSpendingAllowance = (
+const getOnChainSpendingAllowanceForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 ): bigint => {
 	const evmClient = createEvmClient(runtime)
@@ -1244,7 +2005,7 @@ const getOnChainSpendingAllowance = (
 			.callContract(runtime, {
 				call: encodeCallMsg({
 					from: zeroAddress,
-					to: runtime.config.moduleAddress as Address,
+					to: moduleAddress,
 					data: callData,
 				}),
 				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
@@ -1261,19 +2022,24 @@ const getOnChainSpendingAllowance = (
 			data: bytesToHex(result.data),
 		})
 	} catch (error) {
-		runtime.log(`Error getting on-chain spending allowance: ${error}`)
+		runtime.log(`Error getting on-chain spending allowance for module ${moduleAddress}: ${error}`)
 		return 0n
 	}
 }
 
-// Threshold for considering allowance values "equal" (0% tolerance for allowances)
-const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
 
 /**
- * Push batch update to contract (skips if no changes)
+ * Push batch update to contract for a specific module (skips if no meaningful changes)
+ *
+ * Update logic:
+ * - Always update if acquired balances changed
+ * - Always update if allowance went down (any decrease)
+ * - Update if allowance went up by more than 2% (ALLOWANCE_INCREASE_THRESHOLD_BPS)
+ * - Update if stale for more than 45 minutes (MAX_STALENESS_SECONDS)
  */
-const pushBatchUpdate = (
+const pushBatchUpdateForModule = (
 	runtime: Runtime<Config>,
+	moduleAddress: Address,
 	subAccount: Address,
 	newAllowance: bigint,
 	acquiredBalances: Map<Address, bigint>,
@@ -1281,14 +2047,45 @@ const pushBatchUpdate = (
 	const evmClient = createEvmClient(runtime)
 
 	// Get current on-chain allowance
-	const onChainAllowance = getOnChainSpendingAllowance(runtime, subAccount)
+	const onChainAllowance = getOnChainSpendingAllowanceForModule(runtime, moduleAddress, subAccount)
+	const currentTimestamp = getCurrentBlockTimestamp()
 
-	// Check if allowance change is significant
-	const allowanceDiff = newAllowance > onChainAllowance
-		? newAllowance - onChainAllowance
-		: onChainAllowance - newAllowance
-	const allowanceThreshold = (onChainAllowance * ALLOWANCE_CHANGE_THRESHOLD_BPS) / 10000n
-	const allowanceChanged = allowanceDiff > allowanceThreshold
+	// Check staleness
+	const subAccountKey = `${moduleAddress}:${subAccount}`.toLowerCase()
+	const lastUpdate = lastUpdateTimestamp.get(subAccountKey) || 0n
+	const timeSinceUpdate = currentTimestamp - lastUpdate
+	const isStale = timeSinceUpdate > MAX_STALENESS_SECONDS
+
+	// Check allowance direction
+	const allowanceDecreased = newAllowance < onChainAllowance
+	const allowanceIncreased = newAllowance > onChainAllowance
+
+	// Check if increase exceeds threshold
+	// Also consider any increase from 0 as significant
+	let significantIncrease = false
+	if (allowanceIncreased) {
+		if (onChainAllowance > 0n) {
+			const increaseAmount = newAllowance - onChainAllowance
+			const threshold = (onChainAllowance * ALLOWANCE_INCREASE_THRESHOLD_BPS) / 10000n
+			significantIncrease = increaseAmount > threshold
+		} else {
+			significantIncrease = newAllowance > 0n
+		}
+	}
+
+	// Determine if allowance update is needed based on rules:
+	// 1. Allowance went down (any decrease) -> always update
+	// 2. Allowance went up by more than threshold -> update
+	// 3. Stale for more than MAX_STALENESS_SECONDS -> update
+	const allowanceChanged = allowanceDecreased || significantIncrease || isStale
+
+	if (!allowanceChanged && !allowanceDecreased && !significantIncrease) {
+		if (allowanceIncreased) {
+			const increaseAmount = newAllowance - onChainAllowance
+			const increaseBps = onChainAllowance > 0n ? (increaseAmount * 10000n) / onChainAllowance : 0n
+			runtime.log(`  Allowance increase within threshold: ${onChainAllowance} -> ${newAllowance} (+${increaseBps}bps, threshold: ${ALLOWANCE_INCREASE_THRESHOLD_BPS}bps)`)
+		}
+	}
 
 	// Check if any acquired balances changed
 	const tokens: Address[] = []
@@ -1297,7 +2094,7 @@ const pushBatchUpdate = (
 
 	// First, add all tokens from calculated acquired balances
 	for (const [token, newBalance] of acquiredBalances) {
-		const onChainBalance = getContractAcquiredBalance(runtime, subAccount, token)
+		const onChainBalance = getContractAcquiredBalanceForModule(runtime, moduleAddress, subAccount, token)
 		if (newBalance !== onChainBalance) {
 			acquiredChanged = true
 		}
@@ -1307,10 +2104,10 @@ const pushBatchUpdate = (
 
 	// Also check for tokens that have on-chain balance but aren't in calculated map
 	// These need to be cleared to 0 (e.g., tokens that aged out or had incorrect matching)
-	const historicalTokens = queryHistoricalAcquiredTokens(runtime, subAccount)
+	const historicalTokens = queryHistoricalAcquiredTokensForModule(runtime, moduleAddress, subAccount)
 	for (const token of historicalTokens) {
 		if (!acquiredBalances.has(token)) {
-			const onChainBalance = getContractAcquiredBalance(runtime, subAccount, token)
+			const onChainBalance = getContractAcquiredBalanceForModule(runtime, moduleAddress, subAccount, token)
 			if (onChainBalance > 0n) {
 				runtime.log(`  Clearing stale acquired balance for ${token}: ${onChainBalance} -> 0`)
 				acquiredChanged = true
@@ -1320,13 +2117,26 @@ const pushBatchUpdate = (
 		}
 	}
 
-	// Skip if no changes
+	// Skip if no changes needed
 	if (!allowanceChanged && !acquiredChanged) {
-		runtime.log(`Skipping batch update - no changes (allowance: ${onChainAllowance} -> ${newAllowance}, tokens: ${tokens.length})`)
+		runtime.log(`Skipping batch update - no changes needed:`)
+		runtime.log(`  Allowance: ${onChainAllowance} -> ${newAllowance} (no decrease, increase <${ALLOWANCE_INCREASE_THRESHOLD_BPS / 100n}%)`)
+		runtime.log(`  Staleness: ${timeSinceUpdate}s (max: ${MAX_STALENESS_SECONDS}s)`)
+		runtime.log(`  Acquired tokens: ${tokens.length} (no changes)`)
 		return null
 	}
 
-	runtime.log(`Pushing batch update: subAccount=${subAccount}, allowance=${newAllowance} (was ${onChainAllowance}), tokens=${tokens.length}`)
+	// Log reason for update
+	const reasons: string[] = []
+	if (acquiredChanged) reasons.push('acquired changed')
+	if (allowanceDecreased) reasons.push('allowance decreased')
+	if (significantIncrease) reasons.push(`allowance increased >${ALLOWANCE_INCREASE_THRESHOLD_BPS / 100n}%`)
+	if (isStale) reasons.push(`stale (${timeSinceUpdate}s > ${MAX_STALENESS_SECONDS}s)`)
+
+	runtime.log(`Pushing batch update for module ${moduleAddress}: subAccount=${subAccount}`)
+	runtime.log(`  Reason: ${reasons.join(', ')}`)
+	runtime.log(`  Allowance: ${onChainAllowance} -> ${newAllowance}`)
+	runtime.log(`  Tokens: ${tokens.length}`)
 
 	const callData = encodeFunctionData({
 		abi: DeFiInteractorModule,
@@ -1357,16 +2167,23 @@ const pushBatchUpdate = (
 		throw new Error(`Failed to push batch update: ${resp.errorMessage || resp.txStatus}`)
 	}
 
+	// Update last update timestamp only after confirmed success
+	// Note: writeReport().result() is a blocking call that waits for transaction confirmation
+	// CRE handles confirmation synchronously via the SDK
+	lastUpdateTimestamp.set(subAccountKey, currentTimestamp)
+
 	const txHash = bytesToHex(resp.txHash || new Uint8Array(32))
 	runtime.log(`Batch update complete. TxHash: ${txHash}`)
 	return txHash
 }
+
 
 // ============ Event Handler ============
 
 /**
  * Handle ProtocolExecution event
  * Triggered on each new protocol interaction
+ * Extracts module address from the log (supports multi-module via hybrid approach)
  */
 const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => {
 	runtime.log('=== Spending Oracle: ProtocolExecution Event ===')
@@ -1378,6 +2195,13 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 			return 'Invalid event'
 		}
 
+		// Extract module address from the log (the contract that emitted the event)
+		const moduleAddress = (log.address as Address) || (runtime.config.moduleAddress as Address)
+		if (!moduleAddress) {
+			runtime.log('No module address in log or config')
+			return 'Invalid event: no module address'
+		}
+
 		const newEvent = parseProtocolExecutionEvent(log)
 
 		// Fetch actual block timestamp for the new event
@@ -1387,6 +2211,7 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		const currentTimestamp = getCurrentBlockTimestamp()
 
 		runtime.log(`New event: ${OperationType[newEvent.opType]} by ${newEvent.subAccount}`)
+		runtime.log(`  Module: ${moduleAddress}`)
 		runtime.log(`  Block: ${newEvent.blockNumber}, Timestamp: ${newEvent.timestamp}`)
 		runtime.log(`  TokensIn: [${newEvent.tokensIn.join(', ')}]`)
 		runtime.log(`  AmountsIn: [${newEvent.amountsIn.map(a => a.toString()).join(', ')}]`)
@@ -1395,8 +2220,8 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		runtime.log(`  SpendingCost: ${newEvent.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
-		const historicalEvents = queryHistoricalEvents(runtime, newEvent.subAccount)
-		const transferEvents = queryTransferEvents(runtime, newEvent.subAccount)
+		const historicalEvents = retryOnce(runtime, () => queryHistoricalEventsForModule(runtime, moduleAddress, newEvent.subAccount), 'queryHistoricalEventsForModule')
+		const transferEvents = retryOnce(runtime, () => queryTransferEventsForModule(runtime, moduleAddress, newEvent.subAccount), 'queryTransferEventsForModule')
 
 		// Add the new event (deduplicate by blockNumber + logIndex which uniquely identifies each log)
 		const allEvents = [...historicalEvents]
@@ -1408,17 +2233,28 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 			allEvents.push(newEvent)
 		}
 
+		// Collect all tokens from events for price cache
+		const tokensInEvents = new Set<Address>()
+		for (const e of allEvents) {
+			for (const t of e.tokensIn) tokensInEvents.add(t.toLowerCase() as Address)
+			for (const t of e.tokensOut) tokensInEvents.add(t.toLowerCase() as Address)
+		}
+
+		// Build price cache for USD-weighted ratio calculations
+		const priceCache = buildTokenPriceCache(runtime, tokensInEvents)
+		runtime.log(`Built price cache for ${priceCache.size} tokens`)
+
 		// Get per-subaccount window duration
-		const { windowDuration } = getSubAccountLimits(runtime, newEvent.subAccount)
+		const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, newEvent.subAccount)
 
 		// Build state from all events using per-subaccount window duration
-		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp, windowDuration)
+		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp, windowDuration, priceCache)
 
 		// Calculate new spending allowance
-		const newAllowance = calculateSpendingAllowance(runtime, newEvent.subAccount, state)
+		const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, newEvent.subAccount, state)
 
 		// Push update to contract
-		const txHash = pushBatchUpdate(runtime, newEvent.subAccount, newAllowance, state.acquiredBalances)
+		const txHash = pushBatchUpdateForModule(runtime, moduleAddress, newEvent.subAccount, newAllowance, state.acquiredBalances)
 
 		runtime.log(`=== Event Processing Complete ===`)
 		return txHash || 'Skipped - no changes'
@@ -1431,8 +2267,69 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 // ============ Cron Handler ============
 
 /**
+ * Process a single module's subaccounts for cron refresh
+ * Uses module-aware functions to properly support multi-module operation
+ */
+const processModuleSubaccounts = (
+	runtime: Runtime<Config>,
+	moduleAddress: Address,
+	currentTimestamp: bigint,
+): string[] => {
+	const results: string[] = []
+
+	// Get subaccounts for this module
+	const subaccounts = retryOnce(runtime, () => getActiveSubaccountsForModule(runtime, moduleAddress), 'getActiveSubaccountsForModule')
+	runtime.log(`Found ${subaccounts.length} active subaccounts for module ${moduleAddress}`)
+
+	if (subaccounts.length === 0) {
+		return [`${moduleAddress}: No subaccounts`]
+	}
+
+	// Query events for this module
+	const allEvents = retryOnce(runtime, () => queryHistoricalEventsForModule(runtime, moduleAddress), 'queryHistoricalEventsForModule')
+	const allTransfers = retryOnce(runtime, () => queryTransferEventsForModule(runtime, moduleAddress), 'queryTransferEventsForModule')
+
+	// Collect all tokens from events for price cache
+	const tokensInEvents = new Set<Address>()
+	for (const e of allEvents) {
+		for (const t of e.tokensIn) tokensInEvents.add(t.toLowerCase() as Address)
+		for (const t of e.tokensOut) tokensInEvents.add(t.toLowerCase() as Address)
+	}
+
+	// Build price cache for USD-weighted ratio calculations
+	const priceCache = buildTokenPriceCache(runtime, tokensInEvents)
+	runtime.log(`Built price cache for ${priceCache.size} tokens`)
+
+	// Process each subaccount
+	for (const subAccount of subaccounts) {
+		try {
+			runtime.log(`Processing subaccount: ${subAccount}`)
+
+			// Get per-subaccount window duration
+			const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, subAccount)
+
+			// Build state for this subaccount with priceCache for USD-weighted ratios
+			const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration, priceCache)
+
+			// Calculate new spending allowance using module-aware functions
+			const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, subAccount, state)
+
+			// Push update to contract using module-aware function
+			const txHash = pushBatchUpdateForModule(runtime, moduleAddress, subAccount, newAllowance, state.acquiredBalances)
+			results.push(`${moduleAddress}/${subAccount}: ${txHash || 'Skipped'}`)
+		} catch (error) {
+			runtime.log(`Error processing ${subAccount}: ${error}`)
+			results.push(`${moduleAddress}/${subAccount}: Error - ${error}`)
+		}
+	}
+
+	return results
+}
+
+/**
  * Periodic refresh of spending allowances
  * Runs every 5 minutes to update allowances as old spending expires
+ * Supports multi-module operation via registry if configured
  */
 const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string => {
 	runtime.log('=== Spending Oracle: Periodic Refresh ===')
@@ -1440,46 +2337,31 @@ const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string 
 	try {
 		const currentTimestamp = getCurrentBlockTimestamp()
 
-		// Get all active subaccounts
-		const subaccounts = getActiveSubaccounts(runtime)
-		runtime.log(`Found ${subaccounts.length} active subaccounts`)
+		// Get all active modules from registry (or single module if no registry)
+		const modules = retryOnce(runtime, () => getActiveModulesFromRegistry(runtime), 'getActiveModulesFromRegistry')
+		runtime.log(`Processing ${modules.length} module(s)`)
 
-		if (subaccounts.length === 0) {
-			runtime.log('No active subaccounts, skipping refresh')
-			return 'No subaccounts'
+		if (modules.length === 0) {
+			runtime.log('No active modules found')
+			return 'No modules'
 		}
 
-		// Query all historical events once (both protocol executions and transfers)
-		const allEvents = queryHistoricalEvents(runtime)
-		const allTransfers = queryTransferEvents(runtime)
+		const allResults: string[] = []
 
-		const results: string[] = []
-
-		// Process each subaccount
-		for (const subAccount of subaccounts) {
+		// Process each module
+		for (const moduleAddress of modules) {
+			runtime.log(`\n--- Processing module: ${moduleAddress} ---`)
 			try {
-				runtime.log(`Processing subaccount: ${subAccount}`)
-
-				// Get per-subaccount window duration
-				const { windowDuration } = getSubAccountLimits(runtime, subAccount)
-
-				// Build state for this subaccount using per-subaccount window duration
-				const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration)
-
-				// Calculate new spending allowance
-				const newAllowance = calculateSpendingAllowance(runtime, subAccount, state)
-
-				// Push update to contract
-				const txHash = pushBatchUpdate(runtime, subAccount, newAllowance, state.acquiredBalances)
-				results.push(`${subAccount}: ${txHash || 'Skipped'}`)
+				const moduleResults = processModuleSubaccounts(runtime, moduleAddress, currentTimestamp)
+				allResults.push(...moduleResults)
 			} catch (error) {
-				runtime.log(`Error processing ${subAccount}: ${error}`)
-				results.push(`${subAccount}: Error - ${error}`)
+				runtime.log(`Error processing module ${moduleAddress}: ${error}`)
+				allResults.push(`${moduleAddress}: Error - ${error}`)
 			}
 		}
 
-		runtime.log(`=== Periodic Refresh Complete ===`)
-		return results.join('; ')
+		runtime.log(`\n=== Periodic Refresh Complete ===`)
+		return allResults.join('; ')
 	} catch (error) {
 		runtime.log(`Error in periodic refresh: ${error}`)
 		return `Error: ${error}`
@@ -1491,6 +2373,7 @@ const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string 
 /**
  * Handle TransferExecuted event
  * Triggered on each token transfer from the Safe
+ * Note: Event trigger only monitors config.moduleAddress, so we use it explicitly
  */
 const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 	runtime.log('=== Spending Oracle: TransferExecuted Event ===')
@@ -1502,6 +2385,13 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 			return 'Invalid event'
 		}
 
+		// Extract module address from the log (the contract that emitted the event)
+		const moduleAddress = (log.address as Address) || (runtime.config.moduleAddress as Address)
+		if (!moduleAddress) {
+			runtime.log('No module address in log or config')
+			return 'Invalid event: no module address'
+		}
+
 		const newTransfer = parseTransferExecutedEvent(log)
 
 		// Fetch actual block timestamp for the new event
@@ -1511,12 +2401,13 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 		const currentTimestamp = getCurrentBlockTimestamp()
 
 		runtime.log(`New transfer: ${newTransfer.amount} of ${newTransfer.token} to ${newTransfer.recipient}`)
+		runtime.log(`  Module: ${moduleAddress}`)
 		runtime.log(`  Block: ${newTransfer.blockNumber}, Timestamp: ${newTransfer.timestamp}`)
 		runtime.log(`  SpendingCost: ${newTransfer.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
-		const historicalEvents = queryHistoricalEvents(runtime, newTransfer.subAccount)
-		const transferEvents = queryTransferEvents(runtime, newTransfer.subAccount)
+		const historicalEvents = retryOnce(runtime, () => queryHistoricalEventsForModule(runtime, moduleAddress, newTransfer.subAccount), 'queryHistoricalEventsForModule')
+		const transferEvents = retryOnce(runtime, () => queryTransferEventsForModule(runtime, moduleAddress, newTransfer.subAccount), 'queryTransferEventsForModule')
 
 		// Add the new transfer event (deduplicate by blockNumber + logIndex)
 		const allTransfers = [...transferEvents]
@@ -1528,17 +2419,29 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 			allTransfers.push(newTransfer)
 		}
 
+		// Collect all tokens from events for price cache
+		const tokensInEvents = new Set<Address>()
+		for (const e of historicalEvents) {
+			for (const t of e.tokensIn) tokensInEvents.add(t.toLowerCase() as Address)
+			for (const t of e.tokensOut) tokensInEvents.add(t.toLowerCase() as Address)
+		}
+		tokensInEvents.add(newTransfer.token.toLowerCase() as Address)
+
+		// Build price cache for USD-weighted ratio calculations
+		const priceCache = buildTokenPriceCache(runtime, tokensInEvents)
+		runtime.log(`Built price cache for ${priceCache.size} tokens`)
+
 		// Get per-subaccount window duration
-		const { windowDuration } = getSubAccountLimits(runtime, newTransfer.subAccount)
+		const { windowDuration } = getSubAccountLimitsForModule(runtime, moduleAddress, newTransfer.subAccount)
 
 		// Build state from all events using per-subaccount window duration
-		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp, windowDuration)
+		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp, windowDuration, priceCache)
 
 		// Calculate new spending allowance
-		const newAllowance = calculateSpendingAllowance(runtime, newTransfer.subAccount, state)
+		const newAllowance = calculateSpendingAllowanceForModule(runtime, moduleAddress, newTransfer.subAccount, state)
 
 		// Push update to contract
-		const txHash = pushBatchUpdate(runtime, newTransfer.subAccount, newAllowance, state.acquiredBalances)
+		const txHash = pushBatchUpdateForModule(runtime, moduleAddress, newTransfer.subAccount, newAllowance, state.acquiredBalances)
 
 		runtime.log(`=== Transfer Event Processing Complete ===`)
 		return txHash || 'Skipped - no changes'
@@ -1550,6 +2453,33 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 
 // ============ Workflow Initialization ============
 
+/**
+ * Get all module addresses to monitor from config
+ * Combines moduleAddresses array with legacy moduleAddress (deduplicated)
+ */
+const getModuleAddressesForTriggers = (config: Config): string[] => {
+	const addresses = new Set<string>()
+
+	// Add moduleAddresses array if present
+	if (config.moduleAddresses && config.moduleAddresses.length > 0) {
+		for (const addr of config.moduleAddresses) {
+			addresses.add(addr.toLowerCase())
+		}
+	}
+
+	// Add legacy moduleAddress if present
+	if (config.moduleAddress) {
+		addresses.add(config.moduleAddress.toLowerCase())
+	}
+
+	return Array.from(addresses)
+}
+
+/**
+ * Initialize workflow with hybrid multi-module support:
+ * - Log triggers for configured modules (instant event processing)
+ * - Cron trigger catches new modules from registry (delayed but complete)
+ */
 const initWorkflow = (config: Config) => {
 	const network = getNetwork({
 		chainFamily: 'evm',
@@ -1564,32 +2494,50 @@ const initWorkflow = (config: Config) => {
 	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
 	const cronTrigger = new cre.capabilities.CronCapability()
 
-	return [
-		// Event trigger: Process each ProtocolExecution event
-		// logTrigger uses topics array where topics[0] contains event signatures
-		cre.handler(
-			evmClient.logTrigger({
-				addresses: [config.moduleAddress],
-				topics: [{ values: [PROTOCOL_EXECUTION_EVENT_SIG] }],
-			}),
-			onProtocolExecution,
-		),
-		// Event trigger: Process each TransferExecuted event
-		cre.handler(
-			evmClient.logTrigger({
-				addresses: [config.moduleAddress],
-				topics: [{ values: [TRANSFER_EXECUTED_EVENT_SIG] }],
-			}),
-			onTransferExecuted,
-		),
-		// Cron trigger: Periodic refresh of spending allowances
+	// Get all configured module addresses
+	const moduleAddresses = getModuleAddressesForTriggers(config)
+
+	// Build handlers array
+	const handlers = []
+
+	// Create log triggers for each configured module (instant event processing)
+	// This provides real-time monitoring for known modules
+	for (const moduleAddress of moduleAddresses) {
+		// ProtocolExecution event trigger
+		handlers.push(
+			cre.handler(
+				evmClient.logTrigger({
+					addresses: [moduleAddress],
+					topics: [{ values: [PROTOCOL_EXECUTION_EVENT_SIG] }],
+				}),
+				onProtocolExecution,
+			)
+		)
+
+		// TransferExecuted event trigger
+		handlers.push(
+			cre.handler(
+				evmClient.logTrigger({
+					addresses: [moduleAddress],
+					topics: [{ values: [TRANSFER_EXECUTED_EVENT_SIG] }],
+				}),
+				onTransferExecuted,
+			)
+		)
+	}
+
+	// Cron trigger: Periodic refresh of spending allowances
+	// This also catches any new modules from registry that aren't in config yet
+	handlers.push(
 		cre.handler(
 			cronTrigger.trigger({
 				schedule: config.refreshSchedule,
 			}),
 			onCronRefresh,
-		),
-	]
+		)
+	)
+
+	return handlers
 }
 
 export async function main() {

@@ -5,12 +5,14 @@
     "moduleResolution": "bundler",
     "lib": ["ESNext"],
     "outDir": "./dist",
+    "rootDir": "..",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "main.ts"
+    "main.ts",
+    "../contracts/abi/**/*.ts"
   ]
 }
