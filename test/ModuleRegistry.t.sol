@@ -161,6 +161,13 @@ contract ModuleRegistryTest is Test {
         registry.deactivateModule(module1);
     }
 
+    function testDeactivateModuleOnlyOwner() public {
+        registry.registerModule(module1, safe1, oracle);
+        vm.prank(makeAddr("notOwner"));
+        vm.expectRevert();
+        registry.deactivateModule(module1);
+    }
+
     function testReactivateModule() public {
         registry.registerModule(module1, safe1, oracle);
         registry.deactivateModule(module1);
@@ -172,6 +179,14 @@ contract ModuleRegistryTest is Test {
 
         IModuleRegistry.ModuleInfo memory info = registry.moduleInfo(module1);
         assertTrue(info.isActive);
+    }
+
+    function testReactivateModuleOnlyOwner() public {
+        registry.registerModule(module1, safe1, oracle);
+        registry.deactivateModule(module1);
+        vm.prank(makeAddr("notOwner"));
+        vm.expectRevert();
+        registry.reactivateModule(module1);
     }
 
     function testRemoveModule() public {
@@ -186,6 +201,13 @@ contract ModuleRegistryTest is Test {
         assertEq(registry.safeToModule(safe1), address(0));
     }
 
+    function testRemoveModuleOnlyOwner() public {
+        registry.registerModule(module1, safe1, oracle);
+        vm.prank(makeAddr("notOwner"));
+        vm.expectRevert();
+        registry.removeModule(module1);
+    }
+
     function testRemoveModuleAllowsReregistration() public {
         registry.registerModule(module1, safe1, oracle);
         registry.removeModule(module1);
@@ -193,6 +215,50 @@ contract ModuleRegistryTest is Test {
         // Can now register a new module for the same Safe
         registry.registerModule(module2, safe1, oracle);
         assertEq(registry.safeToModule(safe1), module2);
+    }
+
+    function testRemoveModuleCompactsArray() public {
+        // Register 3 modules
+        address module3 = makeAddr("module3");
+        address safe3 = makeAddr("safe3");
+        registry.registerModule(module1, safe1, oracle);
+        registry.registerModule(module2, safe2, oracle);
+        registry.registerModule(module3, safe3, oracle);
+
+        assertEq(registry.getTotalModuleCount(), 3);
+
+        // Remove module1 (swap-and-pop: module3 takes module1's slot)
+        registry.removeModule(module1);
+
+        assertEq(registry.getTotalModuleCount(), 2);
+        assertFalse(registry.isRegistered(module1));
+        assertTrue(registry.isRegistered(module2));
+        assertTrue(registry.isRegistered(module3));
+
+        // Active modules should be module2 and module3
+        address[] memory active = registry.getActiveModules();
+        assertEq(active.length, 2);
+    }
+
+    function testRemoveLastModuleInArray() public {
+        registry.registerModule(module1, safe1, oracle);
+        registry.registerModule(module2, safe2, oracle);
+
+        // Remove last element (no swap needed)
+        registry.removeModule(module2);
+
+        assertEq(registry.getTotalModuleCount(), 1);
+        assertTrue(registry.isRegistered(module1));
+        assertFalse(registry.isRegistered(module2));
+    }
+
+    function testRemoveSingleModule() public {
+        registry.registerModule(module1, safe1, oracle);
+
+        registry.removeModule(module1);
+
+        assertEq(registry.getTotalModuleCount(), 0);
+        assertFalse(registry.isRegistered(module1));
     }
 
     // ============ View Function Tests ============
@@ -297,6 +363,6 @@ contract ModuleRegistryTest is Test {
         assertEq(registry.getTotalModuleCount(), 1); // Still counts deactivated
 
         registry.removeModule(module1);
-        assertEq(registry.getTotalModuleCount(), 1); // Array not compacted
+        assertEq(registry.getTotalModuleCount(), 0); // Removed via swap-and-pop
     }
 }
