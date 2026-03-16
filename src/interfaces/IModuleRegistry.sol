@@ -19,11 +19,27 @@ interface IModuleRegistry {
     /// @param module The deployed module address
     /// @param safe The Safe address this module serves
     /// @param oracle The authorized oracle address
-    function registerModuleFromFactory(
-        address module,
-        address safe,
-        address oracle
-    ) external;
+    function registerModuleFromFactory(address module, address safe, address oracle) external;
+
+    /// @notice Deactivate a module (soft delete)
+    /// @param module The module address to deactivate
+    function deactivateModule(address module) external;
+
+    /// @notice Reactivate a previously deactivated module
+    /// @param module The module address to reactivate
+    function reactivateModule(address module) external;
+
+    /// @notice Remove a module entirely (hard delete, swap-and-pop from array)
+    /// @param module The module address to remove
+    function removeModule(address module) external;
+
+    /// @notice Authorize a factory to auto-register modules
+    /// @param factory The factory address to authorize
+    function authorizeFactory(address factory) external;
+
+    /// @notice Remove factory authorization
+    /// @param factory The factory address to deauthorize
+    function deauthorizeFactory(address factory) external;
 
     /// @notice Get all active modules
     /// @return modules Array of active module addresses
@@ -34,10 +50,10 @@ interface IModuleRegistry {
     /// @param limit Maximum number of modules to return
     /// @return modules Array of active module addresses
     /// @return total Total number of active modules
-    function getActiveModulesPaginated(
-        uint256 offset,
-        uint256 limit
-    ) external view returns (address[] memory modules, uint256 total);
+    function getActiveModulesPaginated(uint256 offset, uint256 limit)
+        external
+        view
+        returns (address[] memory modules, uint256 total);
 
     /// @notice Get the module for a specific Safe
     /// @param safe The Safe address
