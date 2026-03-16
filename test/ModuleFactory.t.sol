@@ -21,12 +21,7 @@ contract ModuleFactoryTest is Test {
     address public owner;
     address public oracle;
 
-    event ModuleDeployed(
-        address indexed module,
-        address indexed safe,
-        address indexed oracle,
-        bytes32 salt
-    );
+    event ModuleDeployed(address indexed module, address indexed safe, address indexed oracle, bytes32 salt);
     event RegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event AutoRegisterToggled(bool enabled);
 
@@ -74,10 +69,15 @@ contract ModuleFactoryTest is Test {
         assertEq(address(factory.registry()), address(newRegistry));
     }
 
+    function testSetRegistryRevertsOnZeroAddress() public {
+        vm.expectRevert(ModuleFactory.InvalidAddress.selector);
+        factory.setRegistry(address(0));
+    }
+
     function testSetRegistryOnlyOwner() public {
         vm.prank(makeAddr("notOwner"));
         vm.expectRevert();
-        factory.setRegistry(address(0));
+        factory.setRegistry(makeAddr("someRegistry"));
     }
 
     function testSetAutoRegister() public {
@@ -131,7 +131,6 @@ contract ModuleFactoryTest is Test {
         address module = factory.deployModule(address(safe1), oracle);
 
         assertEq(module, predicted);
-        assertEq(factory.deployedModules(address(safe1)), module);
         assertEq(factory.getNonce(address(safe1)), 1);
 
         // Verify module was deployed correctly
@@ -139,6 +138,11 @@ contract ModuleFactoryTest is Test {
         assertEq(deployedModule.avatar(), address(safe1));
         assertEq(deployedModule.owner(), address(safe1));
         assertEq(deployedModule.authorizedOracle(), oracle);
+
+        // Verify tracked in deployedModules array
+        address[] memory modules = factory.getDeployedModules(address(safe1));
+        assertEq(modules.length, 1);
+        assertEq(modules[0], module);
     }
 
     function testDeployModuleAutoRegisters() public {
@@ -161,6 +165,11 @@ contract ModuleFactoryTest is Test {
 
         // Should NOT be registered in registry
         assertFalse(registry.isRegistered(module));
+
+        // But should be tracked in factory
+        address[] memory modules = factory.getDeployedModules(address(safe1));
+        assertEq(modules.length, 1);
+        assertEq(modules[0], module);
     }
 
     function testDeployModuleRevertsOnZeroAddress() public {
@@ -226,9 +235,26 @@ contract ModuleFactoryTest is Test {
         // First deployment succeeds
         factory.deployModule(address(safe1), oracle);
 
-        // Second deployment for same Safe should revert (pre-check before CREATE2)
+        // Second deployment for same Safe should revert (pre-check via registry)
         address existingModule = registry.safeToModule(address(safe1));
-        vm.expectRevert(abi.encodeWithSelector(ModuleFactory.SafeAlreadyHasModule.selector, address(safe1), existingModule));
+        vm.expectRevert(
+            abi.encodeWithSelector(ModuleFactory.SafeAlreadyHasModule.selector, address(safe1), existingModule)
+        );
+        factory.deployModule(address(safe1), oracle);
+    }
+
+    function testDeployModuleRevertsIfSafeAlreadyHasModuleEvenWithAutoRegisterOff() public {
+        // Deploy with auto-register on
+        factory.deployModule(address(safe1), oracle);
+
+        // Toggle auto-register off
+        factory.setAutoRegister(false);
+
+        // Should still revert because registry check runs regardless of autoRegister
+        address existingModule = registry.safeToModule(address(safe1));
+        vm.expectRevert(
+            abi.encodeWithSelector(ModuleFactory.SafeAlreadyHasModule.selector, address(safe1), existingModule)
+        );
         factory.deployModule(address(safe1), oracle);
     }
 
@@ -246,16 +272,34 @@ contract ModuleFactoryTest is Test {
 
     // ============ View Function Tests ============
 
-    function testGetDeployedModule() public {
-        (bool hasBefore, address moduleBefore) = factory.getDeployedModule(address(safe1));
+    function testGetDeployedModules() public {
+        address[] memory modulesBefore = factory.getDeployedModules(address(safe1));
+        assertEq(modulesBefore.length, 0);
+
+        address deployed = factory.deployModule(address(safe1), oracle);
+
+        address[] memory modulesAfter = factory.getDeployedModules(address(safe1));
+        assertEq(modulesAfter.length, 1);
+        assertEq(modulesAfter[0], deployed);
+    }
+
+    function testGetLatestDeployedModule() public {
+        (bool hasBefore, address moduleBefore) = factory.getLatestDeployedModule(address(safe1));
         assertFalse(hasBefore);
         assertEq(moduleBefore, address(0));
 
         address deployed = factory.deployModule(address(safe1), oracle);
 
-        (bool hasAfter, address moduleAfter) = factory.getDeployedModule(address(safe1));
+        (bool hasAfter, address moduleAfter) = factory.getLatestDeployedModule(address(safe1));
         assertTrue(hasAfter);
         assertEq(moduleAfter, deployed);
+    }
+
+    function testGetDeployedModuleCount() public {
+        assertEq(factory.getDeployedModuleCount(address(safe1)), 0);
+
+        factory.deployModule(address(safe1), oracle);
+        assertEq(factory.getDeployedModuleCount(address(safe1)), 1);
     }
 
     function testGetNonce() public {
@@ -285,5 +329,28 @@ contract ModuleFactoryTest is Test {
         bytes32 salt1 = factory.computeSalt(address(safe1), 0);
         bytes32 salt2 = factory.computeSalt(address(safe1), 0);
         assertEq(salt1, salt2);
+    }
+
+    // ============ Desync Prevention Tests ============
+
+    function testDeployAfterRegistryRemovalAllowed() public {
+        // Deploy first module
+        address module1 = factory.deployModule(address(safe1), oracle);
+        assertTrue(registry.isRegistered(module1));
+
+        // Remove from registry
+        registry.removeModule(module1);
+        assertFalse(registry.isRegistered(module1));
+        assertEq(registry.safeToModule(address(safe1)), address(0));
+
+        // Can now deploy another module for same Safe
+        address module2 = factory.deployModule(address(safe1), oracle);
+        assertTrue(registry.isRegistered(module2));
+
+        // Factory tracks both deployments
+        address[] memory modules = factory.getDeployedModules(address(safe1));
+        assertEq(modules.length, 2);
+        assertEq(modules[0], module1);
+        assertEq(modules[1], module2);
     }
 }

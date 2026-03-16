@@ -19,20 +19,15 @@ contract ModuleFactory is Ownable {
     /// @notice Whether to auto-register deployed modules
     bool public autoRegister;
 
-    /// @notice Tracks all deployments from this factory: safe => module
-    mapping(address => address) public deployedModules;
+    /// @notice Tracks all deployments from this factory: safe => list of deployed modules
+    mapping(address => address[]) private _deployedModules;
 
     /// @notice Nonce for additional salt uniqueness (increments after each deployment)
     mapping(address => uint256) public deploymentNonce;
 
     // ============ Events ============
 
-    event ModuleDeployed(
-        address indexed module,
-        address indexed safe,
-        address indexed oracle,
-        bytes32 salt
-    );
+    event ModuleDeployed(address indexed module, address indexed safe, address indexed oracle, bytes32 salt);
     event RegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event AutoRegisterToggled(bool enabled);
 
@@ -53,11 +48,7 @@ contract ModuleFactory is Ownable {
      * @param _registry The ModuleRegistry address (can be address(0) initially)
      * @param _autoRegister Whether to auto-register on deploy
      */
-    constructor(
-        address _initialOwner,
-        address _registry,
-        bool _autoRegister
-    ) Ownable(_initialOwner) {
+    constructor(address _initialOwner, address _registry, bool _autoRegister) Ownable(_initialOwner) {
         registry = IModuleRegistry(_registry);
         autoRegister = _autoRegister;
     }
@@ -66,9 +57,10 @@ contract ModuleFactory is Ownable {
 
     /**
      * @notice Set the registry address
-     * @param _registry The new registry address
+     * @param _registry The new registry address (must not be address(0))
      */
     function setRegistry(address _registry) external onlyOwner {
+        if (_registry == address(0)) revert InvalidAddress();
         address oldRegistry = address(registry);
         registry = IModuleRegistry(_registry);
         emit RegistryUpdated(oldRegistry, _registry);
@@ -104,21 +96,14 @@ contract ModuleFactory is Ownable {
      * @param nonce The nonce for salt generation
      * @return predicted The predicted module address
      */
-    function computeModuleAddress(
-        address safe,
-        address oracle,
-        uint256 nonce
-    ) external view returns (address predicted) {
+    function computeModuleAddress(address safe, address oracle, uint256 nonce)
+        external
+        view
+        returns (address predicted)
+    {
         bytes32 salt = computeSalt(safe, nonce);
         bytes memory bytecode = _getCreationBytecode(safe, oracle);
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                bytes1(0xff),
-                address(this),
-                salt,
-                keccak256(bytecode)
-            )
-        );
+        bytes32 hash = keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, keccak256(bytecode)));
         return address(uint160(uint256(hash)));
     }
 
@@ -130,10 +115,7 @@ contract ModuleFactory is Ownable {
      * @param oracle The authorized oracle address
      * @return module The deployed module address
      */
-    function deployModule(
-        address safe,
-        address oracle
-    ) external onlyOwner returns (address module) {
+    function deployModule(address safe, address oracle) external onlyOwner returns (address module) {
         return _deployModule(safe, oracle, deploymentNonce[safe]);
     }
 
@@ -144,11 +126,11 @@ contract ModuleFactory is Ownable {
      * @param nonce The nonce for salt generation
      * @return module The deployed module address
      */
-    function deployModuleWithNonce(
-        address safe,
-        address oracle,
-        uint256 nonce
-    ) external onlyOwner returns (address module) {
+    function deployModuleWithNonce(address safe, address oracle, uint256 nonce)
+        external
+        onlyOwner
+        returns (address module)
+    {
         return _deployModule(safe, oracle, nonce);
     }
 
@@ -159,11 +141,7 @@ contract ModuleFactory is Ownable {
      * @param nonce The nonce for salt generation
      * @return module The deployed module address
      */
-    function _deployModule(
-        address safe,
-        address oracle,
-        uint256 nonce
-    ) internal returns (address module) {
+    function _deployModule(address safe, address oracle, uint256 nonce) internal returns (address module) {
         // Validate addresses
         if (safe == address(0) || oracle == address(0)) {
             revert InvalidAddress();
@@ -174,12 +152,18 @@ contract ModuleFactory is Ownable {
             revert InvalidOracleAddress(oracle);
         }
 
-        // Pre-check registry before deployment to prevent factory/registry state mismatch
-        if (autoRegister && address(registry) != address(0)) {
+        // Always check registry for existing Safe module (prevents factory/registry desync
+        // regardless of autoRegister setting - e.g., toggling autoRegister after deployment)
+        if (address(registry) != address(0)) {
             address existingModule = registry.getModuleForSafe(safe);
             if (existingModule != address(0)) {
                 revert SafeAlreadyHasModule(safe, existingModule);
             }
+        }
+
+        // Validate auto-register prerequisites before deployment
+        if (autoRegister && address(registry) == address(0)) {
+            revert RegistryNotSet();
         }
 
         bytes32 salt = computeSalt(safe, nonce);
@@ -200,16 +184,13 @@ contract ModuleFactory is Ownable {
         }
 
         // Update tracking
-        deployedModules[safe] = module;
+        _deployedModules[safe].push(module);
         deploymentNonce[safe] = nonce + 1;
 
         emit ModuleDeployed(module, safe, oracle, salt);
 
         // Auto-register if enabled
         if (autoRegister) {
-            if (address(registry) == address(0)) {
-                revert RegistryNotSet();
-            }
             registry.registerModuleFromFactory(module, safe, oracle);
         }
 
@@ -222,18 +203,8 @@ contract ModuleFactory is Ownable {
      * @param bytecode The creation bytecode
      * @return predicted The predicted address
      */
-    function _computeCreate2Address(
-        bytes32 salt,
-        bytes memory bytecode
-    ) internal view returns (address predicted) {
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                bytes1(0xff),
-                address(this),
-                salt,
-                keccak256(bytecode)
-            )
-        );
+    function _computeCreate2Address(bytes32 salt, bytes memory bytecode) internal view returns (address predicted) {
+        bytes32 hash = keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, keccak256(bytecode)));
         return address(uint160(uint256(hash)));
     }
 
@@ -243,10 +214,7 @@ contract ModuleFactory is Ownable {
      * @param oracle The oracle address
      * @return bytecode The creation bytecode with constructor args
      */
-    function _getCreationBytecode(
-        address safe,
-        address oracle
-    ) internal pure returns (bytes memory) {
+    function _getCreationBytecode(address safe, address oracle) internal pure returns (bytes memory) {
         return abi.encodePacked(
             type(DeFiInteractorModule).creationCode,
             abi.encode(safe, safe, oracle) // avatar, owner, authorizedOracle
@@ -256,14 +224,35 @@ contract ModuleFactory is Ownable {
     // ============ View Functions ============
 
     /**
-     * @notice Check if a module has been deployed for a Safe
+     * @notice Get all modules deployed for a Safe
      * @param safe The Safe address
-     * @return hasModule Whether a module exists
-     * @return module The module address (address(0) if none)
+     * @return modules Array of deployed module addresses
      */
-    function getDeployedModule(address safe) external view returns (bool hasModule, address module) {
-        module = deployedModules[safe];
-        hasModule = module != address(0);
+    function getDeployedModules(address safe) external view returns (address[] memory modules) {
+        return _deployedModules[safe];
+    }
+
+    /**
+     * @notice Get the latest module deployed for a Safe
+     * @param safe The Safe address
+     * @return hasModule Whether any module exists
+     * @return module The latest module address (address(0) if none)
+     */
+    function getLatestDeployedModule(address safe) external view returns (bool hasModule, address module) {
+        uint256 length = _deployedModules[safe].length;
+        if (length == 0) {
+            return (false, address(0));
+        }
+        return (true, _deployedModules[safe][length - 1]);
+    }
+
+    /**
+     * @notice Get the number of modules deployed for a Safe
+     * @param safe The Safe address
+     * @return count Number of deployed modules
+     */
+    function getDeployedModuleCount(address safe) external view returns (uint256) {
+        return _deployedModules[safe].length;
     }
 
     /**
