@@ -1,0 +1,49 @@
+{
+  "moduleAddresses": [],
+  "registryAddress": "",
+  "chainSelectorName": "base-mainnet",
+  "gasLimit": "500000",
+  "proxyAddress": "",
+  "refreshSchedule": "*/5 * * * *",
+  "windowDurationSeconds": 86400,
+  "blocksToLookBack": 43200,
+  "maxBlocksPerQuery": 5000,
+  "maxHistoricalBlocks": 432000,
+  "tokens": [
+    {
+      "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "priceFeedAddress": "0x7e860098F58bBFC8648a4311b374B1D669a2bc6B",
+      "symbol": "USDC"
+    },
+    {
+      "address": "0x4200000000000000000000000000000000000006",
+      "priceFeedAddress": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+      "symbol": "WETH"
+    },
+    {
+      "address": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+      "priceFeedAddress": "0x591e79239a7d679378eC8c847e5038150364C78F",
+      "symbol": "DAI"
+    },
+    {
+      "address": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
+      "priceFeedAddress": "0xd7818272B9e248357d13057AAb0B417aF31E817d",
+      "symbol": "cbETH"
+    },
+    {
+      "address": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+      "priceFeedAddress": "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D",
+      "symbol": "cbBTC"
+    },
+    {
+      "address": "0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196",
+      "priceFeedAddress": "0x17CAb8FE31cA45e4684181bCB02e26f877aEEaEF",
+      "symbol": "LINK"
+    },
+    {
+      "address": "0xcfA132E353cB4E398080B9700609bb008eceB125",
+      "priceFeedAddress": "0x978B06bB4bDf7cc3650B70B7aF36CF6E95Cf0dBE",
+      "symbol": "AAVE"
+    }
+  ]
+}

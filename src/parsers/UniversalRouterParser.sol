@@ -55,9 +55,6 @@ contract UniversalRouterParser is ICalldataParser {
     address public constant MSG_SENDER = address(1);
     address public constant ADDRESS_THIS = address(2);
 
-    // WETH address on Sepolia (also used to represent native ETH in paths)
-    address public constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
         if (data.length < 4) revert InvalidCalldata();
@@ -81,9 +78,10 @@ contract UniversalRouterParser is ICalldataParser {
                 // V3 swap params: (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
                 // First token is at start of path
                 bytes memory swapInput = inputs[i];
-                if (swapInput.length >= 128) { // Need at least recipient + amounts + path offset
-                    // Path is at a dynamic offset, need to decode
-                    (, , , bytes memory path, ) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
+                if (swapInput.length >= 128) {
+                    // Need at least recipient + amounts + path offset
+                // Path is at a dynamic offset, need to decode
+                    (,,, bytes memory path,) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     if (path.length >= 20) {
                         // First 20 bytes of path is tokenIn for EXACT_IN
                         // For EXACT_OUT, path is reversed so first is tokenOut
@@ -106,7 +104,7 @@ contract UniversalRouterParser is ICalldataParser {
                 // V2 swap params: (address recipient, uint256 amountIn, uint256 amountOutMin, address[] path, bool payerIsUser)
                 bytes memory swapInput = inputs[i];
                 if (swapInput.length >= 128) {
-                    (, , , address[] memory path, ) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
+                    (,,, address[] memory path,) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
                     if (path.length > 0) {
                         tokens = new address[](1);
                         if (command == V2_SWAP_EXACT_IN) {
@@ -135,7 +133,12 @@ contract UniversalRouterParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
@@ -161,10 +164,10 @@ contract UniversalRouterParser is ICalldataParser {
                 if (swapInput.length >= 128) {
                     if (command == V3_SWAP_EXACT_IN) {
                         // amountIn is second param
-                        (, amount, , , ) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
+                        (, amount,,,) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     } else {
                         // EXACT_OUT: amountInMax is third param
-                        (, , amount, , ) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
+                        (,, amount,,) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     }
                     amounts = new uint256[](1);
                     amounts[0] = amount;
@@ -174,9 +177,9 @@ contract UniversalRouterParser is ICalldataParser {
                 bytes memory swapInput = inputs[i];
                 if (swapInput.length >= 128) {
                     if (command == V2_SWAP_EXACT_IN) {
-                        (, amount, , , ) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
+                        (, amount,,,) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
                     } else {
-                        (, , amount, , ) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
+                        (,, amount,,) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
                     }
                     amounts = new uint256[](1);
                     amounts[0] = amount;
@@ -198,7 +201,12 @@ contract UniversalRouterParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+    function extractOutputTokens(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
@@ -207,7 +215,7 @@ contract UniversalRouterParser is ICalldataParser {
 
         // Find last swap/unwrap command to get output token
         for (uint256 i = commands.length; i > 0; i--) {
-            uint8 command = uint8(commands[i-1]) & 0x3f;
+            uint8 command = uint8(commands[i - 1]) & 0x3f;
             address token;
 
             if (command == UNWRAP_WETH) {
@@ -216,9 +224,9 @@ contract UniversalRouterParser is ICalldataParser {
                 tokens[0] = address(0);
                 return tokens;
             } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT) {
-                bytes memory swapInput = inputs[i-1];
+                bytes memory swapInput = inputs[i - 1];
                 if (swapInput.length >= 128) {
-                    (, , , bytes memory path, ) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
+                    (,,, bytes memory path,) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     if (path.length >= 20) {
                         if (command == V3_SWAP_EXACT_IN) {
                             // Last 20 bytes of path is tokenOut
@@ -237,9 +245,9 @@ contract UniversalRouterParser is ICalldataParser {
                     }
                 }
             } else if (command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
-                bytes memory swapInput = inputs[i-1];
+                bytes memory swapInput = inputs[i - 1];
                 if (swapInput.length >= 128) {
-                    (, , , address[] memory path, ) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
+                    (,,, address[] memory path,) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
                     if (path.length > 0) {
                         tokens = new address[](1);
                         if (command == V2_SWAP_EXACT_IN) {
@@ -253,7 +261,7 @@ contract UniversalRouterParser is ICalldataParser {
             } else if (command == V4_SWAP || command == V4_SWAP_ALT) {
                 // V4_SWAP params: (bytes actions, bytes[] params)
                 bool found;
-                (token, found) = _extractV4OutputToken(inputs[i-1]);
+                (token, found) = _extractV4OutputToken(inputs[i - 1]);
                 if (found) {
                     tokens = new address[](1);
                     tokens[0] = token; // address(0) = native ETH in V4
@@ -267,7 +275,12 @@ contract UniversalRouterParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
@@ -319,8 +332,10 @@ contract UniversalRouterParser is ICalldataParser {
                         return _resolveRecipient(recipient, defaultRecipient);
                     }
                 }
-            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT ||
-                       command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
+            } else if (
+                command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT || command == V2_SWAP_EXACT_IN
+                    || command == V2_SWAP_EXACT_OUT
+            ) {
                 // V3/V2 swap params: (address recipient, uint256 amountIn, uint256 amountOutMin, ...)
                 bytes memory swapInput = inputs[i];
                 if (swapInput.length >= 32) {
@@ -389,7 +404,7 @@ contract UniversalRouterParser is ICalldataParser {
                 // For EXACT_IN_SINGLE: zeroForOne determines direction
                 if (params[i].length >= 160) {
                     // Decode PoolKey (first 5 slots) + zeroForOne
-                    (address currency0, address currency1, , , , bool zeroForOne) =
+                    (address currency0, address currency1,,,, bool zeroForOne) =
                         abi.decode(params[i], (address, address, uint24, int24, address, bool));
                     // zeroForOne=true means swap currency0->currency1, so input is currency0
                     // zeroForOne=false means swap currency1->currency0, so input is currency1
@@ -454,7 +469,7 @@ contract UniversalRouterParser is ICalldataParser {
                         amount := mload(add(add(params, add(32, mul(i, 32))), 192))
                     }
                     // Decode properly
-                    (, , , , , , uint128 amountIn, ) =
+                    (,,,,,, uint128 amountIn,) =
                         abi.decode(params[i], (address, address, uint24, int24, address, bool, uint128, uint128));
                     return uint256(amountIn);
                 }
@@ -505,7 +520,8 @@ contract UniversalRouterParser is ICalldataParser {
         // V4 action 0x0e = TAKE, params: (Currency currency, address recipient, uint256 amount)
         for (uint256 i = 0; i < actions.length && i < params.length; i++) {
             uint8 action = uint8(actions[i]);
-            if (action == 0x0e) { // TAKE action
+            if (action == 0x0e) {
+                // TAKE action
                 if (params[i].length >= 32) {
                     bytes memory paramData = params[i];
                     address currency;
@@ -519,12 +535,12 @@ contract UniversalRouterParser is ICalldataParser {
 
         // Fallback: look for swap actions in reverse order (last swap determines output)
         for (uint256 i = actions.length; i > 0; i--) {
-            uint8 action = uint8(actions[i-1]);
+            uint8 action = uint8(actions[i - 1]);
 
             if (action == V4_SWAP_EXACT_IN_SINGLE || action == V4_SWAP_EXACT_OUT_SINGLE) {
-                if (params[i-1].length >= 160) {
-                    (address currency0, address currency1, , , , bool zeroForOne) =
-                        abi.decode(params[i-1], (address, address, uint24, int24, address, bool));
+                if (params[i - 1].length >= 160) {
+                    (address currency0, address currency1,,,, bool zeroForOne) =
+                        abi.decode(params[i - 1], (address, address, uint24, int24, address, bool));
                     // zeroForOne=true means swap currency0->currency1, so output is currency1
                     if (action == V4_SWAP_EXACT_IN_SINGLE) {
                         return (zeroForOne ? currency1 : currency0, true);
