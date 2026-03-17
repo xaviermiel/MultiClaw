@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {AgentVaultFactory} from "../src/AgentVaultFactory.sol";
+import {PresetRegistry} from "../src/PresetRegistry.sol";
 import {ModuleRegistry} from "../src/ModuleRegistry.sol";
 import {DeFiInteractorModule} from "../src/DeFiInteractorModule.sol";
 import {IModuleRegistry} from "../src/interfaces/IModuleRegistry.sol";
@@ -11,10 +12,13 @@ import {MockChainlinkPriceFeed} from "./mocks/MockChainlinkPriceFeed.sol";
 
 /**
  * @title AgentVaultFactoryTest
- * @notice Tests for the AgentVaultFactory contract
+ * @notice Tests for AgentVaultFactory + PresetRegistry
+ * @dev Covers: constructor, configuration, preset CRUD, custom deployment,
+ *      preset-based deployment, validation, registry integration, edge cases.
  */
 contract AgentVaultFactoryTest is Test {
     AgentVaultFactory public factory;
+    PresetRegistry public presetRegistry;
     ModuleRegistry public registry;
     MockSafe public safe1;
     MockSafe public safe2;
@@ -51,7 +55,8 @@ contract AgentVaultFactoryTest is Test {
 
         // Deploy registry and factory
         registry = new ModuleRegistry(owner);
-        factory = new AgentVaultFactory(owner, address(registry));
+        presetRegistry = new PresetRegistry(owner);
+        factory = new AgentVaultFactory(owner, address(registry), address(presetRegistry));
 
         // Authorize factory in registry
         registry.authorizeFactory(address(factory));
@@ -113,7 +118,7 @@ contract AgentVaultFactoryTest is Test {
         uint8[] memory selTypes = new uint8[](1);
         selTypes[0] = 1; // SWAP
 
-        return factory.createPreset(
+        return presetRegistry.createPreset(
             "DeFi Trader",
             1, // DEFI_EXECUTE_ROLE
             500, // 5%
@@ -131,11 +136,13 @@ contract AgentVaultFactoryTest is Test {
     function testConstructor() public view {
         assertEq(factory.owner(), owner);
         assertEq(address(factory.registry()), address(registry));
+        assertEq(address(factory.presetRegistry()), address(presetRegistry));
     }
 
-    function testConstructorWithoutRegistry() public {
-        AgentVaultFactory f = new AgentVaultFactory(owner, address(0));
+    function testConstructorWithoutRegistries() public {
+        AgentVaultFactory f = new AgentVaultFactory(owner, address(0), address(0));
         assertEq(address(f.registry()), address(0));
+        assertEq(address(f.presetRegistry()), address(0));
     }
 
     // ============ Configuration Tests ============
@@ -157,7 +164,18 @@ contract AgentVaultFactoryTest is Test {
         factory.setRegistry(makeAddr("newRegistry"));
     }
 
-    // ============ Preset Tests ============
+    function testSetPresetRegistry() public {
+        PresetRegistry newPr = new PresetRegistry(owner);
+        factory.setPresetRegistry(address(newPr));
+        assertEq(address(factory.presetRegistry()), address(newPr));
+    }
+
+    function testSetPresetRegistryRevertsOnZero() public {
+        vm.expectRevert(AgentVaultFactory.InvalidAddress.selector);
+        factory.setPresetRegistry(address(0));
+    }
+
+    // ============ PresetRegistry Tests ============
 
     function testCreatePreset() public {
         vm.expectEmit(true, false, false, true);
@@ -165,10 +183,10 @@ contract AgentVaultFactoryTest is Test {
 
         uint256 presetId = _createDefiTraderPreset();
         assertEq(presetId, 0);
-        assertEq(factory.presetCount(), 1);
+        assertEq(presetRegistry.presetCount(), 1);
 
         (string memory name, uint16 roleId, uint256 maxSpendingBps, uint256 windowDuration) =
-            factory.getPreset(presetId);
+            presetRegistry.getPreset(presetId);
         assertEq(name, "DeFi Trader");
         assertEq(roleId, 1);
         assertEq(maxSpendingBps, 500);
@@ -183,22 +201,23 @@ contract AgentVaultFactoryTest is Test {
         address[] memory empty = new address[](0);
         bytes4[] memory emptySel = new bytes4[](0);
         uint8[] memory emptyType = new uint8[](0);
-        uint256 id1 = factory.createPreset("Payment Agent", 2, 100, 1 days, empty, empty, empty, emptySel, emptyType);
+        uint256 id1 =
+            presetRegistry.createPreset("Payment Agent", 2, 100, 1 days, empty, empty, empty, emptySel, emptyType);
         assertEq(id1, 1);
-        assertEq(factory.presetCount(), 2);
+        assertEq(presetRegistry.presetCount(), 2);
     }
 
     function testGetPresetProtocols() public {
         uint256 presetId = _createDefiTraderPreset();
-        address[] memory protocols = factory.getPresetProtocols(presetId);
+        address[] memory protocols = presetRegistry.getPresetProtocols(presetId);
         assertEq(protocols.length, 2);
         assertEq(protocols[0], protocol1);
         assertEq(protocols[1], protocol2);
     }
 
     function testGetPresetRevertsOnInvalidId() public {
-        vm.expectRevert(abi.encodeWithSelector(AgentVaultFactory.PresetNotFound.selector, 999));
-        factory.getPreset(999);
+        vm.expectRevert(abi.encodeWithSelector(PresetRegistry.PresetNotFound.selector, 999));
+        presetRegistry.getPreset(999);
     }
 
     function testCreatePresetOnlyOwner() public {
@@ -208,7 +227,7 @@ contract AgentVaultFactoryTest is Test {
 
         vm.prank(agent);
         vm.expectRevert();
-        factory.createPreset("test", 1, 500, 1 days, empty, empty, empty, emptySel, emptyType);
+        presetRegistry.createPreset("test", 1, 500, 1 days, empty, empty, empty, emptySel, emptyType);
     }
 
     function testCreatePresetRevertsOnArrayMismatch() public {
@@ -219,8 +238,8 @@ contract AgentVaultFactoryTest is Test {
         uint8[] memory emptyType = new uint8[](0);
 
         // parserProtocols.length != parserAddresses.length
-        vm.expectRevert(AgentVaultFactory.ArrayLengthMismatch.selector);
-        factory.createPreset("bad", 1, 500, 1 days, empty, oneAddr, empty, emptySel, emptyType);
+        vm.expectRevert(PresetRegistry.ArrayLengthMismatch.selector);
+        presetRegistry.createPreset("bad", 1, 500, 1 days, empty, oneAddr, empty, emptySel, emptyType);
     }
 
     // ============ Deploy Vault Tests ============
@@ -328,11 +347,11 @@ contract AgentVaultFactoryTest is Test {
 
         address[] memory priceFeedTokens = new address[](1);
         priceFeedTokens[0] = protocol1;
-        address[] memory priceFeedAddresses = new address[](1);
-        priceFeedAddresses[0] = address(priceFeed);
+        address[] memory priceFeedAddrs = new address[](1);
+        priceFeedAddrs[0] = address(priceFeed);
 
         address module =
-            factory.deployVaultFromPreset(address(safe1), oracle, agent, presetId, priceFeedTokens, priceFeedAddresses);
+            factory.deployVaultFromPreset(address(safe1), oracle, agent, presetId, priceFeedTokens, priceFeedAddrs);
         assertTrue(module != address(0));
 
         DeFiInteractorModule m = DeFiInteractorModule(module);
@@ -352,8 +371,18 @@ contract AgentVaultFactoryTest is Test {
     function testDeployFromPresetRevertsOnInvalidPreset() public {
         address[] memory empty = new address[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(AgentVaultFactory.PresetNotFound.selector, 999));
+        vm.expectRevert(abi.encodeWithSelector(PresetRegistry.PresetNotFound.selector, 999));
         factory.deployVaultFromPreset(address(safe1), oracle, agent, 999, empty, empty);
+    }
+
+    function testDeployFromPresetRevertsIfNoPresetRegistry() public {
+        AgentVaultFactory factoryNoPr = new AgentVaultFactory(owner, address(registry), address(0));
+        registry.authorizeFactory(address(factoryNoPr));
+
+        address[] memory empty = new address[](0);
+
+        vm.expectRevert(AgentVaultFactory.PresetRegistryNotSet.selector);
+        factoryNoPr.deployVaultFromPreset(address(safe1), oracle, agent, 0, empty, empty);
     }
 
     // ============ Validation Tests ============
@@ -419,7 +448,7 @@ contract AgentVaultFactoryTest is Test {
     // ============ No Registry Tests ============
 
     function testDeployVaultWithoutRegistry() public {
-        AgentVaultFactory factoryNoReg = new AgentVaultFactory(owner, address(0));
+        AgentVaultFactory factoryNoReg = new AgentVaultFactory(owner, address(0), address(presetRegistry));
 
         AgentVaultFactory.VaultConfig memory config = _buildConfig(address(safe1));
         address module = factoryNoReg.deployVault(config);
@@ -472,7 +501,7 @@ contract AgentVaultFactoryTest is Test {
         bytes4[] memory emptySel = new bytes4[](0);
         uint8[] memory emptyType = new uint8[](0);
 
-        factory.updatePreset(
+        presetRegistry.updatePreset(
             presetId,
             "Updated DeFi Trader",
             1,
@@ -485,7 +514,7 @@ contract AgentVaultFactoryTest is Test {
             emptyType
         );
 
-        (string memory name,, uint256 maxBps, uint256 window) = factory.getPreset(presetId);
+        (string memory name,, uint256 maxBps, uint256 window) = presetRegistry.getPreset(presetId);
         assertEq(name, "Updated DeFi Trader");
         assertEq(maxBps, 1000);
         assertEq(window, 2 days);
@@ -496,7 +525,7 @@ contract AgentVaultFactoryTest is Test {
         bytes4[] memory emptySel = new bytes4[](0);
         uint8[] memory emptyType = new uint8[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(AgentVaultFactory.PresetNotFound.selector, 0));
-        factory.updatePreset(0, "bad", 1, 500, 1 days, empty, empty, empty, emptySel, emptyType);
+        vm.expectRevert(abi.encodeWithSelector(PresetRegistry.PresetNotFound.selector, 0));
+        presetRegistry.updatePreset(0, "bad", 1, 500, 1 days, empty, empty, empty, emptySel, emptyType);
     }
 }

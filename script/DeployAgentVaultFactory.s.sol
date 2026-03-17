@@ -3,11 +3,12 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
 import "../src/AgentVaultFactory.sol";
+import "../src/PresetRegistry.sol";
 import "../src/ModuleRegistry.sol";
 
 /**
  * @title DeployAgentVaultFactory
- * @notice Deploy the AgentVaultFactory and authorize it in the Registry
+ * @notice Deploy PresetRegistry + AgentVaultFactory and authorize the factory in the Registry
  *
  * Environment variables:
  *   - DEPLOYER_PRIVATE_KEY: Private key of deployer (must be Registry owner)
@@ -25,7 +26,7 @@ contract DeployAgentVaultFactory is Script {
         address registryAddress = vm.envAddress("REGISTRY_ADDRESS");
         address factoryOwner = vm.envOr("FACTORY_OWNER", deployer);
 
-        console.log("=== Deploy AgentVaultFactory ===");
+        console.log("=== Deploy AgentVaultFactory + PresetRegistry ===");
         console.log("Chain ID:", block.chainid);
         console.log("Deployer:", deployer);
         console.log("Owner:", factoryOwner);
@@ -38,13 +39,17 @@ contract DeployAgentVaultFactory is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // 1. Deploy the factory
-        AgentVaultFactory factory = new AgentVaultFactory(factoryOwner, registryAddress);
-        console.log("\n1. AgentVaultFactory deployed at:", address(factory));
+        // 1. Deploy PresetRegistry
+        PresetRegistry presetRegistry = new PresetRegistry(factoryOwner);
+        console.log("\n1. PresetRegistry deployed at:", address(presetRegistry));
 
-        // 2. Authorize the factory in the registry
+        // 2. Deploy AgentVaultFactory
+        AgentVaultFactory factory = new AgentVaultFactory(factoryOwner, registryAddress, address(presetRegistry));
+        console.log("2. AgentVaultFactory deployed at:", address(factory));
+
+        // 3. Authorize the factory in the registry
         registry.authorizeFactory(address(factory));
-        console.log("2. Factory authorized in registry");
+        console.log("3. Factory authorized in registry");
 
         vm.stopBroadcast();
 
@@ -52,10 +57,11 @@ contract DeployAgentVaultFactory is Script {
         require(registry.authorizedFactories(address(factory)), "Factory not authorized");
 
         console.log("\n=== Deployment Complete ===");
+        console.log("PresetRegistry:", address(presetRegistry));
         console.log("AgentVaultFactory:", address(factory));
         console.log("\nNext steps:");
-        console.log("1. Create presets with factory.createPreset(...)");
-        console.log("2. Deploy vaults with factory.deployVault(...) or factory.deployVaultFromPreset(...)");
+        console.log("1. Create presets on PresetRegistry: presetRegistry.createPreset(...)");
+        console.log("2. Deploy vaults: factory.deployVault(...) or factory.deployVaultFromPreset(...)");
         console.log("3. Users must enable the module on their Safe via Safe multisig tx");
     }
 }
