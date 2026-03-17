@@ -22,13 +22,16 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "viem": "^2.21.0"
+    "viem": "^2.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.0"
   },
   "peerDependencies": {
     "viem": "^2.0.0"
