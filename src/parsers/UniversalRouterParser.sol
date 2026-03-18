@@ -26,6 +26,7 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
 contract UniversalRouterParser is ICalldataParser {
     error UnsupportedSelector();
     error InvalidCalldata();
+    error UnsupportedV4ExactOutMultiHop();
 
     // Universal Router function selector
     bytes4 public constant EXECUTE_SELECTOR = 0x3593564c; // execute(bytes,bytes[],uint256)
@@ -80,7 +81,7 @@ contract UniversalRouterParser is ICalldataParser {
                 bytes memory swapInput = inputs[i];
                 if (swapInput.length >= 128) {
                     // Need at least recipient + amounts + path offset
-                // Path is at a dynamic offset, need to decode
+                    // Path is at a dynamic offset, need to decode
                     (,,, bytes memory path,) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     if (path.length >= 20) {
                         // First 20 bytes of path is tokenIn for EXACT_IN
@@ -439,9 +440,9 @@ contract UniversalRouterParser is ICalldataParser {
                     return (currencyIn, true);
                 }
             } else if (action == V4_SWAP_EXACT_OUT) {
-                // Multi-hop exact out: need to find the input currency from the path
-                // For now, skip - complex to decode
-                continue;
+                // Multi-hop exact out requires decoding PathKey[] which contains dynamic data
+                // Revert to prevent zero-spending bypass (C-01)
+                revert UnsupportedV4ExactOutMultiHop();
             }
         }
 
@@ -496,10 +497,18 @@ contract UniversalRouterParser is ICalldataParser {
                     }
                     return amount;
                 }
-            } else if (action == V4_SWAP_EXACT_OUT_SINGLE || action == V4_SWAP_EXACT_OUT) {
-                // For EXACT_OUT, the amount is amountInMax (third param after PoolKey/path)
-                // Similar structure but we want amountInMax
-                continue; // Skip for now - focus on EXACT_IN
+            } else if (action == V4_SWAP_EXACT_OUT_SINGLE) {
+                // (PoolKey, bool zeroForOne, uint128 amountOut, uint128 amountInMax, bytes hookData)
+                // For spending limits, use amountInMax (maximum input the user will spend)
+                if (params[i].length >= 256) {
+                    (,,,,,,, uint128 amountInMax) =
+                        abi.decode(params[i], (address, address, uint24, int24, address, bool, uint128, uint128));
+                    return uint256(amountInMax);
+                }
+            } else if (action == V4_SWAP_EXACT_OUT) {
+                // Multi-hop exact out requires decoding PathKey[] which contains dynamic data
+                // Revert to prevent zero-spending bypass (C-01)
+                revert UnsupportedV4ExactOutMultiHop();
             }
         }
 

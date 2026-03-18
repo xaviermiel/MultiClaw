@@ -38,12 +38,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     /// @notice Operation types for selector-based classification
     enum OperationType {
-        UNKNOWN,    // Must revert - unregistered selector
-        SWAP,       // Costs spending (from original), output is acquired
-        DEPOSIT,    // Costs spending (from original), tracked for withdrawal matching
-        WITHDRAW,   // FREE, output becomes acquired if matched to deposit
-        CLAIM,      // FREE, output becomes acquired if matched to deposit (same as WITHDRAW)
-        APPROVE     // FREE but capped, enables future operations
+        UNKNOWN, // Must revert - unregistered selector
+        SWAP, // Costs spending (from original), output is acquired
+        DEPOSIT, // Costs spending (from original), tracked for withdrawal matching
+        WITHDRAW, // FREE, output becomes acquired if matched to deposit
+        CLAIM, // FREE, output becomes acquired if matched to deposit (same as WITHDRAW)
+        APPROVE // FREE but capped, enables future operations
     }
 
     /// @notice Registered operation type for each function selector
@@ -73,9 +73,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     /// @notice Struct to store Safe's USD value data
     struct SafeValue {
-        uint256 totalValueUSD;  // Total USD value with 18 decimals
-        uint256 lastUpdated;    // Timestamp of last update
-        uint256 updateCount;    // Number of updates received
+        uint256 totalValueUSD; // Total USD value with 18 decimals
+        uint256 lastUpdated; // Timestamp of last update
+        uint256 updateCount; // Number of updates received
     }
 
     /// @notice Safe's current USD value
@@ -92,9 +92,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     /// @notice Configuration for sub-account limits
     struct SubAccountLimits {
-        uint256 maxSpendingBps;     // Maximum spending in basis points
-        uint256 windowDuration;     // Time window duration in seconds
-        bool isConfigured;          // Whether limits have been explicitly set
+        uint256 maxSpendingBps; // Maximum spending in basis points
+        uint256 windowDuration; // Time window duration in seconds
+        bool isConfigured; // Whether limits have been explicitly set
     }
 
     /// @notice Per-sub-account limit configuration
@@ -122,17 +122,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event RoleAssigned(address indexed member, uint16 indexed roleId);
     event RoleRevoked(address indexed member, uint16 indexed roleId);
 
-    event SubAccountLimitsSet(
-        address indexed subAccount,
-        uint256 maxSpendingBps,
-        uint256 windowDuration
-    );
+    event SubAccountLimitsSet(address indexed subAccount, uint256 maxSpendingBps, uint256 windowDuration);
 
-    event AllowedAddressesSet(
-        address indexed subAccount,
-        address[] targets,
-        bool allowed
-    );
+    event AllowedAddressesSet(address indexed subAccount, address[] targets, bool allowed);
 
     /// @notice Emitted on every protocol interaction (for oracle consumption)
     event ProtocolExecution(
@@ -157,16 +149,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event SafeValueUpdated(uint256 totalValueUSD, uint256 updateCount);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
 
-    event SpendingAllowanceUpdated(
-        address indexed subAccount,
-        uint256 newAllowance
-    );
+    event SpendingAllowanceUpdated(address indexed subAccount, uint256 newAllowance);
 
-    event AcquiredBalanceUpdated(
-        address indexed subAccount,
-        address indexed token,
-        uint256 newBalance
-    );
+    event AcquiredBalanceUpdated(address indexed subAccount, address indexed token, uint256 newBalance);
 
     event SelectorRegistered(bytes4 indexed selector, OperationType opType);
     event SelectorUnregistered(bytes4 indexed selector);
@@ -219,9 +204,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param _owner The owner address (typically the Safe itself)
      * @param _authorizedOracle The Chainlink CRE address authorized to update state
      */
-    constructor(address _avatar, address _owner, address _authorizedOracle)
-        Module(_avatar, _avatar, _owner)
-    {
+    constructor(address _avatar, address _owner, address _authorizedOracle) Module(_avatar, _avatar, _owner) {
         if (_authorizedOracle == address(0)) revert InvalidOracleAddress();
         authorizedOracle = _authorizedOracle;
     }
@@ -321,11 +304,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Sub-Account Configuration ============
 
-    function setSubAccountLimits(
-        address subAccount,
-        uint256 maxSpendingBps,
-        uint256 windowDuration
-    ) external onlyOwner {
+    function setSubAccountLimits(address subAccount, uint256 maxSpendingBps, uint256 windowDuration)
+        external
+        onlyOwner
+    {
         if (subAccount == address(0)) revert InvalidAddress();
         // Prevent Safe and Module from being subaccounts
         if (subAccount == avatar || subAccount == address(this)) revert CannotBeSubaccount(subAccount);
@@ -333,19 +315,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert InvalidLimitConfiguration();
         }
 
-        subAccountLimits[subAccount] = SubAccountLimits({
-            maxSpendingBps: maxSpendingBps,
-            windowDuration: windowDuration,
-            isConfigured: true
-        });
+        subAccountLimits[subAccount] =
+            SubAccountLimits({maxSpendingBps: maxSpendingBps, windowDuration: windowDuration, isConfigured: true});
 
         // Cap spending allowance to new maximum if it exceeds it
         // - If remaining > new max: cap to new max (can't keep more than allowed)
         // - If remaining <= new max: keep as is (don't auto-increase)
         // Only cap if Safe value is fresh (stale value could be dangerously outdated)
-        if (safeValue.totalValueUSD > 0 &&
-            safeValue.lastUpdated > 0 &&
-            block.timestamp - safeValue.lastUpdated <= maxSafeValueAge) {
+        if (
+            safeValue.totalValueUSD > 0 && safeValue.lastUpdated > 0
+                && block.timestamp - safeValue.lastUpdated <= maxSafeValueAge
+        ) {
             uint256 newMaxAllowance = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
             if (spendingAllowance[subAccount] > newMaxAllowance) {
                 spendingAllowance[subAccount] = newMaxAllowance;
@@ -356,10 +336,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit SubAccountLimitsSet(subAccount, maxSpendingBps, windowDuration);
     }
 
-    function getSubAccountLimits(address subAccount) public view returns (
-        uint256 maxSpendingBps,
-        uint256 windowDuration
-    ) {
+    function getSubAccountLimits(address subAccount)
+        public
+        view
+        returns (uint256 maxSpendingBps, uint256 windowDuration)
+    {
         SubAccountLimits memory limits = subAccountLimits[subAccount];
         if (limits.isConfigured) {
             return (limits.maxSpendingBps, limits.windowDuration);
@@ -367,11 +348,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         return (DEFAULT_MAX_SPENDING_BPS, DEFAULT_WINDOW_DURATION);
     }
 
-    function setAllowedAddresses(
-        address subAccount,
-        address[] calldata targets,
-        bool allowed
-    ) external onlyOwner {
+    function setAllowedAddresses(address subAccount, address[] calldata targets, bool allowed) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
         for (uint256 i = 0; i < targets.length; i++) {
             // Prevent whitelisting Safe or Module as targets
@@ -390,10 +367,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param data The calldata to execute
      * @dev Token and amount are extracted from calldata via registered parsers
      */
-    function executeOnProtocol(
-        address target,
-        bytes calldata data
-    ) external nonReentrant whenNotPaused returns (bytes memory) {
+    function executeOnProtocol(address target, bytes calldata data)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (bytes memory)
+    {
         // 1. Validate permissions
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
         _requireFreshOracle(msg.sender);
@@ -428,10 +407,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param data The calldata to execute
      * @dev Same as executeOnProtocol but allows sending ETH (msg.value)
      */
-    function executeOnProtocolWithValue(
-        address target,
-        bytes calldata data
-    ) external payable nonReentrant whenNotPaused returns (bytes memory) {
+    function executeOnProtocolWithValue(address target, bytes calldata data)
+        external
+        payable
+        nonReentrant
+        whenNotPaused
+        returns (bytes memory)
+    {
         // 1. Validate permissions
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
         _requireFreshOracle(msg.sender);
@@ -487,12 +469,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Spending Check Logic ============
 
-    function _executeWithSpendingCheck(
-        address subAccount,
-        address target,
-        bytes calldata data,
-        OperationType opType
-    ) internal returns (bytes memory) {
+    function _executeWithSpendingCheck(address subAccount, address target, bytes calldata data, OperationType opType)
+        internal
+        returns (bytes memory)
+    {
         // 1. Parser is REQUIRED to extract token/amount from calldata
         ICalldataParser parser = protocolParsers[target];
         if (address(parser) == address(0)) {
@@ -539,9 +519,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
         }
 
         // 9. Execute
@@ -551,23 +529,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 10. Calculate output amounts for all tokens
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
         // 11. Emit event for oracle
-        emit ProtocolExecution(
-            subAccount,
-            target,
-            opType,
-            tokensIn,
-            amountsIn,
-            tokensOut,
-            amountsOut,
-            spendingCost
-        );
+        emit ProtocolExecution(subAccount, target, opType, tokensIn, amountsIn, tokensOut, amountsOut, spendingCost);
 
         return "";
     }
@@ -632,9 +599,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
         }
 
         // 11. Execute with value
@@ -644,35 +609,22 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 12. Calculate output amounts for all tokens
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
         // 13. Emit event for oracle
-        emit ProtocolExecution(
-            subAccount,
-            target,
-            opType,
-            tokensIn,
-            amountsIn,
-            tokensOut,
-            amountsOut,
-            spendingCost
-        );
+        emit ProtocolExecution(subAccount, target, opType, tokensIn, amountsIn, tokensOut, amountsOut, spendingCost);
 
         return "";
     }
 
     // ============ No Spending Check Logic ============
 
-    function _executeNoSpendingCheck(
-        address subAccount,
-        address target,
-        bytes calldata data,
-        OperationType opType
-    ) internal returns (bytes memory) {
+    function _executeNoSpendingCheck(address subAccount, address target, bytes calldata data, OperationType opType)
+        internal
+        returns (bytes memory)
+    {
         // 1. Parser is required for WITHDRAW/CLAIM to track output tokens for acquired balance
         ICalldataParser parser = protocolParsers[target];
         if (address(parser) == address(0)) {
@@ -689,9 +641,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address[] memory tokensOut = parser.extractOutputTokens(target, data);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
         }
 
         // 4. Execute (NO spending check - withdrawals and claims are free)
@@ -701,9 +651,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 5. Calculate received amounts for all tokens
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
@@ -717,7 +665,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             new uint256[](0), // no amountsIn
             tokensOut,
             amountsOut,
-            0                 // no spending cost
+            0 // no spending cost
         );
 
         return "";
@@ -746,9 +694,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address[] memory tokensOut = parser.extractOutputTokens(target, data);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
         }
 
         // 4. Execute with value (NO spending check - withdrawals and claims are free)
@@ -758,9 +704,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 5. Calculate received amounts for all tokens
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0)
-                ? IERC20(tokensOut[i]).balanceOf(avatar)
-                : avatar.balance;
+            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
@@ -774,7 +718,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             new uint256[](0), // no amountsIn
             tokensOut,
             amountsOut,
-            0                 // no spending cost
+            0 // no spending cost
         );
 
         return "";
@@ -784,9 +728,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     function _executeApproveWithCap(
         address subAccount,
-        address target,  // The token contract being approved
+        address target, // The token contract being approved
         bytes calldata data
-    ) internal returns (bytes memory) {
+    )
+        internal
+        returns (bytes memory)
+    {
         // 1. Extract spender and amount from calldata
         // approve(address spender, uint256 amount) - spender is first arg, amount is second
         address spender;
@@ -847,11 +794,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /**
      * @notice Transfer tokens from Safe - acquired tokens are free, non-acquired cost spending
      */
-    function transferToken(
-        address token,
-        address recipient,
-        uint256 amount
-    ) external nonReentrant whenNotPaused returns (bool) {
+    function transferToken(address token, address recipient, uint256 amount)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (bool)
+    {
         if (!hasRole(msg.sender, DEFI_TRANSFER_ROLE)) revert Unauthorized();
         if (token == address(0) || recipient == address(0)) revert InvalidAddress();
         _requireFreshOracle(msg.sender);
@@ -871,11 +819,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         acquiredBalance[msg.sender][token] -= usedFromAcquired;
 
         // Execute transfer
-        bytes memory transferData = abi.encodeWithSelector(
-            IERC20.transfer.selector,
-            recipient,
-            amount
-        );
+        bytes memory transferData = abi.encodeWithSelector(IERC20.transfer.selector, recipient, amount);
 
         bool success = exec(token, 0, transferData, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
@@ -902,11 +846,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
-    function updateAcquiredBalance(
-        address subAccount,
-        address token,
-        uint256 newBalance
-    ) external onlyOracle {
+    function updateAcquiredBalance(address subAccount, address token, uint256 newBalance) external onlyOracle {
+        // Cap acquired balance to Safe's actual token balance (H-01)
+        newBalance = _capToSafeBalance(token, newBalance);
         acquiredBalance[subAccount][token] = newBalance;
         lastOracleUpdate[subAccount] = block.timestamp;
 
@@ -929,8 +871,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         lastOracleUpdate[subAccount] = block.timestamp;
 
         for (uint256 i = 0; i < tokens.length; i++) {
-            acquiredBalance[subAccount][tokens[i]] = balances[i];
-            emit AcquiredBalanceUpdated(subAccount, tokens[i], balances[i]);
+            // Cap acquired balance to Safe's actual token balance (H-01)
+            uint256 cappedBalance = _capToSafeBalance(tokens[i], balances[i]);
+            acquiredBalance[subAccount][tokens[i]] = cappedBalance;
+            emit AcquiredBalanceUpdated(subAccount, tokens[i], cappedBalance);
         }
 
         emit SpendingAllowanceUpdated(subAccount, newAllowance);
@@ -940,8 +884,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (newOracle == address(0)) revert InvalidOracleAddress();
         // Prevent Safe or Module from being oracle
         if (newOracle == avatar || newOracle == address(this)) revert CannotBeOracle(newOracle);
-        // Prevent subaccounts from being oracle (check DEFI_EXECUTE_ROLE)
-        if (subAccountRoles[newOracle][DEFI_EXECUTE_ROLE]) revert CannotBeOracle(newOracle);
+        // Prevent subaccounts from being oracle (check both roles)
+        if (subAccountRoles[newOracle][DEFI_EXECUTE_ROLE] || subAccountRoles[newOracle][DEFI_TRANSFER_ROLE]) {
+            revert CannotBeOracle(newOracle);
+        }
         address oldOracle = authorizedOracle;
         authorizedOracle = newOracle;
         emit OracleUpdated(oldOracle, newOracle);
@@ -964,10 +910,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         tokenPriceFeeds[token] = AggregatorV3Interface(priceFeed);
     }
 
-    function setTokenPriceFeeds(
-        address[] calldata tokens,
-        address[] calldata priceFeeds
-    ) external onlyOwner {
+    function setTokenPriceFeeds(address[] calldata tokens, address[] calldata priceFeeds) external onlyOwner {
         if (tokens.length != priceFeeds.length) revert LengthMismatch();
         for (uint256 i = 0; i < tokens.length; i++) {
             // Note: address(0) is valid as it represents native ETH for swaps
@@ -992,6 +935,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
+    /**
+     * @notice Cap a value to the Safe's actual token balance
+     * @dev Uses try/catch for balanceOf to handle non-contract addresses gracefully
+     */
+    function _capToSafeBalance(address token, uint256 value) internal view returns (uint256) {
+        if (token == address(0)) {
+            uint256 safeBalance = avatar.balance;
+            return value > safeBalance ? safeBalance : value;
+        }
+        // Check if token is a contract before calling balanceOf
+        // (Solidity reverts on calls to non-contract addresses before try/catch can catch)
+        uint256 codeSize;
+        assembly { codeSize := extcodesize(token) }
+        if (codeSize == 0) return value;
+        try IERC20(token).balanceOf(avatar) returns (uint256 safeBalance) {
+            return value > safeBalance ? safeBalance : value;
+        } catch {
+            return value; // If balanceOf reverts (non-ERC20), don't cap
+        }
+    }
+
     function _enforceAllowanceCap(uint256 newAllowance) internal view {
         _requireFreshSafeValue();
         uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
@@ -1000,22 +964,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    function _estimateTokenValueUSD(
-        address token,
-        uint256 amount
-    ) internal view returns (uint256 valueUSD) {
+    function _estimateTokenValueUSD(address token, uint256 amount) internal view returns (uint256 valueUSD) {
         if (amount == 0) return 0;
 
         AggregatorV3Interface priceFeed = tokenPriceFeeds[token];
         if (address(priceFeed) == address(0)) revert NoPriceFeedSet();
 
-        (
-            uint80 roundId,
-            int256 answer,
-            ,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = priceFeed.latestRoundData();
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
 
         if (answer <= 0) revert InvalidPrice();
         if (updatedAt == 0) revert StalePriceFeed();
@@ -1029,19 +984,16 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint8 tokenDecimals = token == address(0) ? 18 : IERC20Metadata(token).decimals();
 
         // Calculate USD value with 18 decimals
-        valueUSD = Math.mulDiv(
-            amount * price,
-            10 ** 18,
-            10 ** uint256(tokenDecimals + priceDecimals),
-            Math.Rounding.Ceil
-        );
+        // Use mulDiv to avoid amount * price overflow (H-05)
+        valueUSD =
+            Math.mulDiv(amount, price * (10 ** 18), 10 ** uint256(tokenDecimals + priceDecimals), Math.Rounding.Ceil);
     }
 
-    function _getOutputTokens(
-        address target,
-        bytes calldata data,
-        ICalldataParser parser
-    ) internal view returns (address[] memory) {
+    function _getOutputTokens(address target, bytes calldata data, ICalldataParser parser)
+        internal
+        view
+        returns (address[] memory)
+    {
         if (address(parser) != address(0)) {
             try parser.extractOutputTokens(target, data) returns (address[] memory tokens) {
                 return tokens;
@@ -1054,18 +1006,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ View Functions ============
 
-    function getSafeValue() external view returns (
-        uint256 totalValueUSD,
-        uint256 lastUpdated,
-        uint256 updateCount
-    ) {
+    function getSafeValue() external view returns (uint256 totalValueUSD, uint256 lastUpdated, uint256 updateCount) {
         return (safeValue.totalValueUSD, safeValue.lastUpdated, safeValue.updateCount);
     }
 
-    function getAcquiredBalance(
-        address subAccount,
-        address token
-    ) external view returns (uint256) {
+    function getAcquiredBalance(address subAccount, address token) external view returns (uint256) {
         return acquiredBalance[subAccount][token];
     }
 
@@ -1073,12 +1018,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         return spendingAllowance[subAccount];
     }
 
-    function getTokenBalances(
-        address[] calldata tokens
-    ) external view returns (uint256[] memory balances) {
+    function getTokenBalances(address[] calldata tokens) external view returns (uint256[] memory balances) {
         balances = new uint256[](tokens.length);
         for (uint256 i = 0; i < tokens.length; i++) {
-            balances[i] = IERC20(tokens[i]).balanceOf(avatar);
+            balances[i] = tokens[i] == address(0) ? avatar.balance : IERC20(tokens[i]).balanceOf(avatar);
         }
     }
 }

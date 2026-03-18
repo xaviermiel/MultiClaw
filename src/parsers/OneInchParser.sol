@@ -81,21 +81,10 @@ contract OneInchParser is ICalldataParser {
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
-        } else if (selector == UNISWAP_V3_SWAP_TO_SELECTOR) {
-            // uniswapV3SwapTo pools contain token addresses in lower 160 bits
-            // First pool contains the input token
-            (,,, uint256[] memory pools) = abi.decode(data[4:], (address, uint256, uint256, uint256[]));
-            if (pools.length == 0) {
-                return new address[](0);
-            }
-            // Extract input token from first pool (lower 160 bits)
-            token = address(uint160(pools[0]));
-            tokens = new address[](1);
-            tokens[0] = token;
-            return tokens;
         } else if (selector == CLIPPER_SWAP_TO_SELECTOR) {
             // clipperSwapTo(address clipperExchange, address recipient, address srcToken, ...)
-            (,, token,,,,,,) = abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
+            (,, token,,,,,,) =
+                abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -105,7 +94,12 @@ contract OneInchParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         uint256 amount;
@@ -129,15 +123,10 @@ contract OneInchParser is ICalldataParser {
             amounts = new uint256[](1);
             amounts[0] = amount;
             return amounts;
-        } else if (selector == UNISWAP_V3_SWAP_TO_SELECTOR) {
-            // uniswapV3SwapTo(address recipient, uint256 amount, ...)
-            (, amount,,) = abi.decode(data[4:], (address, uint256, uint256, uint256[]));
-            amounts = new uint256[](1);
-            amounts[0] = amount;
-            return amounts;
         } else if (selector == CLIPPER_SWAP_TO_SELECTOR) {
             // clipperSwapTo(..., uint256 inputAmount, ...)
-            (,,,, amount,,,,) = abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
+            (,,,, amount,,,,) =
+                abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
             amounts = new uint256[](1);
             amounts[0] = amount;
             return amounts;
@@ -147,7 +136,12 @@ contract OneInchParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractOutputTokens(address, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
@@ -187,21 +181,10 @@ contract OneInchParser is ICalldataParser {
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
-        } else if (selector == UNISWAP_V3_SWAP_TO_SELECTOR) {
-            // uniswapV3SwapTo pools contain token addresses in lower 160 bits
-            // Last pool contains the output token
-            (,,, uint256[] memory pools) = abi.decode(data[4:], (address, uint256, uint256, uint256[]));
-            if (pools.length == 0) {
-                return new address[](0);
-            }
-            // Extract output token from last pool (lower 160 bits)
-            token = address(uint160(pools[pools.length - 1]));
-            tokens = new address[](1);
-            tokens[0] = token;
-            return tokens;
         } else if (selector == CLIPPER_SWAP_TO_SELECTOR) {
             // clipperSwapTo(..., address dstToken, ...)
-            (,,, token,,,,,) = abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
+            (,,, token,,,,,) =
+                abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -211,7 +194,12 @@ contract OneInchParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -228,12 +216,10 @@ contract OneInchParser is ICalldataParser {
         } else if (selector == UNOSWAP_TO_SELECTOR) {
             // unoswapTo(address to, ...)
             (recipient,,,,) = abi.decode(data[4:], (address, address, uint256, uint256, uint256[]));
-        } else if (selector == UNISWAP_V3_SWAP_TO_SELECTOR) {
-            // uniswapV3SwapTo(address recipient, ...)
-            (recipient,,,) = abi.decode(data[4:], (address, uint256, uint256, uint256[]));
         } else if (selector == CLIPPER_SWAP_TO_SELECTOR) {
             // clipperSwapTo(address clipperExchange, address recipient, ...)
-            (, recipient,,,,,,,) = abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
+            (, recipient,,,,,,,) =
+                abi.decode(data[4:], (address, address, address, address, uint256, uint256, uint256, bytes32, bytes32));
         } else {
             revert UnsupportedSelector();
         }
@@ -241,10 +227,7 @@ contract OneInchParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
-        return selector == SWAP_SELECTOR ||
-               selector == UNOSWAP_TO_SELECTOR ||
-               selector == UNISWAP_V3_SWAP_TO_SELECTOR ||
-               selector == CLIPPER_SWAP_TO_SELECTOR;
+        return selector == SWAP_SELECTOR || selector == UNOSWAP_TO_SELECTOR || selector == CLIPPER_SWAP_TO_SELECTOR;
     }
 
     /// @inheritdoc ICalldataParser
@@ -253,10 +236,7 @@ contract OneInchParser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         // All 1inch functions are swaps
-        if (selector == SWAP_SELECTOR ||
-            selector == UNOSWAP_TO_SELECTOR ||
-            selector == UNISWAP_V3_SWAP_TO_SELECTOR ||
-            selector == CLIPPER_SWAP_TO_SELECTOR) {
+        if (selector == SWAP_SELECTOR || selector == UNOSWAP_TO_SELECTOR || selector == CLIPPER_SWAP_TO_SELECTOR) {
             return 1; // SWAP
         }
 

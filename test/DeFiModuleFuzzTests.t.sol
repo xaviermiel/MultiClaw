@@ -16,12 +16,7 @@ contract MockSafeForFuzz {
         isModuleEnabled[module] = true;
     }
 
-    function execTransactionFromModule(
-        address,
-        uint256,
-        bytes calldata,
-        uint8
-    ) external pure returns (bool) {
+    function execTransactionFromModule(address, uint256, bytes calldata, uint8) external pure returns (bool) {
         return true;
     }
 }
@@ -43,13 +38,11 @@ contract MockPriceFeedForFuzz {
         return decimals_;
     }
 
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    ) {
+    function latestRoundData()
+        external
+        view
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
+    {
         return (1, price, block.timestamp, block.timestamp, 1);
     }
 
@@ -184,7 +177,7 @@ contract DeFiModuleFuzzTests is Test {
         module.setAllowedAddresses(subAccount, targets, true);
 
         // Set Safe value (1M USD)
-        module.updateSafeValue(1_000_000 * 10**18);
+        module.updateSafeValue(1_000_000 * 10 ** 18);
     }
 
     // ============ USD Value Calculation Fuzz Tests ============
@@ -195,17 +188,17 @@ contract DeFiModuleFuzzTests is Test {
      */
     function testFuzzUSDCalculation(uint256 amount, int256 price) public {
         // Bound price to realistic range (avoid negative and zero)
-        price = int256(bound(uint256(price), 1, 10**12)); // $0.00000001 to $10,000
+        price = int256(bound(uint256(price), 1, 10 ** 12)); // $0.00000001 to $10,000
 
         priceFeed.setPrice(price);
 
         // Bound amount to prevent overflow in calculation
         // valueUSD = amount * price * 10^18 / 10^(tokenDecimals + priceDecimals)
         // With 18 token decimals and 8 price decimals, max safe amount is ~10^50
-        amount = bound(amount, 0, 10**50);
+        amount = bound(amount, 0, 10 ** 50);
 
         // Max allowance is 20% of 1M USD = 200k USD
-        uint256 maxAllowance = 200_000 * 10**18;
+        uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
 
         // Set acquired balance to 0 so full amount counts as spending
@@ -228,13 +221,14 @@ contract DeFiModuleFuzzTests is Test {
         vm.prank(subAccount);
         // If amount is very high, it might exceed spending limit, which is expected
         try module.executeOnProtocol(protocol, data) {
-            // Success - no overflow
-        } catch (bytes memory reason) {
+        // Success - no overflow
+        }
+        catch (bytes memory reason) {
             // Check it's not an arithmetic error
             bytes4 errorSelector = bytes4(reason);
             assertTrue(
-                errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector ||
-                errorSelector == DeFiInteractorModule.TransactionFailed.selector,
+                errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector
+                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector,
                 "Should not have arithmetic overflow"
             );
         }
@@ -246,14 +240,14 @@ contract DeFiModuleFuzzTests is Test {
     function testFuzzDifferentTokenDecimals(uint8 decimals, uint256 amount) public {
         // Common decimals: 6 (USDC), 8 (WBTC), 18 (most ERC20)
         decimals = uint8(bound(decimals, 6, 18));
-        amount = bound(amount, 1, 10**30);
+        amount = bound(amount, 1, 10 ** 30);
 
         // Create new token with specified decimals
         MockTokenForFuzz customToken = new MockTokenForFuzz(decimals);
         module.setTokenPriceFeed(address(customToken), address(priceFeed));
 
         // Max allowance is 20% of 1M USD = 200k USD
-        uint256 maxAllowance = 200_000 * 10**18;
+        uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
         module.updateAcquiredBalance(subAccount, address(customToken), 0);
 
@@ -270,12 +264,13 @@ contract DeFiModuleFuzzTests is Test {
 
         vm.prank(subAccount);
         try module.executeOnProtocol(protocol, data) {
-            // Success
-        } catch (bytes memory reason) {
+        // Success
+        }
+        catch (bytes memory reason) {
             bytes4 errorSelector = bytes4(reason);
             assertTrue(
-                errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector ||
-                errorSelector == DeFiInteractorModule.TransactionFailed.selector,
+                errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector
+                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector,
                 "Should not have arithmetic overflow"
             );
         }
@@ -287,13 +282,13 @@ contract DeFiModuleFuzzTests is Test {
     function testFuzzDifferentPriceDecimals(uint8 priceDecimals, int256 price) public {
         // Price feeds typically use 8 decimals, but test range
         priceDecimals = uint8(bound(priceDecimals, 6, 18));
-        price = int256(bound(uint256(price), 1, 10**(priceDecimals + 4)));
+        price = int256(bound(uint256(price), 1, 10 ** (priceDecimals + 4)));
 
         MockPriceFeedForFuzz customFeed = new MockPriceFeedForFuzz(price, priceDecimals);
         module.setTokenPriceFeed(address(token), address(customFeed));
 
-        uint256 amount = 1000 * 10**18;
-        uint256 maxAllowance = 200_000 * 10**18;
+        uint256 amount = 1000 * 10 ** 18;
+        uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
         module.updateAcquiredBalance(subAccount, address(token), 0);
 
@@ -309,8 +304,9 @@ contract DeFiModuleFuzzTests is Test {
 
         vm.prank(subAccount);
         try module.executeOnProtocol(protocol, data) {
-            // Success
-        } catch {}
+        // Success
+        }
+            catch {}
     }
 
     // ============ Acquired Balance Logic Fuzz Tests ============
@@ -321,11 +317,16 @@ contract DeFiModuleFuzzTests is Test {
      */
     function testFuzzPartialAcquiredBalance(uint256 amount, uint256 acquired) public {
         // Bound to reasonable values that won't exceed spending cap
-        amount = bound(amount, 1, 100_000 * 10**18); // Max 100k tokens
+        amount = bound(amount, 1, 100_000 * 10 ** 18); // Max 100k tokens
         acquired = bound(acquired, 0, amount * 2); // Can be more or less than amount
 
-        uint256 maxAllowance = 200_000 * 10**18;
+        uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
+
+        // Set Safe's token balance BEFORE acquired balance (H-01 cap)
+        // Safe needs max(amount, acquired) so acquired isn't capped
+        uint256 safeBalance = amount > acquired ? amount : acquired;
+        token.setBalance(address(safe), safeBalance);
         module.updateAcquiredBalance(subAccount, address(token), acquired);
 
         address[] memory tokens = new address[](1);
@@ -334,6 +335,7 @@ contract DeFiModuleFuzzTests is Test {
         amounts[0] = amount;
         parser.setInputs(tokens, amounts);
 
+        // Reset safe balance to actual operation amount
         token.setBalance(address(safe), amount);
 
         bytes memory data = abi.encodeWithSelector(DEPOSIT_SELECTOR, amount, address(safe));
@@ -347,7 +349,9 @@ contract DeFiModuleFuzzTests is Test {
         try module.executeOnProtocol(protocol, data) {
             uint256 acquiredAfter = module.getAcquiredBalance(subAccount, address(token));
             // Acquired should decrease by usedFromAcquired
-            assertEq(acquiredAfter, acquiredBefore - expectedUsedFromAcquired, "Acquired balance should decrease correctly");
+            assertEq(
+                acquiredAfter, acquiredBefore - expectedUsedFromAcquired, "Acquired balance should decrease correctly"
+            );
         } catch {}
     }
 
@@ -355,10 +359,13 @@ contract DeFiModuleFuzzTests is Test {
      * @notice Fuzz test: Acquired balance exactly equals amount (edge case)
      */
     function testFuzzAcquiredEqualsAmount(uint256 amount) public {
-        amount = bound(amount, 1, 100_000 * 10**18);
+        amount = bound(amount, 1, 100_000 * 10 ** 18);
 
-        uint256 maxAllowance = 200_000 * 10**18;
+        uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
+
+        // Set Safe's token balance BEFORE acquired balance (H-01 cap)
+        token.setBalance(address(safe), amount);
         module.updateAcquiredBalance(subAccount, address(token), amount);
 
         address[] memory tokens = new address[](1);
@@ -366,8 +373,6 @@ contract DeFiModuleFuzzTests is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
         parser.setInputs(tokens, amounts);
-
-        token.setBalance(address(safe), amount);
 
         bytes memory data = abi.encodeWithSelector(DEPOSIT_SELECTOR, amount, address(safe));
 
@@ -385,12 +390,15 @@ contract DeFiModuleFuzzTests is Test {
      * @notice Fuzz test: Acquired balance exceeds amount (use only what's needed)
      */
     function testFuzzAcquiredExceedsAmount(uint256 amount, uint256 excess) public {
-        amount = bound(amount, 1, 50_000 * 10**18);
-        excess = bound(excess, 1, 50_000 * 10**18);
+        amount = bound(amount, 1, 50_000 * 10 ** 18);
+        excess = bound(excess, 1, 50_000 * 10 ** 18);
         uint256 acquired = amount + excess;
 
-        uint256 maxAllowance = 200_000 * 10**18;
+        uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
+
+        // Set Safe's token balance BEFORE acquired balance (H-01 cap)
+        token.setBalance(address(safe), acquired);
         module.updateAcquiredBalance(subAccount, address(token), acquired);
 
         address[] memory tokens = new address[](1);
@@ -416,14 +424,9 @@ contract DeFiModuleFuzzTests is Test {
     /**
      * @notice Fuzz test: Multiple tokens with different acquired balances
      */
-    function testFuzzMultiTokenSpending(
-        uint256 amount0,
-        uint256 amount1,
-        uint256 acquired0,
-        uint256 acquired1
-    ) public {
-        amount0 = bound(amount0, 1, 50_000 * 10**18);
-        amount1 = bound(amount1, 1, 50_000 * 10**18);
+    function testFuzzMultiTokenSpending(uint256 amount0, uint256 amount1, uint256 acquired0, uint256 acquired1) public {
+        amount0 = bound(amount0, 1, 50_000 * 10 ** 18);
+        amount1 = bound(amount1, 1, 50_000 * 10 ** 18);
         acquired0 = bound(acquired0, 0, amount0 * 2);
         acquired1 = bound(acquired1, 0, amount1 * 2);
 
@@ -431,8 +434,14 @@ contract DeFiModuleFuzzTests is Test {
         MockTokenForFuzz token1 = new MockTokenForFuzz(18);
         module.setTokenPriceFeed(address(token1), address(priceFeed));
 
-        uint256 maxAllowance = 200_000 * 10**18;
+        uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
+
+        // Set Safe's token balances BEFORE acquired balances (H-01 cap)
+        uint256 safeBalance0 = amount0 > acquired0 ? amount0 : acquired0;
+        uint256 safeBalance1 = amount1 > acquired1 ? amount1 : acquired1;
+        token.setBalance(address(safe), safeBalance0);
+        token1.setBalance(address(safe), safeBalance1);
         module.updateAcquiredBalance(subAccount, address(token), acquired0);
         module.updateAcquiredBalance(subAccount, address(token1), acquired1);
 
@@ -467,7 +476,7 @@ contract DeFiModuleFuzzTests is Test {
      */
     function testFuzzSpendingLimitBoundary(uint256 allowance) public {
         // Cap at max allowed (20% of 1M = 200k USD)
-        allowance = bound(allowance, 1, 200_000 * 10**18);
+        allowance = bound(allowance, 1, 200_000 * 10 ** 18);
 
         module.updateSpendingAllowance(subAccount, allowance);
         module.updateAcquiredBalance(subAccount, address(token), 0);
@@ -498,7 +507,7 @@ contract DeFiModuleFuzzTests is Test {
      */
     function testFuzzSpendingLimitExceededByOne(uint256 allowance) public {
         // Cap at max allowed minus 1 so we can add 1 for the test
-        allowance = bound(allowance, 1, 200_000 * 10**18 - 1);
+        allowance = bound(allowance, 1, 200_000 * 10 ** 18 - 1);
 
         module.updateSpendingAllowance(subAccount, allowance);
         module.updateAcquiredBalance(subAccount, address(token), 0);
@@ -555,7 +564,7 @@ contract DeFiModuleFuzzTests is Test {
      */
     function testFuzzBatchUpdate(uint256 allowance, uint256 numTokens) public {
         // Cap at max allowed (20% of 1M = 200k USD)
-        allowance = bound(allowance, 0, 200_000 * 10**18);
+        allowance = bound(allowance, 0, 200_000 * 10 ** 18);
         numTokens = bound(numTokens, 1, 10);
 
         address[] memory tokens = new address[](numTokens);
@@ -563,7 +572,7 @@ contract DeFiModuleFuzzTests is Test {
 
         for (uint256 i = 0; i < numTokens; i++) {
             tokens[i] = address(uint160(i + 1000));
-            balances[i] = i * 10**18;
+            balances[i] = i * 10 ** 18;
         }
 
         module.batchUpdate(subAccount, allowance, tokens, balances);
@@ -589,7 +598,7 @@ contract DeFiModuleFuzzTests is Test {
             tokens[i] = address(uint160(i + 1000));
         }
         for (uint256 i = 0; i < len2; i++) {
-            balances[i] = i * 10**18;
+            balances[i] = i * 10 ** 18;
         }
 
         vm.expectRevert(DeFiInteractorModule.LengthMismatch.selector);
@@ -602,7 +611,7 @@ contract DeFiModuleFuzzTests is Test {
      * @notice Fuzz test: Zero amount should not affect spending
      */
     function testFuzzZeroAmountNoSpending() public {
-        module.updateSpendingAllowance(subAccount, 1000 * 10**18);
+        module.updateSpendingAllowance(subAccount, 1000 * 10 ** 18);
         module.updateAcquiredBalance(subAccount, address(token), 0);
 
         uint256 allowanceBefore = module.getSpendingAllowance(subAccount);

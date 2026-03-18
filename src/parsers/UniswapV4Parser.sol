@@ -10,16 +10,19 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
 interface IV4PositionManager {
     /// @notice Returns the pool and position info for a given tokenId
     /// @dev PoolKey contains (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks)
-    function getPoolAndPositionInfo(uint256 tokenId) external view returns (
-        address currency0,
-        address currency1,
-        uint24 fee,
-        int24 tickSpacing,
-        address hooks,
-        int24 tickLower,
-        int24 tickUpper,
-        uint128 liquidity
-    );
+    function getPoolAndPositionInfo(uint256 tokenId)
+        external
+        view
+        returns (
+            address currency0,
+            address currency1,
+            uint24 fee,
+            int24 tickSpacing,
+            address hooks,
+            int24 tickLower,
+            int24 tickUpper,
+            uint128 liquidity
+        );
 }
 
 /**
@@ -61,7 +64,12 @@ contract UniswapV4Parser is ICalldataParser {
     uint8 public constant SWEEP = 0x14;
 
     /// @inheritdoc ICalldataParser
-    function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractInputTokens(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
@@ -106,7 +114,8 @@ contract UniswapV4Parser is ICalldataParser {
                 // Query the position's tokens from the PositionManager
                 if (params[i].length >= 32) {
                     uint256 tokenId = _readUint256(params[i], 0);
-                    (address currency0, address currency1,,,,,,) = IV4PositionManager(target).getPoolAndPositionInfo(tokenId);
+                    (address currency0, address currency1,,,,,,) =
+                        IV4PositionManager(target).getPoolAndPositionInfo(tokenId);
                     tokens = new address[](2);
                     tokens[0] = currency0;
                     tokens[1] = currency1;
@@ -122,7 +131,12 @@ contract UniswapV4Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
@@ -130,34 +144,13 @@ contract UniswapV4Parser is ICalldataParser {
         (bytes memory unlockData,) = abi.decode(data[4:], (bytes, uint256));
         (bytes memory actions, bytes[] memory params) = _decodeActionsAndParams(unlockData);
 
-        // Find SETTLE or SETTLE_PAIR to get input amounts
-        // Array length must match extractInputTokens result
+        // Pass 1: Look for primary liquidity actions with explicit amounts
+        // These take priority over settlement actions to prevent SETTLE_PAIR
+        // from returning zero amounts before MINT/INCREASE is checked (C-02)
         for (uint256 i = 0; i < actions.length; i++) {
             uint8 action = uint8(actions[i]);
 
-            if (action == SETTLE) {
-                // SETTLE params: (Currency currency, uint256 amount, bool payerIsUser)
-                if (params[i].length >= 64) {
-                    amounts = new uint256[](1);
-                    amounts[0] = _readUint256(params[i], 32);
-                    return amounts;
-                }
-            } else if (action == SETTLE_ALL) {
-                // SETTLE_ALL: (Currency currency, uint256 maxAmount)
-                if (params[i].length >= 64) {
-                    amounts = new uint256[](1);
-                    amounts[0] = _readUint256(params[i], 32);
-                    return amounts;
-                }
-            } else if (action == SETTLE_PAIR) {
-                // SETTLE_PAIR params: (Currency currency0, Currency currency1)
-                // No amounts in params - return zeros to match 2 tokens from extractInputTokens
-                // Actual amounts tracked via balance changes by the module
-                amounts = new uint256[](2);
-                amounts[0] = 0;
-                amounts[1] = 0;
-                return amounts;
-            } else if (action == MINT_POSITION || action == MINT_POSITION_FROM_DELTAS) {
+            if (action == MINT_POSITION || action == MINT_POSITION_FROM_DELTAS) {
                 // MINT_POSITION params: (PoolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, owner, hookData)
                 // PoolKey is (currency0, currency1, fee, tickSpacing, hooks) = 5 slots = 160 bytes
                 // Then: int24 tickLower (32), int24 tickUpper (32), uint256 liquidity (32), uint128 amount0Max (32), uint128 amount1Max (32)
@@ -194,11 +187,45 @@ contract UniswapV4Parser is ICalldataParser {
             }
         }
 
+        // Pass 2: Fallback to settlement actions (for non-liquidity operations)
+        for (uint256 i = 0; i < actions.length; i++) {
+            uint8 action = uint8(actions[i]);
+
+            if (action == SETTLE) {
+                // SETTLE params: (Currency currency, uint256 amount, bool payerIsUser)
+                if (params[i].length >= 64) {
+                    amounts = new uint256[](1);
+                    amounts[0] = _readUint256(params[i], 32);
+                    return amounts;
+                }
+            } else if (action == SETTLE_ALL) {
+                // SETTLE_ALL: (Currency currency, uint256 maxAmount)
+                if (params[i].length >= 64) {
+                    amounts = new uint256[](1);
+                    amounts[0] = _readUint256(params[i], 32);
+                    return amounts;
+                }
+            } else if (action == SETTLE_PAIR) {
+                // SETTLE_PAIR params: (Currency currency0, Currency currency1)
+                // No amounts in params - return zeros to match 2 tokens from extractInputTokens
+                // Actual amounts tracked via balance changes by the module
+                amounts = new uint256[](2);
+                amounts[0] = 0;
+                amounts[1] = 0;
+                return amounts;
+            }
+        }
+
         return new uint256[](0);
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractOutputTokens(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
@@ -239,7 +266,8 @@ contract UniswapV4Parser is ICalldataParser {
                 // BURN_POSITION params: (uint256 tokenId, uint128 amount0Min, uint128 amount1Min, bytes hookData)
                 if (params[i].length >= 32) {
                     uint256 tokenId = _readUint256(params[i], 0);
-                    (address currency0, address currency1,,,,,,) = IV4PositionManager(target).getPoolAndPositionInfo(tokenId);
+                    (address currency0, address currency1,,,,,,) =
+                        IV4PositionManager(target).getPoolAndPositionInfo(tokenId);
                     tokens = new address[](2);
                     tokens[0] = currency0;
                     tokens[1] = currency1;
@@ -252,7 +280,12 @@ contract UniswapV4Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
@@ -312,10 +345,10 @@ contract UniswapV4Parser is ICalldataParser {
             uint8 action = uint8(actions[i]);
 
             // Deposit operations (adding liquidity)
-            if (action == MINT_POSITION ||
-                action == MINT_POSITION_FROM_DELTAS ||
-                action == INCREASE_LIQUIDITY ||
-                action == INCREASE_LIQUIDITY_FROM_DELTAS) {
+            if (
+                action == MINT_POSITION || action == MINT_POSITION_FROM_DELTAS || action == INCREASE_LIQUIDITY
+                    || action == INCREASE_LIQUIDITY_FROM_DELTAS
+            ) {
                 return 2; // DEPOSIT
             }
 
