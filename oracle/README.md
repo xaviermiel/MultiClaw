@@ -12,6 +12,9 @@ Event-driven monitor that tracks spending and acquired balances for sub-accounts
 
 - **RPC polling** for `ProtocolExecution` and `TransferExecuted` events
 - **Rolling 24h window** tracking for spending calculations
+- **Dual-mode allowance calculation**:
+  - **BPS mode** (`maxSpendingBps > 0`): `maxAllowance = safeValue × maxSpendingBps / 10000`
+  - **USD mode** (`maxSpendingUSD > 0`): `maxAllowance = maxSpendingUSD` (fixed dollar cap)
 - **Deposit/withdrawal matching** for acquired balance status (FIFO queues)
 - **Cron-based periodic refresh** to update allowances as spending expires
 - **Multi-module support** via ModuleRegistry discovery

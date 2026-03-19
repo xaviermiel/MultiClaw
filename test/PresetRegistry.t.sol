@@ -53,7 +53,9 @@ contract PresetRegistryTest is Test {
         selTypes[0] = 1; // SWAP
 
         return
-            registry.createPreset("DeFi Trader", 1, 500, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes);
+            registry.createPreset(
+                "DeFi Trader", 1, 500, 0, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes
+            );
     }
 
     /// @dev Creates a Payment Agent preset (transfer-only, no protocols)
@@ -62,7 +64,7 @@ contract PresetRegistryTest is Test {
         bytes4[] memory emptySel = new bytes4[](0);
         uint8[] memory emptyType = new uint8[](0);
 
-        return registry.createPreset("Payment Agent", 2, 100, 1 days, empty, empty, empty, emptySel, emptyType);
+        return registry.createPreset("Payment Agent", 2, 100, 0, 1 days, empty, empty, empty, emptySel, emptyType);
     }
 
     /// @dev Shorthand for empty arrays
@@ -101,12 +103,13 @@ contract PresetRegistryTest is Test {
     function testCreatePresetStoresAllFields() public {
         uint256 presetId = _createDeFiTraderPreset();
 
-        (string memory name, uint16 roleId, uint256 maxSpendingBps, uint256 windowDuration) =
+        (string memory name, uint16 roleId, uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration) =
             registry.getPreset(presetId);
 
         assertEq(name, "DeFi Trader");
         assertEq(roleId, 1);
         assertEq(maxSpendingBps, 500);
+        assertEq(maxSpendingUSD, 0);
         assertEq(windowDuration, 1 days);
     }
 
@@ -125,6 +128,7 @@ contract PresetRegistryTest is Test {
         (
             uint16 roleId,
             uint256 maxSpendingBps,
+            uint256 maxSpendingUSD,
             uint256 windowDuration,
             address[] memory allowedProtocols,
             address[] memory parserProtocols,
@@ -135,6 +139,7 @@ contract PresetRegistryTest is Test {
 
         assertEq(roleId, 1);
         assertEq(maxSpendingBps, 500);
+        assertEq(maxSpendingUSD, 0);
         assertEq(windowDuration, 1 days);
         assertEq(allowedProtocols.length, 2);
         assertEq(allowedProtocols[0], protocol1);
@@ -163,7 +168,7 @@ contract PresetRegistryTest is Test {
         uint256 presetId = _createPaymentAgentPreset();
 
         (
-            ,,,
+            ,,,,
             address[] memory allowedProtocols,
             address[] memory parserProtocols,
             address[] memory parserAddresses,
@@ -200,11 +205,11 @@ contract PresetRegistryTest is Test {
         selTypes[2] = 3; // WITHDRAW
 
         uint256 presetId = registry.createPreset(
-            "Yield Farmer", 1, 1000, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes
+            "Yield Farmer", 1, 1000, 0, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes
         );
 
         (
-            ,,,,
+            ,,,,,
             address[] memory storedParserProtos,
             address[] memory storedParserAddrs,
             bytes4[] memory storedSels,
@@ -227,6 +232,7 @@ contract PresetRegistryTest is Test {
             "test",
             1,
             500,
+            0,
             1 days,
             _emptyAddresses(),
             _emptyAddresses(),
@@ -244,7 +250,7 @@ contract PresetRegistryTest is Test {
 
         vm.expectRevert(PresetRegistry.ArrayLengthMismatch.selector);
         registry.createPreset(
-            "bad", 1, 500, 1 days, _emptyAddresses(), oneAddr, _emptyAddresses(), _emptySelectors(), _emptyUint8s()
+            "bad", 1, 500, 0, 1 days, _emptyAddresses(), oneAddr, _emptyAddresses(), _emptySelectors(), _emptyUint8s()
         );
     }
 
@@ -254,8 +260,26 @@ contract PresetRegistryTest is Test {
 
         vm.expectRevert(PresetRegistry.ArrayLengthMismatch.selector);
         registry.createPreset(
-            "bad", 1, 500, 1 days, _emptyAddresses(), _emptyAddresses(), _emptyAddresses(), oneSel, _emptyUint8s()
+            "bad", 1, 500, 0, 1 days, _emptyAddresses(), _emptyAddresses(), _emptyAddresses(), oneSel, _emptyUint8s()
         );
+    }
+
+    // ============ Create Preset — Fixed USD Mode ============
+
+    function testCreatePresetWithFixedUSD() public {
+        address[] memory empty = new address[](0);
+        bytes4[] memory emptySel = new bytes4[](0);
+        uint8[] memory emptyType = new uint8[](0);
+
+        uint256 presetId = registry.createPreset(
+            "Fixed USD Agent", 1, 0, 25_000 * 10 ** 18, 1 days, empty, empty, empty, emptySel, emptyType
+        );
+
+        (string memory name,, uint256 maxBps, uint256 maxUSD, uint256 window) = registry.getPreset(presetId);
+        assertEq(name, "Fixed USD Agent");
+        assertEq(maxBps, 0);
+        assertEq(maxUSD, 25_000 * 10 ** 18);
+        assertEq(window, 1 days);
     }
 
     // ============ Update Preset Tests ============
@@ -274,6 +298,7 @@ contract PresetRegistryTest is Test {
             "Updated Trader",
             2, // changed role
             1000, // increased spending
+            0, // BPS mode
             2 days, // longer window
             newProtocols,
             _emptyAddresses(),
@@ -282,10 +307,12 @@ contract PresetRegistryTest is Test {
             _emptyUint8s()
         );
 
-        (string memory name, uint16 roleId, uint256 maxBps, uint256 window) = registry.getPreset(presetId);
+        (string memory name, uint16 roleId, uint256 maxBps, uint256 maxUSD, uint256 window) =
+            registry.getPreset(presetId);
         assertEq(name, "Updated Trader");
         assertEq(roleId, 2);
         assertEq(maxBps, 1000);
+        assertEq(maxUSD, 0);
         assertEq(window, 2 days);
 
         // Protocols replaced entirely (not appended)
@@ -301,6 +328,7 @@ contract PresetRegistryTest is Test {
             "bad",
             1,
             500,
+            0,
             1 days,
             _emptyAddresses(),
             _emptyAddresses(),
@@ -322,6 +350,7 @@ contract PresetRegistryTest is Test {
             "bad",
             1,
             500,
+            0,
             1 days,
             _emptyAddresses(),
             oneAddr,
@@ -341,6 +370,7 @@ contract PresetRegistryTest is Test {
             "hack",
             1,
             500,
+            0,
             1 days,
             _emptyAddresses(),
             _emptyAddresses(),
@@ -397,12 +427,13 @@ contract PresetRegistryTest is Test {
         uint256 presetId = _createDeFiTraderPreset();
         assertTrue(registry.presetExists(presetId));
 
-        // Update with empty arrays
+        // Update with empty arrays (maxSpendingBps=0, maxSpendingUSD=1e18 to satisfy dual-mode at module level)
         registry.updatePreset(
             presetId,
             "Empty",
             1,
             0,
+            1 * 10 ** 18,
             1 hours,
             _emptyAddresses(),
             _emptyAddresses(),
@@ -414,7 +445,7 @@ contract PresetRegistryTest is Test {
         // Still exists
         assertTrue(registry.presetExists(presetId));
 
-        (string memory name,,,) = registry.getPreset(presetId);
+        (string memory name,,,,) = registry.getPreset(presetId);
         assertEq(name, "Empty");
     }
 }

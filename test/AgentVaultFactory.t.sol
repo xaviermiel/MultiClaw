@@ -92,6 +92,7 @@ contract AgentVaultFactoryTest is Test {
             agentAddress: agent,
             roleId: 1, // DEFI_EXECUTE_ROLE
             maxSpendingBps: 500, // 5%
+            maxSpendingUSD: 0, // BPS mode
             windowDuration: 1 days,
             allowedProtocols: allowedProtocols,
             parserProtocols: parserProtocols,
@@ -122,6 +123,7 @@ contract AgentVaultFactoryTest is Test {
             "DeFi Trader",
             1, // DEFI_EXECUTE_ROLE
             500, // 5%
+            0, // BPS mode
             1 days,
             protocols,
             parserProtos,
@@ -185,11 +187,12 @@ contract AgentVaultFactoryTest is Test {
         assertEq(presetId, 0);
         assertEq(presetRegistry.presetCount(), 1);
 
-        (string memory name, uint16 roleId, uint256 maxSpendingBps, uint256 windowDuration) =
+        (string memory name, uint16 roleId, uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration) =
             presetRegistry.getPreset(presetId);
         assertEq(name, "DeFi Trader");
         assertEq(roleId, 1);
         assertEq(maxSpendingBps, 500);
+        assertEq(maxSpendingUSD, 0);
         assertEq(windowDuration, 1 days);
     }
 
@@ -202,7 +205,7 @@ contract AgentVaultFactoryTest is Test {
         bytes4[] memory emptySel = new bytes4[](0);
         uint8[] memory emptyType = new uint8[](0);
         uint256 id1 =
-            presetRegistry.createPreset("Payment Agent", 2, 100, 1 days, empty, empty, empty, emptySel, emptyType);
+            presetRegistry.createPreset("Payment Agent", 2, 100, 0, 1 days, empty, empty, empty, emptySel, emptyType);
         assertEq(id1, 1);
         assertEq(presetRegistry.presetCount(), 2);
     }
@@ -227,7 +230,7 @@ contract AgentVaultFactoryTest is Test {
 
         vm.prank(agent);
         vm.expectRevert();
-        presetRegistry.createPreset("test", 1, 500, 1 days, empty, empty, empty, emptySel, emptyType);
+        presetRegistry.createPreset("test", 1, 500, 0, 1 days, empty, empty, empty, emptySel, emptyType);
     }
 
     function testCreatePresetRevertsOnArrayMismatch() public {
@@ -239,7 +242,7 @@ contract AgentVaultFactoryTest is Test {
 
         // parserProtocols.length != parserAddresses.length
         vm.expectRevert(PresetRegistry.ArrayLengthMismatch.selector);
-        presetRegistry.createPreset("bad", 1, 500, 1 days, empty, oneAddr, empty, emptySel, emptyType);
+        presetRegistry.createPreset("bad", 1, 500, 0, 1 days, empty, oneAddr, empty, emptySel, emptyType);
     }
 
     // ============ Deploy Vault Tests ============
@@ -266,8 +269,9 @@ contract AgentVaultFactoryTest is Test {
         assertTrue(m.hasRole(agent, 1)); // DEFI_EXECUTE_ROLE
 
         // Spending limits configured
-        (uint256 maxBps, uint256 windowDur) = m.getSubAccountLimits(agent);
+        (uint256 maxBps, uint256 maxUSD, uint256 windowDur) = m.getSubAccountLimits(agent);
         assertEq(maxBps, 500);
+        assertEq(maxUSD, 0);
         assertEq(windowDur, 1 days);
 
         // Allowed addresses set
@@ -359,7 +363,7 @@ contract AgentVaultFactoryTest is Test {
         // Verify preset was applied
         assertEq(m.owner(), address(safe1));
         assertTrue(m.hasRole(agent, 1));
-        (uint256 maxBps,) = m.getSubAccountLimits(agent);
+        (uint256 maxBps,,) = m.getSubAccountLimits(agent);
         assertEq(maxBps, 500);
         assertTrue(m.allowedAddresses(agent, protocol1));
         assertTrue(m.allowedAddresses(agent, protocol2));
@@ -481,6 +485,7 @@ contract AgentVaultFactoryTest is Test {
         config.agentAddress = agent;
         config.roleId = 2; // DEFI_TRANSFER_ROLE
         config.maxSpendingBps = 100; // 1%
+        config.maxSpendingUSD = 0;
         config.windowDuration = 1 days;
         config.allowedProtocols = new address[](0);
         config.parserProtocols = new address[](0);
@@ -514,6 +519,7 @@ contract AgentVaultFactoryTest is Test {
             "Updated DeFi Trader",
             1,
             1000, // updated to 10%
+            0, // BPS mode
             2 days, // updated window
             newProtocols,
             emptyAddr,
@@ -522,9 +528,10 @@ contract AgentVaultFactoryTest is Test {
             emptyType
         );
 
-        (string memory name,, uint256 maxBps, uint256 window) = presetRegistry.getPreset(presetId);
+        (string memory name,, uint256 maxBps, uint256 maxUSD, uint256 window) = presetRegistry.getPreset(presetId);
         assertEq(name, "Updated DeFi Trader");
         assertEq(maxBps, 1000);
+        assertEq(maxUSD, 0);
         assertEq(window, 2 days);
     }
 
@@ -534,6 +541,6 @@ contract AgentVaultFactoryTest is Test {
         uint8[] memory emptyType = new uint8[](0);
 
         vm.expectRevert(abi.encodeWithSelector(PresetRegistry.PresetNotFound.selector, 0));
-        presetRegistry.updatePreset(0, "bad", 1, 500, 1 days, empty, empty, empty, emptySel, emptyType);
+        presetRegistry.updatePreset(0, "bad", 1, 500, 0, 1 days, empty, empty, empty, emptySel, emptyType);
     }
 }

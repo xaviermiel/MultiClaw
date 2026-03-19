@@ -33,7 +33,8 @@ const client = new MultiClawClient({ chain: "base", signer: ownerWallet });
 const vault = await client.createAgentVault({
   preset: "defi-trader", // DeFi Trader, Yield Farmer, Payment Agent, or Custom
   agentSigner: "0xAgent...",
-  maxSpendingBps: 500, // 5% of Safe per 24h
+  maxSpendingBps: 500, // 5% of Safe per 24h (BPS mode)
+  // OR: maxSpendingUSD: 1000n * 10n**18n,  // $1000/day fixed (USD mode)
 });
 
 // 2. Agent operates within guardrails
@@ -124,6 +125,15 @@ Both `ModuleFactory` and `AgentVaultFactory` are **permissionless** — anyone c
 | Yield Farmer  | Morpho + Aave V3     | 10%/day      | EXECUTE      |
 | Payment Agent | None (transfer only) | 1%/day       | TRANSFER     |
 | Custom        | User-defined         | User-defined | User-defined |
+
+### Dual-Mode Spending Limits
+
+Each sub-account's spending limit can be configured in one of two modes:
+
+- **BPS mode** (`maxSpendingBps`): Percentage of Safe value per window (e.g., 500 = 5%). Scales with portfolio.
+- **USD mode** (`maxSpendingUSD`): Fixed dollar amount per window (e.g., $1,000/day). Does not scale.
+
+Exactly one must be set. The `absoluteMaxSpendingBps` hard cap (20%) still applies in both modes — even a fixed $1M limit cannot exceed 20% of the Safe's value.
 
 ## Acquired Balance Model
 

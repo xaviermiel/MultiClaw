@@ -94,9 +94,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Sub-Account Configuration ============
 
-    /// @notice Configuration for sub-account limits
+    /// @notice Configuration for sub-account limits (dual-mode: BPS or fixed USD)
+    /// @dev Exactly one of maxSpendingBps or maxSpendingUSD must be non-zero
     struct SubAccountLimits {
-        uint256 maxSpendingBps; // Maximum spending in basis points
+        uint256 maxSpendingBps; // Maximum spending in basis points (% of Safe value)
+        uint256 maxSpendingUSD; // Maximum spending in USD (18 decimals, fixed amount)
         uint256 windowDuration; // Time window duration in seconds
         bool isConfigured; // Whether limits have been explicitly set
     }
@@ -126,7 +128,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event RoleAssigned(address indexed member, uint16 indexed roleId);
     event RoleRevoked(address indexed member, uint16 indexed roleId);
 
-    event SubAccountLimitsSet(address indexed subAccount, uint256 maxSpendingBps, uint256 windowDuration);
+    event SubAccountLimitsSet(
+        address indexed subAccount, uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration
+    );
 
     event AllowedAddressesSet(address indexed subAccount, address[] targets, bool allowed);
 
@@ -192,6 +196,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error CannotBeOracle(address account);
     error CannotWhitelistCoreAddress(address account);
     error CannotRegisterParserForCoreAddress(address account);
+    error BothLimitModesSet();
+    error NeitherLimitModeSet();
 
     // ============ Modifiers ============
 
@@ -308,48 +314,69 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Sub-Account Configuration ============
 
-    function setSubAccountLimits(address subAccount, uint256 maxSpendingBps, uint256 windowDuration)
-        external
-        onlyOwner
-    {
+    /// @notice Set spending limits for a sub-account (dual-mode: BPS or fixed USD)
+    /// @dev Exactly one of maxSpendingBps or maxSpendingUSD must be non-zero.
+    ///      BPS mode: limit = percentage of Safe value. USD mode: limit = fixed dollar amount.
+    /// @param subAccount The sub-account address
+    /// @param maxSpendingBps Maximum spending in basis points (0 to use USD mode)
+    /// @param maxSpendingUSD Maximum spending in USD with 18 decimals (0 to use BPS mode)
+    /// @param windowDuration Time window duration in seconds (minimum 1 hour)
+    function setSubAccountLimits(
+        address subAccount,
+        uint256 maxSpendingBps,
+        uint256 maxSpendingUSD,
+        uint256 windowDuration
+    ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
-        // Prevent Safe and Module from being subaccounts
         if (subAccount == avatar || subAccount == address(this)) revert CannotBeSubaccount(subAccount);
+        if (maxSpendingBps > 0 && maxSpendingUSD > 0) revert BothLimitModesSet();
+        if (maxSpendingBps == 0 && maxSpendingUSD == 0) revert NeitherLimitModeSet();
         if (maxSpendingBps > 10000 || windowDuration < 1 hours) {
             revert InvalidLimitConfiguration();
         }
 
-        subAccountLimits[subAccount] =
-            SubAccountLimits({maxSpendingBps: maxSpendingBps, windowDuration: windowDuration, isConfigured: true});
+        subAccountLimits[subAccount] = SubAccountLimits({
+            maxSpendingBps: maxSpendingBps,
+            maxSpendingUSD: maxSpendingUSD,
+            windowDuration: windowDuration,
+            isConfigured: true
+        });
 
         // Cap spending allowance to new maximum if it exceeds it
-        // - If remaining > new max: cap to new max (can't keep more than allowed)
-        // - If remaining <= new max: keep as is (don't auto-increase)
         // Only cap if Safe value is fresh (stale value could be dangerously outdated)
         if (
             safeValue.totalValueUSD > 0 && safeValue.lastUpdated > 0
                 && block.timestamp - safeValue.lastUpdated <= maxSafeValueAge
         ) {
-            uint256 newMaxAllowance = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
+            uint256 newMaxAllowance;
+            if (maxSpendingUSD > 0) {
+                newMaxAllowance = maxSpendingUSD;
+            } else {
+                newMaxAllowance = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
+            }
             if (spendingAllowance[subAccount] > newMaxAllowance) {
                 spendingAllowance[subAccount] = newMaxAllowance;
                 emit SpendingAllowanceUpdated(subAccount, newMaxAllowance);
             }
         }
 
-        emit SubAccountLimitsSet(subAccount, maxSpendingBps, windowDuration);
+        emit SubAccountLimitsSet(subAccount, maxSpendingBps, maxSpendingUSD, windowDuration);
     }
 
+    /// @notice Get the spending limits for a sub-account
+    /// @return maxSpendingBps Basis points limit (0 if in USD mode)
+    /// @return maxSpendingUSD Fixed USD limit with 18 decimals (0 if in BPS mode)
+    /// @return windowDuration Time window in seconds
     function getSubAccountLimits(address subAccount)
         public
         view
-        returns (uint256 maxSpendingBps, uint256 windowDuration)
+        returns (uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration)
     {
         SubAccountLimits memory limits = subAccountLimits[subAccount];
         if (limits.isConfigured) {
-            return (limits.maxSpendingBps, limits.windowDuration);
+            return (limits.maxSpendingBps, limits.maxSpendingUSD, limits.windowDuration);
         }
-        return (DEFAULT_MAX_SPENDING_BPS, DEFAULT_WINDOW_DURATION);
+        return (DEFAULT_MAX_SPENDING_BPS, 0, DEFAULT_WINDOW_DURATION);
     }
 
     function setAllowedAddresses(address subAccount, address[] calldata targets, bool allowed) external onlyOwner {

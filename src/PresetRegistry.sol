@@ -18,6 +18,7 @@ contract PresetRegistry is Ownable {
         bool exists;
         uint16 roleId;
         uint256 maxSpendingBps;
+        uint256 maxSpendingUSD;
         uint256 windowDuration;
         address[] allowedProtocols;
         address[] parserProtocols;
@@ -51,7 +52,8 @@ contract PresetRegistry is Ownable {
      * @notice Create a new preset template
      * @param name Human-readable preset name
      * @param roleId Role to grant the agent (1=EXECUTE, 2=TRANSFER)
-     * @param maxSpendingBps Spending limit in basis points
+     * @param maxSpendingBps Spending limit in basis points (0 for USD mode)
+     * @param maxSpendingUSD Spending limit in USD with 18 decimals (0 for BPS mode)
      * @param windowDuration Time window in seconds
      * @param allowedProtocols Protocols the agent can interact with
      * @param parserProtocols Protocol addresses for parser registration
@@ -64,6 +66,7 @@ contract PresetRegistry is Ownable {
         string calldata name,
         uint16 roleId,
         uint256 maxSpendingBps,
+        uint256 maxSpendingUSD,
         uint256 windowDuration,
         address[] calldata allowedProtocols,
         address[] calldata parserProtocols,
@@ -71,7 +74,9 @@ contract PresetRegistry is Ownable {
         bytes4[] calldata selectors,
         uint8[] calldata selectorTypes
     ) external onlyOwner returns (uint256 presetId) {
-        if (parserProtocols.length != parserAddresses.length) revert ArrayLengthMismatch();
+        if (parserProtocols.length != parserAddresses.length) {
+            revert ArrayLengthMismatch();
+        }
         if (selectors.length != selectorTypes.length) revert ArrayLengthMismatch();
 
         presetId = presetCount++;
@@ -81,6 +86,7 @@ contract PresetRegistry is Ownable {
         p.exists = true;
         p.roleId = roleId;
         p.maxSpendingBps = maxSpendingBps;
+        p.maxSpendingUSD = maxSpendingUSD;
         p.windowDuration = windowDuration;
         p.allowedProtocols = allowedProtocols;
         p.parserProtocols = parserProtocols;
@@ -100,6 +106,7 @@ contract PresetRegistry is Ownable {
         string calldata name,
         uint16 roleId,
         uint256 maxSpendingBps,
+        uint256 maxSpendingUSD,
         uint256 windowDuration,
         address[] calldata allowedProtocols,
         address[] calldata parserProtocols,
@@ -115,6 +122,7 @@ contract PresetRegistry is Ownable {
         p.name = name;
         p.roleId = roleId;
         p.maxSpendingBps = maxSpendingBps;
+        p.maxSpendingUSD = maxSpendingUSD;
         p.windowDuration = windowDuration;
         p.allowedProtocols = allowedProtocols;
         p.parserProtocols = parserProtocols;
@@ -134,11 +142,17 @@ contract PresetRegistry is Ownable {
     function getPreset(uint256 presetId)
         external
         view
-        returns (string memory name, uint16 roleId, uint256 maxSpendingBps, uint256 windowDuration)
+        returns (
+            string memory name,
+            uint16 roleId,
+            uint256 maxSpendingBps,
+            uint256 maxSpendingUSD,
+            uint256 windowDuration
+        )
     {
         Preset storage p = _presets[presetId];
         if (!p.exists) revert PresetNotFound(presetId);
-        return (p.name, p.roleId, p.maxSpendingBps, p.windowDuration);
+        return (p.name, p.roleId, p.maxSpendingBps, p.maxSpendingUSD, p.windowDuration);
     }
 
     function getPresetProtocols(uint256 presetId) external view returns (address[] memory) {
@@ -152,6 +166,7 @@ contract PresetRegistry is Ownable {
         returns (
             uint16 roleId,
             uint256 maxSpendingBps,
+            uint256 maxSpendingUSD,
             uint256 windowDuration,
             address[] memory allowedProtocols,
             address[] memory parserProtocols,
@@ -165,6 +180,7 @@ contract PresetRegistry is Ownable {
         return (
             p.roleId,
             p.maxSpendingBps,
+            p.maxSpendingUSD,
             p.windowDuration,
             p.allowedProtocols,
             p.parserProtocols,

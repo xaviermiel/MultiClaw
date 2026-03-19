@@ -41,6 +41,7 @@ contract AgentVaultFactory is Ownable {
         address agentAddress;
         uint16 roleId;
         uint256 maxSpendingBps;
+        uint256 maxSpendingUSD;
         uint256 windowDuration;
         address[] allowedProtocols;
         address[] parserProtocols;
@@ -128,7 +129,7 @@ contract AgentVaultFactory is Ownable {
 
         // 2. Configure module (factory is owner, so these calls succeed)
         m.grantRole(config.agentAddress, config.roleId);
-        m.setSubAccountLimits(config.agentAddress, config.maxSpendingBps, config.windowDuration);
+        m.setSubAccountLimits(config.agentAddress, config.maxSpendingBps, config.maxSpendingUSD, config.windowDuration);
         if (config.allowedProtocols.length > 0) {
             m.setAllowedAddresses(config.agentAddress, config.allowedProtocols, true);
         }
@@ -179,6 +180,7 @@ contract AgentVaultFactory is Ownable {
         (
             uint16 roleId,
             uint256 maxSpendingBps,
+            uint256 maxSpendingUSD,
             uint256 windowDuration,
             address[] memory allowedProtocols,
             address[] memory parserProtocols,
@@ -193,7 +195,7 @@ contract AgentVaultFactory is Ownable {
 
         // 2. Configure from preset
         m.grantRole(agentAddress, roleId);
-        m.setSubAccountLimits(agentAddress, maxSpendingBps, windowDuration);
+        m.setSubAccountLimits(agentAddress, maxSpendingBps, maxSpendingUSD, windowDuration);
         if (allowedProtocols.length > 0) {
             m.setAllowedAddresses(agentAddress, allowedProtocols, true);
         }
