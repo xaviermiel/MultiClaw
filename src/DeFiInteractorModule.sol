@@ -406,9 +406,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
         if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
-            return _executeNoSpendingCheck(msg.sender, target, data, opType);
+            return _executeNoSpendingCheck(msg.sender, target, data, opType, 0);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-            return _executeWithSpendingCheck(msg.sender, target, data, opType);
+            return _executeWithSpendingCheck(msg.sender, target, data, opType, 0);
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -454,9 +454,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
         if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
-            return _executeNoSpendingCheckWithValue(msg.sender, target, data, opType, value);
+            return _executeNoSpendingCheck(msg.sender, target, data, opType, value);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-            return _executeWithSpendingCheckWithValue(msg.sender, target, data, opType, value);
+            return _executeWithSpendingCheck(msg.sender, target, data, opType, value);
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -490,75 +490,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Spending Check Logic ============
 
-    function _executeWithSpendingCheck(address subAccount, address target, bytes calldata data, OperationType opType)
-        internal
-        returns (bytes memory)
-    {
-        // 1. Parser is REQUIRED to extract token/amount from calldata
-        ICalldataParser parser = protocolParsers[target];
-        if (address(parser) == address(0)) {
-            revert NoParserRegistered(target);
-        }
-
-        // 2. Validate recipient is the Safe to prevent fund theft
-        address recipient = parser.extractRecipient(target, data, avatar);
-        if (recipient != avatar) {
-            revert InvalidRecipient(recipient, avatar);
-        }
-
-        // 3. Extract tokens and amounts from calldata via parser (arrays for multi-token operations)
-        address[] memory tokensIn = parser.extractInputTokens(target, data);
-        uint256[] memory amountsIn = parser.extractInputAmounts(target, data);
-
-        // 4. Validate array lengths match
-        if (tokensIn.length != amountsIn.length) revert LengthMismatch();
-
-        // 5. Calculate spending cost and deduct acquired balance in one pass
-        //    (prevents double-counting when same token appears multiple times)
-        uint256 spendingCost = 0;
-        for (uint256 i = 0; i < tokensIn.length; i++) {
-            uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
-            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
-            uint256 fromOriginal = amountsIn[i] - usedFromAcquired;
-            spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
-            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
-        }
-
-        // 6. Check spending allowance (reverts restore all state changes including acquired balance)
-        if (spendingCost > spendingAllowance[subAccount]) {
-            revert ExceedsSpendingLimit();
-        }
-
-        // 7. Deduct spending allowance
-        spendingAllowance[subAccount] -= spendingCost;
-
-        // 8. Capture balances before for output tracking (multiple tokens)
-        address[] memory tokensOut = _getOutputTokens(target, data, parser);
-        uint256[] memory balancesBefore = new uint256[](tokensOut.length);
-        for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
-        }
-
-        // 9. Execute
-        bool success = exec(target, 0, data, ISafe.Operation.Call);
-        if (!success) revert TransactionFailed();
-
-        // 10. Calculate output amounts for all tokens
-        // NOTE: Fee-on-transfer tokens are NOT supported — if balanceAfter < balancesBefore
-        // due to transfer fees, this will revert with arithmetic underflow.
-        uint256[] memory amountsOut = new uint256[](tokensOut.length);
-        for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
-            amountsOut[i] = balanceAfter - balancesBefore[i];
-        }
-
-        // 11. Emit event for oracle
-        emit ProtocolExecution(subAccount, target, opType, tokensIn, amountsIn, tokensOut, amountsOut, spendingCost);
-
-        return "";
-    }
-
-    function _executeWithSpendingCheckWithValue(
+    function _executeWithSpendingCheck(
         address subAccount,
         address target,
         bytes calldata data,
@@ -584,10 +516,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 4. Validate array lengths match
         if (tokensIn.length != amountsIn.length) revert LengthMismatch();
 
-        // 5. For ETH swaps, override native ETH amount with msg.value
-        for (uint256 i = 0; i < tokensIn.length; i++) {
-            if (tokensIn[i] == address(0) && value > 0) {
-                amountsIn[i] = value;
+        // 5. For ETH swaps, override native ETH amount with actual value
+        if (value > 0) {
+            for (uint256 i = 0; i < tokensIn.length; i++) {
+                if (tokensIn[i] == address(0)) {
+                    amountsIn[i] = value;
+                }
             }
         }
 
@@ -617,18 +551,20 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
         }
 
-        // 11. Execute with value
+        // 10. Execute
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 12. Calculate output amounts for all tokens
+        // 11. Calculate output amounts for all tokens
+        // NOTE: Fee-on-transfer tokens are NOT supported — if balanceAfter < balancesBefore
+        // due to transfer fees, this will revert with arithmetic underflow.
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
             uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
-        // 13. Emit event for oracle
+        // 12. Emit event for oracle
         emit ProtocolExecution(subAccount, target, opType, tokensIn, amountsIn, tokensOut, amountsOut, spendingCost);
 
         return "";
@@ -636,57 +572,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ No Spending Check Logic ============
 
-    function _executeNoSpendingCheck(address subAccount, address target, bytes calldata data, OperationType opType)
-        internal
-        returns (bytes memory)
-    {
-        // 1. Parser is required for WITHDRAW/CLAIM to track output tokens for acquired balance
-        ICalldataParser parser = protocolParsers[target];
-        if (address(parser) == address(0)) {
-            revert NoParserRegistered(target);
-        }
-
-        // 2. Validate recipient is the Safe to prevent fund theft
-        address recipient = parser.extractRecipient(target, data, avatar);
-        if (recipient != avatar) {
-            revert InvalidRecipient(recipient, avatar);
-        }
-
-        // 3. Get output tokens from parser (parser may query vault for ERC4626)
-        address[] memory tokensOut = parser.extractOutputTokens(target, data);
-        uint256[] memory balancesBefore = new uint256[](tokensOut.length);
-        for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
-        }
-
-        // 4. Execute (NO spending check - withdrawals and claims are free)
-        bool success = exec(target, 0, data, ISafe.Operation.Call);
-        if (!success) revert TransactionFailed();
-
-        // 5. Calculate received amounts for all tokens
-        uint256[] memory amountsOut = new uint256[](tokensOut.length);
-        for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
-            amountsOut[i] = balanceAfter - balancesBefore[i];
-        }
-
-        // 6. Emit event for oracle to:
-        //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
-        emit ProtocolExecution(
-            subAccount,
-            target,
-            opType,
-            new address[](0), // no tokensIn for withdraw/claim
-            new uint256[](0), // no amountsIn
-            tokensOut,
-            amountsOut,
-            0 // no spending cost
-        );
-
-        return "";
-    }
-
-    function _executeNoSpendingCheckWithValue(
+    function _executeNoSpendingCheck(
         address subAccount,
         address target,
         bytes calldata data,
@@ -712,7 +598,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
         }
 
-        // 4. Execute with value (NO spending check - withdrawals and claims are free)
+        // 4. Execute (NO spending check - withdrawals and claims are free)
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
