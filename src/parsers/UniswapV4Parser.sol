@@ -162,11 +162,8 @@ contract UniswapV4Parser is ICalldataParser {
                     amounts[1] = uint256(_readUint128(params[i], 288));
                     return amounts;
                 }
-                // Fallback to zeros if params too short
-                amounts = new uint256[](2);
-                amounts[0] = 0;
-                amounts[1] = 0;
-                return amounts;
+                // Params too short to extract amounts — revert to prevent zero-spending bypass
+                revert InvalidCalldata();
             } else if (action == INCREASE_LIQUIDITY || action == INCREASE_LIQUIDITY_FROM_DELTAS) {
                 // INCREASE_LIQUIDITY params: (uint256 tokenId, uint256 liquidity, uint128 amount0Max, uint128 amount1Max, bytes hookData)
                 // tokenId at offset 0 (32 bytes), liquidity at 32 (32 bytes), amount0Max at 64 (32 bytes), amount1Max at 96 (32 bytes)
@@ -176,11 +173,8 @@ contract UniswapV4Parser is ICalldataParser {
                     amounts[1] = uint256(_readUint128(params[i], 96));
                     return amounts;
                 }
-                // Fallback to zeros if params too short
-                amounts = new uint256[](2);
-                amounts[0] = 0;
-                amounts[1] = 0;
-                return amounts;
+                // Params too short to extract amounts — revert to prevent zero-spending bypass
+                revert InvalidCalldata();
             } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
                 // Withdraw/claim operations - no input amounts
                 return new uint256[](0);
