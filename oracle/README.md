@@ -51,7 +51,7 @@ The oracle wallet has significant on-chain power:
 ### Installation
 
 ```bash
-cd test-oracle
+cd oracle
 npm install
 ```
 

@@ -1,7 +1,7 @@
 {
-  "name": "test-oracle",
+  "name": "oracle",
   "version": "1.0.0",
-  "description": "Local test oracle for DeFiInteractorModule - runs without Chainlink CRE",
+  "description": "Off-chain oracle for DeFiInteractorModule",
   "type": "module",
   "scripts": {
     "start": "npx tsx src/index.ts",

@@ -129,7 +129,7 @@ Day Start:
 │       │ emits events                                            │
 │       ▼                                                         │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Off-Chain Oracle (test-oracle)              │    │
+│  │              Off-Chain Oracle (oracle)                  │    │
 │  │  1. Monitor events                                      │    │
 │  │  2. Track spending in rolling 24h window                │    │
 │  │  3. Match deposits to withdrawals (for acquired status) │    │

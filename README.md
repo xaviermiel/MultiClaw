@@ -184,7 +184,7 @@ forge test --match-test testGrantRole -vvv
 
 ## Oracle Integration
 
-The **DeFiInteractorModule** relies on an off-chain oracle (`test-oracle/`) for autonomous operation. See [`test-oracle/README.md`](./test-oracle/README.md) for full documentation.
+The **DeFiInteractorModule** relies on an off-chain oracle (`oracle/`) for autonomous operation. See [`oracle/README.md`](./oracle/README.md) for full documentation.
 
 ### 1. Spending Oracle
 
@@ -196,7 +196,7 @@ Monitors events and manages spending allowances for the Acquired Balance Model:
 - Multi-module support via ModuleRegistry discovery
 - Cron-based periodic refresh
 
-**Implementation:** `test-oracle/src/spending-oracle.ts`
+**Implementation:** `oracle/src/spending-oracle.ts`
 
 ### 2. Safe Value Oracle
 
@@ -209,7 +209,7 @@ Tracks and stores the USD value of the associated Safe:
 - Threshold-based updates (>1% change or staleness)
 - Stores value on-chain via oracle transaction
 
-**Implementation:** `test-oracle/src/safe-value.ts`
+**Implementation:** `oracle/src/safe-value.ts`
 
 ### Supported Protocols
 
