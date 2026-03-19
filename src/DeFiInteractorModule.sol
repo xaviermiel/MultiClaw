@@ -43,7 +43,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         DEPOSIT, // Costs spending (from original), tracked for withdrawal matching
         WITHDRAW, // FREE, output becomes acquired if matched to deposit
         CLAIM, // FREE, output becomes acquired if matched to deposit (same as WITHDRAW)
-        APPROVE // FREE but capped, enables future operations
+        APPROVE, // FREE but capped, enables future operations
+        REPAY // Per-subaccount permission, no spending check when allowed
     }
 
     /// @notice Registered operation type for each function selector
@@ -117,6 +118,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Maximum age for Chainlink price feed data
     uint256 public maxPriceFeedAge = 24 hours;
 
+    // ============ Repay Permissions ============
+
+    /// @notice Per-sub-account repay permission: subAccount => allowed
+    mapping(address => bool) public repayAllowed;
+
     // ============ Events ============
 
     event RoleAssigned(address indexed member, uint16 indexed roleId);
@@ -157,6 +163,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event SelectorUnregistered(bytes4 indexed selector);
     event ParserRegistered(address indexed protocol, address parser);
 
+    event RepayPermissionSet(address indexed subAccount, bool allowed);
+
     event EmergencyPaused(address indexed by);
     event EmergencyUnpaused(address indexed by);
 
@@ -188,6 +196,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error CannotBeOracle(address account);
     error CannotWhitelistCoreAddress(address account);
     error CannotRegisterParserForCoreAddress(address account);
+    error RepayNotAllowed(address subAccount);
 
     // ============ Modifiers ============
 
@@ -359,6 +368,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit AllowedAddressesSet(subAccount, targets, allowed);
     }
 
+    /**
+     * @notice Set repay permission for a sub-account
+     * @param subAccount The sub-account address
+     * @param allowed Whether the sub-account is allowed to repay debt without spending check
+     */
+    function setRepayAllowed(address subAccount, bool allowed) external onlyOwner {
+        if (subAccount == address(0)) revert InvalidAddress();
+        repayAllowed[subAccount] = allowed;
+        emit RepayPermissionSet(subAccount, allowed);
+    }
+
     // ============ Main Entry Point ============
 
     /**
@@ -396,6 +416,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             return _executeNoSpendingCheck(msg.sender, target, data, opType);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
             return _executeWithSpendingCheck(msg.sender, target, data, opType);
+        } else if (opType == OperationType.REPAY) {
+            if (!repayAllowed[msg.sender]) revert RepayNotAllowed(msg.sender);
+            return _executeRepay(msg.sender, target, data);
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -436,6 +459,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             return _executeNoSpendingCheckWithValue(msg.sender, target, data, opType, msg.value);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
             return _executeWithSpendingCheckWithValue(msg.sender, target, data, opType, msg.value);
+            if (!repayAllowed[msg.sender]) revert RepayNotAllowed(msg.sender);
+            return _executeRepay(msg.sender, target, data);
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -457,7 +482,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // If parser exists, use it for classification (handles dynamic operations like V4)
         if (address(parser) != address(0)) {
             uint8 parserOpType = parser.getOperationType(data);
-            if (parserOpType > 0 && parserOpType <= uint8(OperationType.APPROVE)) {
+            if (parserOpType > 0 && parserOpType <= uint8(OperationType.REPAY)) {
                 return OperationType(parserOpType);
             }
         }
@@ -718,6 +743,51 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             new uint256[](0), // no amountsIn
             tokensOut,
             amountsOut,
+            0 // no spending cost
+        );
+
+        return "";
+    }
+
+    // ============ Repay Logic ============
+
+    /**
+     * @notice Execute a debt repayment operation (no spending check, requires repayAllowed permission)
+     * @dev REPAY consumes Safe tokens to reduce protocol debt. Unlike WITHDRAW/CLAIM,
+     *      it has input tokens (the tokens being repaid). We track these in the event
+     *      for oracle accounting but do not enforce spending limits.
+     */
+    function _executeRepay(address subAccount, address target, bytes calldata data) internal returns (bytes memory) {
+        // 1. Parser is REQUIRED to extract token/amount from calldata
+        ICalldataParser parser = protocolParsers[target];
+        if (address(parser) == address(0)) {
+            revert NoParserRegistered(target);
+        }
+
+        // 2. Validate recipient is the Safe (onBehalfOf for repay must be the Safe)
+        address recipient = parser.extractRecipient(target, data, avatar);
+        if (recipient != avatar) {
+            revert InvalidRecipient(recipient, avatar);
+        }
+
+        // 3. Extract tokens and amounts for event tracking (no spending enforcement)
+        address[] memory tokensIn = parser.extractInputTokens(target, data);
+        uint256[] memory amountsIn = parser.extractInputAmounts(target, data);
+        if (tokensIn.length != amountsIn.length) revert LengthMismatch();
+
+        // 4. Execute (NO spending check - repay is permitted by setRepayAllowed)
+        bool success = exec(target, 0, data, ISafe.Operation.Call);
+        if (!success) revert TransactionFailed();
+
+        // 5. Emit event for oracle tracking
+        emit ProtocolExecution(
+            subAccount,
+            target,
+            OperationType.REPAY,
+            tokensIn,
+            amountsIn,
+            new address[](0), // repay has no output tokens
+            new uint256[](0),
             0 // no spending cost
         );
 

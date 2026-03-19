@@ -49,7 +49,10 @@ interface ICalldataParser {
      *      For protocols where recipient is implicit (e.g., msg.sender), return defaultRecipient.
      *      The module will validate that recipient == Safe address to prevent fund theft.
      */
-    function extractRecipient(address target, bytes calldata data, address defaultRecipient) external view returns (address recipient);
+    function extractRecipient(address target, bytes calldata data, address defaultRecipient)
+        external
+        view
+        returns (address recipient);
 
     /**
      * @notice Check if this parser supports the given selector
@@ -61,7 +64,7 @@ interface ICalldataParser {
     /**
      * @notice Get the operation type for the given calldata
      * @param data The calldata to analyze
-     * @return opType The operation type: 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
+     * @return opType The operation type: 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE, 6=REPAY
      * @dev This allows parsers to determine operation type from calldata content,
      *      which is essential for protocols with single entry points (e.g., Uniswap V4's modifyLiquidities)
      */

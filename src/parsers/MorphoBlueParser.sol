@@ -85,7 +85,12 @@ contract MorphoBlueParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -108,7 +113,12 @@ contract MorphoBlueParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+    function extractOutputTokens(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -122,7 +132,8 @@ contract MorphoBlueParser is ICalldataParser {
             tokens = new address[](1);
             tokens[0] = _extractCollateralToken(data);
             return tokens;
-        } else if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR || selector == SUPPLY_COLLATERAL_SELECTOR) {
+        } else if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR || selector == SUPPLY_COLLATERAL_SELECTOR)
+        {
             // Supply/Repay/SupplyCollateral: no output tokens (internal accounting)
             return new address[](0);
         }
@@ -131,7 +142,12 @@ contract MorphoBlueParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -156,11 +172,8 @@ contract MorphoBlueParser is ICalldataParser {
     /// @inheritdoc ICalldataParser
     /// @dev BORROW_SELECTOR intentionally excluded - only multisig can borrow
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
-        return selector == SUPPLY_SELECTOR ||
-               selector == WITHDRAW_SELECTOR ||
-               selector == REPAY_SELECTOR ||
-               selector == SUPPLY_COLLATERAL_SELECTOR ||
-               selector == WITHDRAW_COLLATERAL_SELECTOR;
+        return selector == SUPPLY_SELECTOR || selector == WITHDRAW_SELECTOR || selector == REPAY_SELECTOR
+            || selector == SUPPLY_COLLATERAL_SELECTOR || selector == WITHDRAW_COLLATERAL_SELECTOR;
     }
 
     /**
@@ -173,12 +186,11 @@ contract MorphoBlueParser is ICalldataParser {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
-        if (selector == SUPPLY_SELECTOR ||
-            selector == REPAY_SELECTOR ||
-            selector == SUPPLY_COLLATERAL_SELECTOR) {
+        if (selector == SUPPLY_SELECTOR || selector == SUPPLY_COLLATERAL_SELECTOR) {
             return 2; // DEPOSIT - costs spending
-        } else if (selector == WITHDRAW_SELECTOR ||
-                   selector == WITHDRAW_COLLATERAL_SELECTOR) {
+        } else if (selector == REPAY_SELECTOR) {
+            return 6; // REPAY - per-subaccount permission, no spending check when allowed
+        } else if (selector == WITHDRAW_SELECTOR || selector == WITHDRAW_COLLATERAL_SELECTOR) {
             return 3; // WITHDRAW - free operation
         }
         // BORROW_SELECTOR intentionally returns 0 (UNKNOWN) - not supported
@@ -213,10 +225,14 @@ contract MorphoBlueParser is ICalldataParser {
     }
 
     function _extractCollateralOnBehalf(bytes calldata data) internal pure returns (address) {
-        return address(uint160(uint256(bytes32(data[4 + COLLATERAL_ON_BEHALF_OFFSET:4 + COLLATERAL_ON_BEHALF_OFFSET + 32]))));
+        return
+            address(
+                uint160(uint256(bytes32(data[4 + COLLATERAL_ON_BEHALF_OFFSET:4 + COLLATERAL_ON_BEHALF_OFFSET + 32])))
+            );
     }
 
     function _extractCollateralReceiver(bytes calldata data) internal pure returns (address) {
-        return address(uint160(uint256(bytes32(data[4 + COLLATERAL_RECEIVER_OFFSET:4 + COLLATERAL_RECEIVER_OFFSET + 32]))));
+        return
+            address(uint160(uint256(bytes32(data[4 + COLLATERAL_RECEIVER_OFFSET:4 + COLLATERAL_RECEIVER_OFFSET + 32]))));
     }
 }

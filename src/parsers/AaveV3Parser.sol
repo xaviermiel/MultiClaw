@@ -12,23 +12,24 @@ import {IAavePool} from "../interfaces/IAavePool.sol";
  * SECURITY NOTE:
  * - BORROW is intentionally not supported. Borrowing creates debt against Safe's collateral
  *   and could be exploited to bypass spending limits. Only the multisig should borrow.
- * - REPAY is classified as WITHDRAW (free operation) since repaying debt improves Safe's health.
+ * - REPAY is classified as REPAY (opType 6). Requires per-subaccount permission via setRepayAllowed.
+ *   When allowed, repay executes without spending check since it improves Safe's health factor.
  */
 contract AaveV3Parser is ICalldataParser {
     error UnsupportedSelector();
     error InvalidCalldata();
 
     // Aave V3 Pool function selectors
-    bytes4 public constant SUPPLY_SELECTOR = 0x617ba037;      // supply(address,uint256,address,uint16)
-    bytes4 public constant WITHDRAW_SELECTOR = 0x69328dec;    // withdraw(address,uint256,address)
+    bytes4 public constant SUPPLY_SELECTOR = 0x617ba037; // supply(address,uint256,address,uint16)
+    bytes4 public constant WITHDRAW_SELECTOR = 0x69328dec; // withdraw(address,uint256,address)
     // BORROW_SELECTOR intentionally not supported - only multisig can borrow
-    bytes4 public constant REPAY_SELECTOR = 0x573ade81;       // repay(address,uint256,uint256,address)
+    bytes4 public constant REPAY_SELECTOR = 0x573ade81; // repay(address,uint256,uint256,address)
 
     // Aave V3 RewardsController selectors (CLAIM operations)
-    bytes4 public constant CLAIM_REWARDS_SELECTOR = 0x236300dc;           // claimRewards(address[],uint256,address,address)
+    bytes4 public constant CLAIM_REWARDS_SELECTOR = 0x236300dc; // claimRewards(address[],uint256,address,address)
     bytes4 public constant CLAIM_REWARDS_ON_BEHALF_SELECTOR = 0x33028b99; // claimRewardsOnBehalf(address[],uint256,address,address,address)
-    bytes4 public constant CLAIM_ALL_REWARDS_SELECTOR = 0xbb492bf5;       // claimAllRewards(address[],address)
-    bytes4 public constant CLAIM_ALL_ON_BEHALF_SELECTOR = 0x9ff55db9;     // claimAllRewardsOnBehalf(address[],address,address)
+    bytes4 public constant CLAIM_ALL_REWARDS_SELECTOR = 0xbb492bf5; // claimAllRewards(address[],address)
+    bytes4 public constant CLAIM_ALL_ON_BEHALF_SELECTOR = 0x9ff55db9; // claimAllRewardsOnBehalf(address[],address,address)
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
@@ -49,7 +50,12 @@ contract AaveV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -67,7 +73,12 @@ contract AaveV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractOutputTokens(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -90,7 +101,7 @@ contract AaveV3Parser is ICalldataParser {
             // claimRewards(address[] assets, uint256 amount, address to, address reward)
             // reward token is the 4th parameter
             address token;
-            (, , , token) = abi.decode(data[4:], (address[], uint256, address, address));
+            (,,, token) = abi.decode(data[4:], (address[], uint256, address, address));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -98,7 +109,7 @@ contract AaveV3Parser is ICalldataParser {
             // claimRewardsOnBehalf(address[] assets, uint256 amount, address user, address to, address reward)
             // reward token is the 5th parameter
             address token;
-            (, , , , token) = abi.decode(data[4:], (address[], uint256, address, address, address));
+            (,,,, token) = abi.decode(data[4:], (address[], uint256, address, address, address));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -111,7 +122,12 @@ contract AaveV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -150,22 +166,18 @@ contract AaveV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
-        return selector == SUPPLY_SELECTOR ||
-               selector == WITHDRAW_SELECTOR ||
-               selector == REPAY_SELECTOR ||
-               _isClaimSelector(selector);
+        return selector == SUPPLY_SELECTOR || selector == WITHDRAW_SELECTOR || selector == REPAY_SELECTOR
+            || _isClaimSelector(selector);
         // NOTE: BORROW is intentionally NOT supported - only multisig can borrow
     }
 
     /**
      * @notice Get the operation type for the given calldata
      * @param data The calldata to analyze
-     * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
+     * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE, 6=REPAY
      *
-     * @dev REPAY is classified as WITHDRAW (free operation) because:
-     *      - It improves the Safe's health factor by reducing debt
-     *      - It doesn't increase risk exposure
-     *      - Subaccounts should be free to repay debt without spending checks
+     * @dev REPAY is its own operation type (6). The module checks per-subaccount
+     *      permission via repayAllowed. When allowed, repay executes without spending check.
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
         if (data.length < 4) revert InvalidCalldata();
@@ -186,9 +198,7 @@ contract AaveV3Parser is ICalldataParser {
      * @notice Check if selector is a CLAIM operation
      */
     function _isClaimSelector(bytes4 selector) internal pure returns (bool) {
-        return selector == CLAIM_REWARDS_SELECTOR ||
-               selector == CLAIM_REWARDS_ON_BEHALF_SELECTOR ||
-               selector == CLAIM_ALL_REWARDS_SELECTOR ||
-               selector == CLAIM_ALL_ON_BEHALF_SELECTOR;
+        return selector == CLAIM_REWARDS_SELECTOR || selector == CLAIM_REWARDS_ON_BEHALF_SELECTOR
+            || selector == CLAIM_ALL_REWARDS_SELECTOR || selector == CLAIM_ALL_ON_BEHALF_SELECTOR;
     }
 }
