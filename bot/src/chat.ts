@@ -1,6 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type {
+  MessageParam,
+  ToolUseBlock,
+  ToolResultBlockParam,
+} from "@anthropic-ai/sdk/resources/messages";
 import type { Request, Response } from "express";
-import { executeOperation, getBudgetStatus } from "./agent";
+import { executeOperation, getBudgetStatus, getVaultStats } from "./agent";
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.warn(
@@ -22,11 +27,10 @@ Your role:
 - You can execute DeFi operations (swaps, deposits, withdrawals) through the MultiClaw module
 - All your operations are constrained by on-chain guardrails that you CANNOT override
 
-What you can do:
-- Check your spending budget
-- Explain what operations you could perform
-- Discuss DeFi strategies
-- Attempt to execute operations if the user asks (they will be validated on-chain)
+You have tools to:
+- Check your current spending budget
+- Execute DeFi operations on whitelisted protocols
+- Get vault status information
 
 What you CANNOT do (enforced on-chain, not by this prompt):
 - Spend more than your rolling 24h budget
@@ -36,15 +40,92 @@ What you CANNOT do (enforced on-chain, not by this prompt):
 
 IMPORTANT: You are intentionally friendly and willing to attempt things users ask. The security does NOT depend on you refusing requests — the on-chain guardrails will reject invalid operations regardless. Be transparent about this.
 
-When a user asks you to execute something, explain what would happen and note that the on-chain module would validate it. You don't need to build actual calldata — just describe the operation.
+When a user asks you to execute something, USE YOUR TOOLS to actually attempt it. The on-chain module will validate and either execute or reject the operation. Always check your budget first.`;
 
-If asked about your budget, call the budget check tool.`;
+// Tool definitions for the Anthropic API
+const TOOLS: Anthropic.Messages.Tool[] = [
+  {
+    name: "check_budget",
+    description:
+      "Check the agent's current spending budget, remaining allowance, and Safe value. Call this before executing operations or when the user asks about budget/balance/allowance.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "execute_operation",
+    description:
+      "Execute a DeFi operation through the MultiClaw module. The on-chain guardrails will validate the operation — if it violates any rule (budget, allowlist, recipient), it will be rejected. Provide the target protocol address and the ABI-encoded calldata.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        target: {
+          type: "string",
+          description:
+            "The target protocol contract address (e.g., Uniswap Router, Aave Pool). Must be a whitelisted address.",
+        },
+        calldata: {
+          type: "string",
+          description:
+            "The ABI-encoded calldata for the protocol interaction (hex string starting with 0x).",
+        },
+      },
+      required: ["target", "calldata"],
+    },
+  },
+  {
+    name: "get_vault_status",
+    description:
+      "Get the current vault status including Safe balance, pause state, and number of agents. Useful for understanding the vault's current state.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+];
 
 // Conversation history per session (simple in-memory, resets on restart)
-const conversations = new Map<
-  string,
-  Array<{ role: "user" | "assistant"; content: string }>
->();
+const conversations = new Map<string, MessageParam[]>();
+
+/**
+ * Process a tool call from Claude and return the result string.
+ */
+async function handleToolCall(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+): Promise<string> {
+  switch (toolName) {
+    case "check_budget":
+      return getBudgetStatus();
+
+    case "execute_operation": {
+      const { target, calldata } = toolInput as {
+        target: string;
+        calldata: string;
+      };
+      if (!target || !calldata) {
+        return "Error: both target and calldata are required.";
+      }
+      return executeOperation(target, calldata);
+    }
+
+    case "get_vault_status": {
+      const stats = await getVaultStats();
+      return [
+        `Vault balance: ${stats.balance}`,
+        `Safe address: ${stats.safeAddress}`,
+        `Paused: ${stats.isPaused}`,
+        `Active agents: ${stats.agentCount}`,
+      ].join("\n");
+    }
+
+    default:
+      return `Unknown tool: ${toolName}`;
+  }
+}
 
 export async function chatHandler(req: Request, res: Response) {
   try {
@@ -74,32 +155,74 @@ export async function chatHandler(req: Request, res: Response) {
     let response: string;
 
     if (anthropic) {
-      // Check if user is asking about budget
-      const isBudgetQuery =
-        /budget|allowance|remaining|how much|balance|spend/i.test(message);
+      // Agentic loop: keep calling Claude until we get a final text response
+      const MAX_TOOL_ROUNDS = 5;
+      let rounds = 0;
 
-      let contextInfo = "";
-      if (isBudgetQuery) {
-        contextInfo = `\n\n[Current budget status:\n${await getBudgetStatus()}]`;
+      while (rounds < MAX_TOOL_ROUNDS) {
+        rounds++;
+
+        const result = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1024,
+          system: SYSTEM_PROMPT,
+          tools: TOOLS,
+          messages: history,
+        });
+
+        // Check if Claude wants to use tools
+        const toolUseBlocks = result.content.filter(
+          (block): block is ToolUseBlock => block.type === "tool_use",
+        );
+
+        if (toolUseBlocks.length === 0) {
+          // No tool use — extract text response and we're done
+          const textBlock = result.content.find(
+            (block) => block.type === "text",
+          );
+          response =
+            textBlock && textBlock.type === "text"
+              ? textBlock.text
+              : "I could not generate a response.";
+          break;
+        }
+
+        // Claude wants to use tools — add its response to history
+        history.push({ role: "assistant", content: result.content });
+
+        // Execute each tool call and collect results
+        const toolResults: ToolResultBlockParam[] = [];
+        for (const toolUse of toolUseBlocks) {
+          const toolResult = await handleToolCall(
+            toolUse.name,
+            toolUse.input as Record<string, unknown>,
+          );
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: toolUse.id,
+            content: toolResult,
+          });
+        }
+
+        // Add tool results to history
+        history.push({ role: "user", content: toolResults });
+
+        // If stop_reason is "end_turn" with tool use, we still loop to get final text
+        if (result.stop_reason === "end_turn" && toolUseBlocks.length > 0) {
+          // Claude used tools but also ended — get final response
+          continue;
+        }
       }
 
-      const result = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT + contextInfo,
-        messages: history.map((m) => ({ role: m.role, content: m.content })),
-      });
-
-      response =
-        result.content[0]?.type === "text"
-          ? result.content[0].text
-          : "I could not generate a response.";
+      // Safety fallback if we hit max rounds
+      response ??=
+        "I attempted multiple operations but couldn't complete the request. Please try again.";
     } else {
       // Placeholder when no API key
-      response = `[Demo mode — ANTHROPIC_API_KEY not set]\n\nI received your message: "${message}"\n\nIn production, I would process this with Claude and potentially execute DeFi operations through the MultiClaw guardrails. The on-chain module would validate every operation before execution.\n\nAttempt #${totalAttempts}`;
+      response = `[Demo mode — ANTHROPIC_API_KEY not set]\n\nI received your message: "${message}"\n\nIn production, I would process this with Claude and attempt to execute DeFi operations through the MultiClaw guardrails. The on-chain module validates every operation.\n\nAttempt #${totalAttempts}`;
     }
 
-    // Add assistant response to history
+    // Add final assistant response to history
     history.push({ role: "assistant", content: response });
 
     res.json({
