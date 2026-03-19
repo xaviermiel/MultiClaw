@@ -1,5 +1,5 @@
 {
-  "name": "multisub-sdk",
+  "name": "multiclaw-sdk",
   "private": true,
   "workspaces": [
     "packages/*"

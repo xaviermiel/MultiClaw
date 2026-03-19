@@ -1,23 +1,23 @@
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { formatEther } from "viem";
-import type { MultisubToolConfig } from "../toolkit";
+import type { MultiClawToolConfig } from "../toolkit";
 
 /**
  * LangChain tool for checking the agent's remaining spending budget.
  * Read-only — does not require a signer.
  */
-export class MultisubBudgetTool extends StructuredTool {
-  name = "multisub_check_budget";
+export class MultiClawBudgetTool extends StructuredTool {
+  name = "multiclaw_check_budget";
   description = `Check the remaining spending budget for this agent.
 Returns the remaining USD allowance, maximum allowance, and percentage used.
 Use this before executing operations to verify there is sufficient budget.`;
 
   schema = z.object({});
 
-  private config: MultisubToolConfig;
+  private config: MultiClawToolConfig;
 
-  constructor(config: MultisubToolConfig) {
+  constructor(config: MultiClawToolConfig) {
     super();
     this.config = config;
   }

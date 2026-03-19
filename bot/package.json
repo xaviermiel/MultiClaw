@@ -1,7 +1,7 @@
 {
-  "name": "multisub-challenge-bot",
+  "name": "multiclaw-challenge-bot",
   "version": "0.1.0",
-  "description": "Break the Vault challenge bot — AI agent with Multisub on-chain guardrails",
+  "description": "Break the Vault challenge bot — AI agent with MultiClaw on-chain guardrails",
   "type": "module",
   "scripts": {
     "start": "tsx src/server.ts",
@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@multisub/core": "file:../sdk/packages/core",
+    "@multiclaw/core": "file:../sdk/packages/core",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "viem": "^2.21.0"

@@ -17,7 +17,7 @@ import { DeFiInteractorModuleAbi } from "./abi/DeFiInteractorModule";
 import { AgentVaultFactoryAbi } from "./abi/AgentVaultFactory";
 import { getChainConfig } from "./chains";
 import type {
-  MultisubClientConfig,
+  MultiClawClientConfig,
   ChainAddresses,
   VaultConfig,
   VaultDeployment,
@@ -30,9 +30,9 @@ import type {
 import { DEFI_EXECUTE_ROLE, DEFI_TRANSFER_ROLE } from "./types";
 
 /**
- * MultisubClient — the primary SDK entry point.
+ * MultiClawClient — the primary SDK entry point.
  *
- * Provides typed methods for all Multisub contract interactions:
+ * Provides typed methods for all MultiClaw contract interactions:
  * - Vault creation (via AgentVaultFactory)
  * - Agent operations (executeOnProtocol, transferToken)
  * - Read operations (budget, status, history)
@@ -40,9 +40,9 @@ import { DEFI_EXECUTE_ROLE, DEFI_TRANSFER_ROLE } from "./types";
  *
  * @example
  * ```ts
- * import { MultisubClient } from '@multisub/core'
+ * import { MultiClawClient } from '@multiclaw/core'
  *
- * const client = new MultisubClient({ chain: 'base' })
+ * const client = new MultiClawClient({ chain: 'base' })
  *
  * // Read agent's remaining budget
  * const budget = await client.getRemainingBudget(moduleAddress, agentAddress)
@@ -52,12 +52,12 @@ import { DEFI_EXECUTE_ROLE, DEFI_TRANSFER_ROLE } from "./types";
  * const receipt = await client.executeAsAgent(moduleAddress, target, calldata, agentAccount)
  * ```
  */
-export class MultisubClient {
+export class MultiClawClient {
   readonly publicClient: PublicClient<Transport, Chain>;
   readonly chain: Chain;
   readonly addresses: ChainAddresses;
 
-  constructor(config: MultisubClientConfig) {
+  constructor(config: MultiClawClientConfig) {
     const chainConfig = getChainConfig(config.chain);
     this.chain = chainConfig.chain;
 

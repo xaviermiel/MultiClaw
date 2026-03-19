@@ -1,7 +1,7 @@
 {
-  "name": "@multisub/langchain",
+  "name": "@multiclaw/langchain",
   "version": "0.1.0",
-  "description": "LangChain StructuredTool adapter for Multisub agent guardrails",
+  "description": "LangChain StructuredTool adapter for MultiClaw agent guardrails",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@multisub/core": "file:../core",
+    "@multiclaw/core": "file:../core",
     "zod": "^4.3.6"
   },
   "peerDependencies": {

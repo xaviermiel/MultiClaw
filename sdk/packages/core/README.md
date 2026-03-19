@@ -1,21 +1,21 @@
-# @multisub/core
+# @multiclaw/core
 
-TypeScript SDK for [Multisub](https://multisubs.xyz) — on-chain guardrails for AI agents managing crypto funds.
+TypeScript SDK for [MultiClaw](https://multiclaws.xyz) — on-chain guardrails for AI agents managing crypto funds.
 
 ## Installation
 
 ```bash
-npm install @multisub/core viem
+npm install @multiclaw/core viem
 ```
 
 ## Quick Start
 
 ```typescript
-import { MultisubClient } from "@multisub/core";
+import { MultiClawClient } from "@multiclaw/core";
 import { privateKeyToAccount } from "viem/accounts";
 
 // 1. Create client
-const client = new MultisubClient({ chain: "base" });
+const client = new MultiClawClient({ chain: "base" });
 
 // 2. Check agent's remaining budget
 const budget = await client.getRemainingBudget(moduleAddress, agentAddress);
@@ -38,7 +38,7 @@ const { txHash } = await client.executeAsAgent(
 ### Constructor
 
 ```typescript
-const client = new MultisubClient({
+const client = new MultiClawClient({
   chain: "base", // 'base' | 'baseSepolia'
   rpcUrl: "https://...", // Optional: override default RPC
   addresses: {
@@ -178,7 +178,7 @@ Resume operations after a pause.
 Deploy a fully-configured vault via `AgentVaultFactory`. Caller must be the factory owner.
 
 ```typescript
-import { type VaultConfig, DEFI_EXECUTE_ROLE } from "@multisub/core";
+import { type VaultConfig, DEFI_EXECUTE_ROLE } from "@multiclaw/core";
 
 const config: VaultConfig = {
   safe: safeAddress,
@@ -212,14 +212,14 @@ import {
   AgentVaultFactoryAbi,
   PresetRegistryAbi,
   ModuleRegistryAbi,
-} from "@multisub/core/abi";
+} from "@multiclaw/core/abi";
 ```
 
 ## Framework Adapters
 
-- **LangChain**: `@multisub/langchain` — StructuredTool adapters
-- **Eliza**: `@multisub/eliza` — Eliza plugin with DeFi actions
-- **GOAT**: `@multisub/goat` — GOAT SDK plugin
+- **LangChain**: `@multiclaw/langchain` — StructuredTool adapters
+- **Eliza**: `@multiclaw/eliza` — Eliza plugin with DeFi actions
+- **GOAT**: `@multiclaw/goat` — GOAT SDK plugin
 
 See each package's documentation for integration guides.
 

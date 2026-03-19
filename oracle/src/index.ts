@@ -15,7 +15,7 @@ import { validateConfig } from './config.js'
 
 function main() {
   console.log('===========================================')
-  console.log('  MultiSub Local Oracle')
+  console.log('  MultiClaw Local Oracle')
   console.log('===========================================')
   console.log('')
 

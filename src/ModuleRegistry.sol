@@ -55,7 +55,7 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
 
     /**
      * @notice Initialize the registry with an owner
-     * @param _initialOwner The initial owner address (MultiSub team EOA)
+     * @param _initialOwner The initial owner address (MultiClaw team EOA)
      */
     constructor(address _initialOwner) Ownable(_initialOwner) {}
 

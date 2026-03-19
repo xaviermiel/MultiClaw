@@ -1,12 +1,12 @@
 # Spending Limit Mechanism - Overview
 
-## What is MultiSub?
+## What is MultiClaw?
 
-MultiSub enables **Safe multisig owners** to delegate DeFi operations to **sub-accounts** (hot wallets) while maintaining strict spending controls. Sub-accounts can interact with whitelisted protocols but cannot exceed their allocated spending limits.
+MultiClaw enables **Safe multisig owners** to delegate DeFi operations to **sub-accounts** (hot wallets) while maintaining strict spending controls. Sub-accounts can interact with whitelisted protocols but cannot exceed their allocated spending limits.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     MULTISUB ARCHITECTURE                       │
+│                     MULTICLAW ARCHITECTURE                       │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │   Safe Multisig (holds funds)                                   │

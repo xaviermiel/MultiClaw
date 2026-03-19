@@ -140,7 +140,7 @@ export interface TransferExecution {
 
 // ============ Client Config ============
 
-export interface MultisubClientConfig {
+export interface MultiClawClientConfig {
   /** Chain name: 'base' | 'baseSepolia' */
   chain: "base" | "baseSepolia";
   /** Custom RPC URL (overrides default for chain) */

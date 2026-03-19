@@ -1,238 +1,213 @@
-# MultiSub
+# MultiClaw — On-Chain Guardrails for AI Agents
 
-> A secure self-custody DeFi wallet built as a **custom Zodiac module**, combining Safe multisig security with delegated permission-restricted interactions.
+> Give your AI agent a wallet with hard spending limits. Unhackable by design.
 
-[![Solidity](https://img.shields.io/badge/solidity-0.8.20-blue)]()
-[![Tests](https://img.shields.io/badge/tests-450%2F450%20passing-brightgreen)]()
+[![Solidity](https://img.shields.io/badge/solidity-0.8.24-blue)]()
+[![Tests](https://img.shields.io/badge/tests-450%2B%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
-[![Zodiac](https://img.shields.io/badge/zodiac-module-purple)]()
+[![Base](https://img.shields.io/badge/chain-Base-0052FF)]()
 
-## Overview
+## The Problem
 
-MultiSub is a **custom Zodiac module** that enables Safe multisig owners to delegate DeFi operations to sub-accounts (hot wallets) while maintaining strict security controls.
+AI agents need wallets to operate on-chain. But giving an agent an unrestricted private key is a security disaster — one jailbreak, prompt injection, or plugin exploit and your funds are gone.
 
-**The Problem**: Traditional self-custody forces you to choose between security (multisig), usability (hot wallet), or flexibility (delegation).
+## The Solution
 
-**Our Solution**: A self-contained Zodiac module with integrated role management, per-sub-account allowlists, and time-windowed limits.
+MultiClaw wraps a [Safe](https://safe.global/) multisig with a permission layer that enforces spending limits, protocol whitelists, and role-based access **at the smart contract level**. Even if your agent is 100% compromised, the on-chain guardrails hold.
+
+**Deployment is permissionless** — anyone can deploy an agent vault via the factory contracts. No approval needed.
 
 ## Quick Start
 
+### Using the SDK
+
 ```bash
-# 1. Install
-git clone <repository-url>
-cd MultiSub
-forge install && forge build
-
-# 2. Deploy module and enable on Safe
-SAFE_ADDRESS=0x... AUTHORIZED_UPDATER=0x... \
-forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
-
-# 3. Deploy parsers and register selectors
-SAFE_ADDRESS=0x... DEFI_MODULE_ADDRESS=0x... \
-forge script script/ConfigureParsersAndSelectors.s.sol --rpc-url $RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
-
-# 4. Configure sub-accounts
-SAFE_ADDRESS=0x... DEFI_MODULE_ADDRESS=0x... SUB_ACCOUNT_ADDRESS=0x... \
-forge script script/ConfigureSubaccount.s.sol --rpc-url $RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+npm install @multiclaw/core
 ```
 
-**Prerequisites**: [Foundry](https://getfoundry.sh/), a deployed [Safe](https://app.safe.global/)
+```typescript
+import { MultiClawClient } from "@multiclaw/core";
+
+// 1. Deploy a vault (permissionless — anyone can call)
+const client = new MultiClawClient({ chain: "base", signer: ownerWallet });
+const vault = await client.createAgentVault({
+  preset: "defi-trader", // DeFi Trader, Yield Farmer, Payment Agent, or Custom
+  agentSigner: "0xAgent...",
+  maxSpendingBps: 500, // 5% of Safe per 24h
+});
+
+// 2. Agent operates within guardrails
+const agent = new MultiClawAgent({
+  chain: "base",
+  signer: agentWallet,
+  moduleAddress: vault.module,
+});
+
+await agent.executeOnProtocol("0xUniRouter...", swapCalldata);
+const budget = await agent.getRemainingBudget();
+```
+
+### Using Foundry (Direct Contract Interaction)
+
+```bash
+git clone <repository-url> && cd MultiClaw
+forge install && forge build
+
+# Deploy a vault via AgentVaultFactory (permissionless — anyone can call)
+# The factory is already deployed on Base at the address in sdk/packages/core/src/chains.ts
+cast send $AGENT_VAULT_FACTORY "deployVaultFromPreset(address,address,address,uint256,address[],address[])" \
+  $SAFE_ADDRESS $ORACLE_ADDRESS $AGENT_ADDRESS $PRESET_ID "[]" "[]" \
+  --rpc-url $BASE_RPC_URL --private-key $PRIVATE_KEY
+```
+
+## What the Agent Can Do (Within Guardrails)
+
+- Swap tokens on Uniswap, 1inch, KyberSwap, Paraswap
+- Supply/withdraw on Aave V3, Morpho Blue, Morpho MetaMorpho vaults
+- Repay protocol debt on Aave V3, Morpho Blue (if granted REPAY role — improves Safe health)
+- Claim rewards from Merkl
+- Transfer tokens to specified recipients (if granted TRANSFER role)
+
+## What the Agent Cannot Do (Even If Fully Compromised)
+
+- Spend more than its rolling 24h budget
+- Interact with non-whitelisted protocols
+- Approve tokens to unknown contracts
+- Redirect swap/withdrawal output to an attacker address
+- Bypass limits via any prompt injection, jailbreak, or plugin exploit
 
 ## Architecture
 
 ```
-┌────────────────────────────────────┐
-│        Safe Multisig               │
-│      (Avatar & Owner)              │
-│                                    │
-│  • Enables/disables module         │
-│  • Configures roles & limits       │
-│  • Emergency controls              │
-└─────────────┬──────────────────────┘
-              │ enableModule()
-              ↓
-┌────────────────────────────────────┐
-│    DeFiInteractorModule            │
-│    (Custom Zodiac Module)          │
-│                                    │
-│  Features:                         │
-│  ├─ 2 Roles (Execute, Transfer)    │
-│  ├─ Per-sub-account allowlists     │
-│  ├─ Customizable limits            │
-│  └─ Emergency pause                │
-│                                    │
-│  Uses: exec() → Safe               │
-└─────────────┬──────────────────────┘
-              │
-              ↓
-┌────────────────────────────────────┐
-│      Sub-Accounts (EOAs)           │
-│                                    │
-│  • executeOnProtocol()             │
-│  • executeOnProtocolWithValue()    │
-│  • transferToken()                 │
-└────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  DEPLOYMENT (permissionless, single transaction)                │
+│                                                                 │
+│  AgentVaultFactory.deployVault(config)                          │
+│    → Deploy DeFiInteractorModule (CREATE2, deterministic)       │
+│    → Configure: roles, limits, allowlists, parsers, feeds       │
+│    → Transfer ownership to Safe                                 │
+│    → Register in ModuleRegistry                                 │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────┐
+│  RUNTIME (on-chain enforcement)                                 │
+│                                                                 │
+│  Safe Multisig ◄── DeFiInteractorModule                        │
+│  (holds funds)     │                                            │
+│                    ├─ Role Check         (agent authorized?)    │
+│                    ├─ Oracle Freshness   (data < 60 min?)       │
+│                    ├─ Target Allowlist   (protocol whitelisted?)│
+│                    ├─ Recipient Guard    (output → Safe only)   │
+│                    ├─ Spending Limit     (within USD budget?)   │
+│                    ├─ Acquired Balance   (free tokens first)    │
+│                    └─ Approve Cap        (spender whitelisted?) │
+│                                                                 │
+│  10 Protocol Parsers: Aave V3, Morpho, Uniswap V3/V4,         │
+│    Universal Router, 1inch, KyberSwap, Paraswap, Merkl         │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Features
+## Permissionless Deployment
 
-### Streamlined Roles
+Both `ModuleFactory` and `AgentVaultFactory` are **permissionless** — anyone can deploy a module or vault without requiring approval from the MultiClaw team. Security is preserved because:
 
-- **DEFI_EXECUTE_ROLE (1)**: Execute protocol operations (swaps, deposits, withdrawals, claims, approvals)
-- **DEFI_TRANSFER_ROLE (2)**: Transfer tokens out of Safe
-- **DEFI_REPAY_ROLE (3)**: Repay protocol debt (no spending check — improves Safe health)
+1. **Module ownership transfers to the Safe** after deployment — only the Safe can configure it
+2. **The deployer has no special privileges** over the deployed module
+3. **The Safe must separately enable the module** (requires Safe multisig transaction)
+4. **Registry tracks all deployments** for oracle discovery
 
-### Acquired Balance Model
+### Template Presets
+
+| Preset        | Protocols            | Budget       | Role         |
+| ------------- | -------------------- | ------------ | ------------ |
+| DeFi Trader   | Uniswap + Aave V3    | 5%/day       | EXECUTE      |
+| Yield Farmer  | Morpho + Aave V3     | 10%/day      | EXECUTE      |
+| Payment Agent | None (transfer only) | 1%/day       | TRANSFER     |
+| Custom        | User-defined         | User-defined | User-defined |
+
+## Acquired Balance Model
 
 The spending limit mechanism distinguishes between:
 
 - **Original tokens** (in Safe at start of window) → using them **costs spending**
-- **Acquired tokens** (received from operations) → **free to use**
+- **Acquired tokens** (received from DeFi operations) → **free to use** for 24h
 
-This allows sub-accounts to chain operations (swap → deposit → withdraw) without hitting limits on every step.
+This lets agents chain operations (swap → deposit → withdraw) without burning budget on every step.
 
-**Critical Rules:**
+| Operation    | Costs Spending?     | Output Acquired? |
+| ------------ | ------------------- | ---------------- |
+| **Swap**     | Yes (original only) | Yes              |
+| **Deposit**  | Yes (original only) | No               |
+| **Withdraw** | No (FREE)           | Conditional\*    |
+| **Claim**    | No (FREE)           | Conditional\*    |
+| **Approve**  | No (capped)         | N/A              |
+| **Repay**    | No (REPAY role\*\*) | N/A              |
+| **Transfer** | Always              | N/A              |
 
-1. Only the exact amount received is marked as acquired
-2. Acquired status expires after 24 hours (tokens become "original" again)
+\* Only if matched to a deposit by the same agent on the same protocol.
+\*\* Requires `DEFI_REPAY_ROLE` (3). Improves Safe health factor — no spending check needed.
 
-### Operation Types
-
-| Operation         | Costs Spending?     | Output Acquired? |
-| ----------------- | ------------------- | ---------------- |
-| **Swap**          | Yes (original only) | Yes              |
-| **Deposit**       | Yes (original only) | No               |
-| **Withdraw**      | No (FREE)           | Conditional\*    |
-| **Claim Rewards** | No (FREE)           | Conditional\*    |
-| **Approve**       | No (capped)         | N/A              |
-| **Repay Debt**    | No (REPAY role\*\*) | N/A              |
-| **Transfer Out**  | Always              | N/A              |
-
-\* Only if deposit matched by the same subaccount to the same protocol in the time window.
-\*\* Requires DEFI_REPAY_ROLE (3). Granted via `grantRole(subAccount, 3)`. Improves Safe health factor.
-
-### Granular Controls
-
-- **Per-Sub-Account Allowlists**: Each sub-account has its own protocol whitelist
-- **Custom Limits**: Configurable spending percentages per sub-account
-- **Rolling Windows**: 24-hour rolling windows prevent rapid drain attacks
-
-### Security
-
-- **Selector-Based Classification**: Operations classified by function selector
-- **Calldata Verification**: Token/amount extracted from calldata and verified
-- **Allowlist Enforcement**: Sub-accounts can only interact with whitelisted protocols
-- **Oracle Freshness Check**: Operations blocked if oracle data is stale (>15 minutes)
-- **Hard Safety Cap**: Oracle cannot set allowances above absolute maximum
-- Emergency pause mechanism
-- Instant role revocation
-
-## Default Limits
-
-If not configured, sub-accounts use:
-
-- **Max Spending**: 5% of portfolio per 24 hours
-- **Window**: Rolling 24 hours (86400 seconds)
-
-## Hybrid On-Chain/Off-Chain Architecture
+## Security Model
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Sub-Account calls executeOnProtocol(target, data)              │
-│       ▼                                                         │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │              On-Chain Contract                          │    │
-│  │  1. Classify operation from function selector           │    │
-│  │  2. Extract tokenIn/amount from calldata via parser     │    │
-│  │  3. Check & update spending allowance                   │    │
-│  │  4. Execute through Safe (exec → avatar)                │    │
-│  │  5. Emit ProtocolExecution event                        │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│       ▼                                                         │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Off-Chain Oracle                           │    │
-│  │  1. Monitor events                                      │    │
-│  │  2. Track spending in rolling 24h window                │    │
-│  │  3. Match deposits to withdrawals (for acquired status) │    │
-│  │  4. Calculate spending allowances                       │    │
-│  │  5. Update contract state (spendingAllowance, etc.)     │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ Layer 1   ROLE CHECK          Does this key have the right role? │
+│ Layer 2   ORACLE FRESHNESS    Is spending state < 60 min old?    │
+│ Layer 3   OPERATION CLASSIFY  Is this selector registered?       │
+│ Layer 4   TARGET ALLOWLIST    Is this protocol whitelisted?      │
+│ Layer 5   PARSER EXTRACTION   Decode tokens, amounts, recipient  │
+│ Layer 6   RECIPIENT GUARD     Output goes to Safe, not attacker  │
+│ Layer 7   SPENDING LIMIT      USD cost fits in remaining budget  │
+│ Layer 8   ACQUIRED BALANCE    Free tokens deducted first         │
+│ Layer 9   APPROVE CAP         Spender whitelisted, amount capped │
+│ Layer 10  SAFE EXECUTION      execTransactionFromModule()        │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-## Testing
+Every transaction must pass all applicable layers. Failure at any layer = revert.
 
-```bash
-# Run all tests
-forge test
+## Agent Framework Integrations
 
-# With gas reporting
-forge test --gas-report
-
-# Specific test with verbosity
-forge test --match-test testGrantRole -vvv
-```
+| Framework      | Package                | Description                                     |
+| -------------- | ---------------------- | ----------------------------------------------- |
+| LangChain      | `@multiclaw/langchain` | StructuredTool adapter                          |
+| Eliza          | `@multiclaw/eliza`     | Plugin with SWAP, DEPOSIT, CHECK_BUDGET actions |
+| GOAT           | `@multiclaw/goat`      | GOAT SDK wrapper                                |
+| Raw TypeScript | `@multiclaw/core`      | Direct viem-based contract interactions         |
 
 ## Emergency Controls
 
-| Control                      | Purpose                                  |
-| ---------------------------- | ---------------------------------------- |
-| `pause()`                    | Freeze all module operations             |
-| `revokeRole()`               | Remove sub-account permissions instantly |
-| `unregisterSelector()`       | Block specific operation types           |
-| `setAllowedAddresses(false)` | Remove protocol from whitelist           |
+| Control                      | Purpose                            |
+| ---------------------------- | ---------------------------------- |
+| `pause()`                    | Freeze all module operations       |
+| `revokeRole()`               | Remove agent permissions instantly |
+| `unregisterSelector()`       | Block specific operation types     |
+| `setAllowedAddresses(false)` | Remove protocol from whitelist     |
 
 ## Oracle Integration
 
-The **DeFiInteractorModule** relies on an off-chain oracle (`oracle/`) for autonomous operation. See [`oracle/README.md`](./oracle/README.md) for full documentation.
+Two off-chain services maintain the module's spending state:
 
-### 1. Spending Oracle
+1. **Spending Oracle** — monitors events, tracks spending allowances & acquired balances per agent
+2. **Safe Value Monitor** — periodically values the Safe's portfolio (ERC20, Aave, Morpho, Uniswap positions)
 
-Monitors events and manages spending allowances for the Acquired Balance Model:
+See [`oracle/README.md`](./oracle/README.md) for details.
 
-- RPC polling for `ProtocolExecution` and `TransferExecuted` events
-- FIFO tracking of acquired balances with timestamp inheritance
-- Rolling 24-hour window spending calculations
-- Multi-module support via ModuleRegistry discovery
-- Cron-based periodic refresh
+## Development
 
-**Implementation:** `oracle/src/spending-oracle.ts`
+```bash
+forge build          # Compile contracts
+forge test           # Run all tests (450+)
+forge test --gas-report  # With gas reporting
+make deploy-base-sepolia # Deploy to Base Sepolia
+```
 
-### 2. Safe Value Oracle
+## Documentation
 
-Tracks and stores the USD value of the associated Safe:
-
-- Runs periodically (configurable cron schedule)
-- Fetches token balances from the Safe (ERC20 + native ETH)
-- Supports Aave aTokens, Morpho vaults, Uniswap V2 LP
-- Gets USD prices from Chainlink price feeds
-- Threshold-based updates (>1% change or staleness)
-- Stores value on-chain via oracle transaction
-
-**Implementation:** `oracle/src/safe-value.ts`
-
-### Supported Protocols
-
-| Protocol         | Parser                  | Operations                                                    |
-| ---------------- | ----------------------- | ------------------------------------------------------------- |
-| Aave V3          | `AaveV3Parser`          | Supply, Withdraw, Repay, Claim Rewards                        |
-| Morpho Vault     | `MorphoParser`          | Deposit, Mint, Withdraw, Redeem                               |
-| Morpho Blue      | `MorphoBlueParser`      | Supply, Withdraw, Repay, SupplyCollateral, WithdrawCollateral |
-| Uniswap V3       | `UniswapV3Parser`       | Swaps (exact in/out), LP Mint/Increase/Decrease/Collect       |
-| Uniswap V4       | `UniswapV4Parser`       | modifyLiquidities (Mint, Increase, Decrease, Burn)            |
-| Universal Router | `UniversalRouterParser` | V2/V3/V4 swaps, WRAP/UNWRAP ETH                               |
-| Paraswap         | `ParaswapParser`        | V5/V6 swaps                                                   |
-| 1inch            | `OneInchParser`         | swap, unoswapTo, clipperSwapTo                                |
-| KyberSwap        | `KyberSwapParser`       | swap, swapSimpleMode, swapGeneric                             |
-| Merkl            | `MerklParser`           | Reward claims                                                 |
-
-> **Note**: Fee-on-transfer tokens are not currently supported. Operations involving deflationary tokens will revert.
-
-## Resources
-
-- [Zodiac Wiki](https://www.zodiac.wiki/)
-- [Safe Documentation](https://docs.safe.global/)
-- [Foundry Book](https://book.getfoundry.sh/)
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — Full system architecture and contract reference
+- [`docs/SPENDING_LIMIT_MECHANISM.md`](./docs/SPENDING_LIMIT_MECHANISM.md) — Deep dive into the Acquired Balance Model
+- [`docs/SPENDING_LIMIT_OVERVIEW.md`](./docs/SPENDING_LIMIT_OVERVIEW.md) — Quick overview of spending limits
+- [`docs/TODO.md`](./docs/TODO.md) — Development roadmap
 
 ## License
 
@@ -240,11 +215,8 @@ MIT License - see [LICENSE](./LICENSE)
 
 ## Disclaimer
 
-⚠️ **Use at your own risk**
-
-- Smart contracts may contain vulnerabilities
-- Not financial advice
+**Use at your own risk.** Smart contracts may contain vulnerabilities. This software has not been audited.
 
 ---
 
-**Built with Zodiac for secure DeFi self-custody** 🛡️
+**Built by DUSA LABS — On-chain guardrails for AI agents**

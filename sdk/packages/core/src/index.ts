@@ -1,9 +1,9 @@
 // Client
-export { MultisubClient } from "./client";
+export { MultiClawClient } from "./client";
 
 // Types
 export type {
-  MultisubClientConfig,
+  MultiClawClientConfig,
   ChainAddresses,
   VaultConfig,
   VaultDeployment,

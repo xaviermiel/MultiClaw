@@ -11,7 +11,7 @@ import "../src/ModuleRegistry.sol";
  * @dev The factory deploys DeFiInteractorModules with deterministic CREATE2 addresses
  *
  * Environment variables:
- *   - DEPLOYER_PRIVATE_KEY: Private key of deployer (MultiSub team EOA, must be Registry owner)
+ *   - DEPLOYER_PRIVATE_KEY: Private key of deployer (MultiClaw team EOA, must be Registry owner)
  *   - REGISTRY_ADDRESS: Address of the deployed ModuleRegistry
  *   - FACTORY_OWNER: (Optional) Owner address, defaults to deployer
  *   - AUTO_REGISTER: (Optional) Whether to auto-register modules, defaults to true

@@ -1,6 +1,6 @@
-# MultiSub Oracle
+# MultiClaw Oracle
 
-Off-chain oracle infrastructure for the MultiSub DeFi module. Replaces the previous Chainlink CRE (Computation Runtime Environment) implementation with a self-hosted Node.js service.
+Off-chain oracle infrastructure for the MultiClaw DeFi module. Replaces the previous Chainlink CRE (Computation Runtime Environment) implementation with a self-hosted Node.js service.
 
 ## Architecture
 

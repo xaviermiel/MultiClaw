@@ -10,7 +10,7 @@ import "../src/ModuleRegistry.sol";
  * @dev The registry tracks all deployed DeFiInteractorModules
  *
  * Environment variables:
- *   - DEPLOYER_PRIVATE_KEY: Private key of deployer (MultiSub team EOA)
+ *   - DEPLOYER_PRIVATE_KEY: Private key of deployer (MultiClaw team EOA)
  *   - REGISTRY_OWNER: (Optional) Owner address, defaults to deployer
  *
  * Usage:

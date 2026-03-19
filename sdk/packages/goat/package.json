@@ -1,7 +1,7 @@
 {
-  "name": "@multisub/goat",
+  "name": "@multiclaw/goat",
   "version": "0.1.0",
-  "description": "GOAT SDK plugin for Multisub agent guardrails",
+  "description": "GOAT SDK plugin for MultiClaw agent guardrails",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@multisub/core": "file:../core"
+    "@multiclaw/core": "file:../core"
   },
   "peerDependencies": {
     "viem": "^2.0.0"

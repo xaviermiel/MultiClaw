@@ -1,7 +1,7 @@
 {
-  "name": "@multisub/core",
+  "name": "@multiclaw/core",
   "version": "0.1.0",
-  "description": "TypeScript SDK for Multisub agent vault guardrails",
+  "description": "TypeScript SDK for MultiClaw agent vault guardrails",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

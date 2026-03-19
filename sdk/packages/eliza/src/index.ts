@@ -1,12 +1,12 @@
 import type { Address, Account, Hex } from "viem";
-import { MultisubClient, type BudgetInfo } from "@multisub/core";
+import { MultiClawClient, type BudgetInfo } from "@multiclaw/core";
 import { formatEther } from "viem";
 
 /**
  * Eliza plugin configuration.
  */
-export interface MultisubElizaPluginConfig {
-  client: MultisubClient;
+export interface MultiClawElizaPluginConfig {
+  client: MultiClawClient;
   moduleAddress: Address;
   agentAccount: Account;
 }
@@ -21,20 +21,20 @@ export interface ElizaAction {
 }
 
 /**
- * Create the Multisub plugin for Eliza.
+ * Create the MultiClaw plugin for Eliza.
  *
  * Registers the following actions:
- * - MULTISUB_EXECUTE: Execute a DeFi operation
- * - MULTISUB_TRANSFER: Transfer tokens from the vault
- * - MULTISUB_CHECK_BUDGET: Check remaining spending budget
- * - MULTISUB_VAULT_STATUS: Get vault status
+ * - MULTICLAW_EXECUTE: Execute a DeFi operation
+ * - MULTICLAW_TRANSFER: Transfer tokens from the vault
+ * - MULTICLAW_CHECK_BUDGET: Check remaining spending budget
+ * - MULTICLAW_VAULT_STATUS: Get vault status
  *
  * @example
  * ```ts
- * import { createMultisubElizaPlugin } from '@multisub/eliza'
+ * import { createMultiClawElizaPlugin } from '@multiclaw/eliza'
  *
- * const plugin = createMultisubElizaPlugin({
- *   client: new MultisubClient({ chain: 'base' }),
+ * const plugin = createMultiClawElizaPlugin({
+ *   client: new MultiClawClient({ chain: 'base' }),
  *   moduleAddress: '0x...',
  *   agentAccount: privateKeyToAccount('0x...'),
  * })
@@ -43,12 +43,12 @@ export interface ElizaAction {
  * eliza.registerPlugin(plugin)
  * ```
  */
-export function createMultisubElizaPlugin(config: MultisubElizaPluginConfig) {
+export function createMultiClawElizaPlugin(config: MultiClawElizaPluginConfig) {
   const { client, moduleAddress, agentAccount } = config;
 
   const actions: ElizaAction[] = [
     {
-      name: "MULTISUB_EXECUTE",
+      name: "MULTICLAW_EXECUTE",
       description:
         "Execute a DeFi operation (swap, deposit, withdraw) through the vault",
       handler: async (params) => {
@@ -66,7 +66,7 @@ export function createMultisubElizaPlugin(config: MultisubElizaPluginConfig) {
       },
     },
     {
-      name: "MULTISUB_TRANSFER",
+      name: "MULTICLAW_TRANSFER",
       description: "Transfer tokens from the vault to a recipient",
       handler: async (params) => {
         try {
@@ -84,7 +84,7 @@ export function createMultisubElizaPlugin(config: MultisubElizaPluginConfig) {
       },
     },
     {
-      name: "MULTISUB_CHECK_BUDGET",
+      name: "MULTICLAW_CHECK_BUDGET",
       description: "Check remaining spending budget for the agent",
       handler: async () => {
         try {
@@ -103,7 +103,7 @@ export function createMultisubElizaPlugin(config: MultisubElizaPluginConfig) {
       },
     },
     {
-      name: "MULTISUB_VAULT_STATUS",
+      name: "MULTICLAW_VAULT_STATUS",
       description: "Get the current vault status (paused, oracle, agents)",
       handler: async () => {
         try {
@@ -125,7 +125,7 @@ export function createMultisubElizaPlugin(config: MultisubElizaPluginConfig) {
   ];
 
   return {
-    name: "multisub",
+    name: "multiclaw",
     description: "On-chain guardrails for AI agent DeFi operations",
     actions,
   };

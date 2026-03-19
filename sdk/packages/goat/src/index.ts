@@ -1,12 +1,12 @@
 import type { Address, Account, Hex } from "viem";
-import { MultisubClient } from "@multisub/core";
+import { MultiClawClient } from "@multiclaw/core";
 import { formatEther } from "viem";
 
 /**
  * GOAT SDK plugin configuration.
  */
-export interface MultisubGoatPluginConfig {
-  client: MultisubClient;
+export interface MultiClawGoatPluginConfig {
+  client: MultiClawClient;
   moduleAddress: Address;
   agentAccount: Account;
 }
@@ -25,14 +25,14 @@ export interface GoatTool {
 }
 
 /**
- * Create the Multisub plugin for GOAT SDK.
+ * Create the MultiClaw plugin for GOAT SDK.
  *
  * @example
  * ```ts
- * import { createMultisubGoatPlugin } from '@multisub/goat'
+ * import { createMultiClawGoatPlugin } from '@multiclaw/goat'
  *
- * const plugin = createMultisubGoatPlugin({
- *   client: new MultisubClient({ chain: 'base' }),
+ * const plugin = createMultiClawGoatPlugin({
+ *   client: new MultiClawClient({ chain: 'base' }),
  *   moduleAddress: '0x...',
  *   agentAccount: privateKeyToAccount('0x...'),
  * })
@@ -41,14 +41,14 @@ export interface GoatTool {
  * goat.addTools(plugin.tools)
  * ```
  */
-export function createMultisubGoatPlugin(config: MultisubGoatPluginConfig) {
+export function createMultiClawGoatPlugin(config: MultiClawGoatPluginConfig) {
   const { client, moduleAddress, agentAccount } = config;
 
   const tools: GoatTool[] = [
     {
-      name: "multisub_execute",
+      name: "multiclaw_execute",
       description:
-        "Execute a DeFi operation through the Multisub-protected vault",
+        "Execute a DeFi operation through the MultiClaw-protected vault",
       parameters: {
         target: {
           type: "string",
@@ -76,7 +76,7 @@ export function createMultisubGoatPlugin(config: MultisubGoatPluginConfig) {
       },
     },
     {
-      name: "multisub_transfer",
+      name: "multiclaw_transfer",
       description: "Transfer tokens from the vault",
       parameters: {
         token: {
@@ -111,7 +111,7 @@ export function createMultisubGoatPlugin(config: MultisubGoatPluginConfig) {
       },
     },
     {
-      name: "multisub_check_budget",
+      name: "multiclaw_check_budget",
       description: "Check remaining spending budget",
       parameters: {},
       handler: async () => {
@@ -129,7 +129,7 @@ export function createMultisubGoatPlugin(config: MultisubGoatPluginConfig) {
   ];
 
   return {
-    name: "multisub",
+    name: "multiclaw",
     description: "On-chain guardrails for AI agent DeFi operations",
     tools,
   };

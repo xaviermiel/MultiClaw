@@ -45,7 +45,7 @@ contract ModuleFactory is Ownable {
 
     /**
      * @notice Initialize the factory
-     * @param _initialOwner The initial owner (MultiSub team address)
+     * @param _initialOwner The initial owner (MultiClaw team address)
      * @param _registry The ModuleRegistry address (can be address(0) initially)
      * @param _autoRegister Whether to auto-register on deploy
      */

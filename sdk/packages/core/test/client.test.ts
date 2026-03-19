@@ -12,7 +12,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
-import { MultisubClient } from "../src/client";
+import { MultiClawClient } from "../src/client";
 import { DeFiInteractorModuleAbi } from "../src/abi/DeFiInteractorModule";
 import { DEFI_EXECUTE_ROLE, DEFI_TRANSFER_ROLE } from "../src/types";
 
@@ -39,7 +39,7 @@ const ORACLE_KEY =
   "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" as const;
 
 /**
- * Integration tests for MultisubClient.
+ * Integration tests for MultiClawClient.
  *
  * These tests require a running Anvil instance:
  *   anvil
@@ -47,12 +47,12 @@ const ORACLE_KEY =
  * Then run:
  *   npm test
  */
-describe("MultisubClient (Anvil integration)", () => {
+describe("MultiClawClient (Anvil integration)", () => {
   const ownerAccount = privateKeyToAccount(OWNER_KEY);
   const agentAccount = privateKeyToAccount(AGENT_KEY);
   const oracleAccount = privateKeyToAccount(ORACLE_KEY);
 
-  let client: MultisubClient;
+  let client: MultiClawClient;
   let publicClient: ReturnType<typeof createPublicClient>;
   let ownerWallet: ReturnType<typeof createWalletClient>;
   let oracleWallet: ReturnType<typeof createWalletClient>;
@@ -273,8 +273,8 @@ describe("MultisubClient (Anvil integration)", () => {
       chain: foundry,
     });
 
-    // Create MultisubClient pointing to Anvil
-    client = new MultisubClient({
+    // Create MultiClawClient pointing to Anvil
+    client = new MultiClawClient({
       chain: "baseSepolia", // chain doesn't matter for Anvil, we override rpcUrl
       rpcUrl: ANVIL_RPC,
       addresses: {

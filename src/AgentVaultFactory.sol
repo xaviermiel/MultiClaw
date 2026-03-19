@@ -69,7 +69,7 @@ contract AgentVaultFactory is Ownable {
 
     /**
      * @notice Initialize the AgentVaultFactory
-     * @param _initialOwner The factory owner (Multisub team)
+     * @param _initialOwner The factory owner (MultiClaw team)
      * @param _registry The ModuleRegistry address (can be address(0) initially)
      * @param _presetRegistry The PresetRegistry address (can be address(0) if not using presets)
      */

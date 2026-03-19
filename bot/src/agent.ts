@@ -1,8 +1,8 @@
-import { MultisubClient } from "@multisub/core";
+import { MultiClawClient } from "@multiclaw/core";
 import { privateKeyToAccount } from "viem/accounts";
 import { formatEther, type Address, type Hex } from "viem";
 
-// Initialize the Multisub client and agent account
+// Initialize the MultiClaw client and agent account
 const chain = (process.env.CHAIN as "base" | "baseSepolia") || "base";
 const moduleAddress = process.env.MODULE_ADDRESS as Address;
 
@@ -17,13 +17,13 @@ export const agentAccount = privateKeyToAccount(
   process.env.AGENT_PRIVATE_KEY as `0x${string}`,
 );
 
-export const multisubClient = new MultisubClient({
+export const multiclawClient = new MultiClawClient({
   chain,
   rpcUrl: process.env.RPC_URL,
 });
 
 /**
- * Execute a DeFi operation through Multisub guardrails.
+ * Execute a DeFi operation through MultiClaw guardrails.
  * Returns a human-readable result string.
  */
 export async function executeOperation(
@@ -31,7 +31,7 @@ export async function executeOperation(
   calldata: string,
 ): Promise<string> {
   try {
-    const budget = await multisubClient.getRemainingBudget(
+    const budget = await multiclawClient.getRemainingBudget(
       moduleAddress,
       agentAccount.address,
     );
@@ -40,7 +40,7 @@ export async function executeOperation(
       return "Cannot execute: no spending budget remaining.";
     }
 
-    const { txHash } = await multisubClient.executeAsAgent(
+    const { txHash } = await multiclawClient.executeAsAgent(
       moduleAddress,
       target as Address,
       calldata as Hex,
@@ -59,7 +59,7 @@ export async function executeOperation(
  */
 export async function getBudgetStatus(): Promise<string> {
   try {
-    const budget = await multisubClient.getRemainingBudget(
+    const budget = await multiclawClient.getRemainingBudget(
       moduleAddress,
       agentAccount.address,
     );
@@ -79,7 +79,7 @@ export async function getBudgetStatus(): Promise<string> {
  */
 export async function getVaultStats() {
   try {
-    const status = await multisubClient.getVaultStatus(moduleAddress);
+    const status = await multiclawClient.getVaultStatus(moduleAddress);
     return {
       balance: `$${(Number(status.safeValueUSD) / 1e18).toLocaleString()} USD`,
       safeAddress: status.safe,

@@ -1,15 +1,15 @@
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { Address } from "viem";
-import type { MultisubToolConfig } from "../toolkit";
+import type { MultiClawToolConfig } from "../toolkit";
 
 /**
- * LangChain tool for transferring tokens from the Safe via Multisub.
+ * LangChain tool for transferring tokens from the Safe via MultiClaw.
  * Requires the agent to have DEFI_TRANSFER_ROLE.
  */
-export class MultisubTransferTool extends StructuredTool {
-  name = "multisub_transfer";
-  description = `Transfer tokens from the Multisub vault to a recipient.
+export class MultiClawTransferTool extends StructuredTool {
+  name = "multiclaw_transfer";
+  description = `Transfer tokens from the MultiClaw vault to a recipient.
 Requires DEFI_TRANSFER_ROLE. Spending limits are enforced for non-acquired tokens.
 Provide the token address, recipient address, and amount (in token's smallest unit).`;
 
@@ -23,9 +23,9 @@ Provide the token address, recipient address, and amount (in token's smallest un
       ),
   });
 
-  private config: MultisubToolConfig;
+  private config: MultiClawToolConfig;
 
-  constructor(config: MultisubToolConfig) {
+  constructor(config: MultiClawToolConfig) {
     super();
     this.config = config;
   }

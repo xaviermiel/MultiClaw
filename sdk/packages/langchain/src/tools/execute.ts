@@ -1,16 +1,16 @@
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { Address, Hex } from "viem";
-import type { MultisubToolConfig } from "../toolkit";
+import type { MultiClawToolConfig } from "../toolkit";
 
 /**
- * LangChain tool for executing DeFi protocol interactions through Multisub.
+ * LangChain tool for executing DeFi protocol interactions through MultiClaw.
  * The agent provides a target protocol address and encoded calldata.
  * All spending limits and allowlists are enforced on-chain.
  */
-export class MultisubExecuteTool extends StructuredTool {
-  name = "multisub_execute";
-  description = `Execute a DeFi operation (swap, deposit, withdraw, claim, approve) through the Multisub vault.
+export class MultiClawExecuteTool extends StructuredTool {
+  name = "multiclaw_execute";
+  description = `Execute a DeFi operation (swap, deposit, withdraw, claim, approve) through the MultiClaw vault.
 Provide the target protocol address and the encoded calldata.
 The on-chain module enforces spending limits, protocol allowlists, and recipient validation.
 Returns the transaction hash on success.`;
@@ -22,9 +22,9 @@ Returns the transaction hash on success.`;
     data: z.string().describe("The ABI-encoded calldata for the protocol call"),
   });
 
-  private config: MultisubToolConfig;
+  private config: MultiClawToolConfig;
 
-  constructor(config: MultisubToolConfig) {
+  constructor(config: MultiClawToolConfig) {
     super();
     this.config = config;
   }

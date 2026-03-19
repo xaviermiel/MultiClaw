@@ -1,5 +1,5 @@
-export { MultisubExecuteTool } from "./tools/execute";
-export { MultisubTransferTool } from "./tools/transfer";
-export { MultisubBudgetTool } from "./tools/budget";
-export { createMultisubTools } from "./toolkit";
-export type { MultisubToolConfig } from "./toolkit";
+export { MultiClawExecuteTool } from "./tools/execute";
+export { MultiClawTransferTool } from "./tools/transfer";
+export { MultiClawBudgetTool } from "./tools/budget";
+export { createMultiClawTools } from "./toolkit";
+export type { MultiClawToolConfig } from "./toolkit";
