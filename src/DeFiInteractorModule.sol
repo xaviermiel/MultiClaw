@@ -517,28 +517,24 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 4. Validate array lengths match
         if (tokensIn.length != amountsIn.length) revert LengthMismatch();
 
-        // 5. Calculate total spending cost across all input tokens (acquired balance is free)
+        // 5. Calculate spending cost and deduct acquired balance in one pass
+        //    (prevents double-counting when same token appears multiple times)
         uint256 spendingCost = 0;
         for (uint256 i = 0; i < tokensIn.length; i++) {
             uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
-            uint256 fromOriginal = amountsIn[i] > acquired ? amountsIn[i] - acquired : 0;
+            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
+            uint256 fromOriginal = amountsIn[i] - usedFromAcquired;
             spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
+            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
         }
 
-        // 5. Check spending allowance
+        // 6. Check spending allowance (reverts restore all state changes including acquired balance)
         if (spendingCost > spendingAllowance[subAccount]) {
             revert ExceedsSpendingLimit();
         }
 
-        // 6. Deduct spending allowance
+        // 7. Deduct spending allowance
         spendingAllowance[subAccount] -= spendingCost;
-
-        // 7. Deduct acquired balance for each input token
-        for (uint256 i = 0; i < tokensIn.length; i++) {
-            uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
-            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
-            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
-        }
 
         // 8. Capture balances before for output tracking (multiple tokens)
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
@@ -597,15 +593,18 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             }
         }
 
-        // 6. Calculate total spending cost across all input tokens (acquired balance is free)
+        // 6. Calculate spending cost and deduct acquired balance in one pass
+        //    (prevents double-counting when same token appears multiple times)
         uint256 spendingCost = 0;
         for (uint256 i = 0; i < tokensIn.length; i++) {
             uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
-            uint256 fromOriginal = amountsIn[i] > acquired ? amountsIn[i] - acquired : 0;
+            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
+            uint256 fromOriginal = amountsIn[i] - usedFromAcquired;
             spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
+            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
         }
 
-        // 7. Check spending allowance
+        // 7. Check spending allowance (reverts restore all state changes including acquired balance)
         if (spendingCost > spendingAllowance[subAccount]) {
             revert ExceedsSpendingLimit();
         }
@@ -613,14 +612,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 8. Deduct spending allowance
         spendingAllowance[subAccount] -= spendingCost;
 
-        // 9. Deduct acquired balance for each input token
-        for (uint256 i = 0; i < tokensIn.length; i++) {
-            uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
-            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
-            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
-        }
-
-        // 10. Capture balances before for output tracking (multiple tokens)
+        // 9. Capture balances before for output tracking (multiple tokens)
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
