@@ -31,6 +31,8 @@ interface ChainConfig {
   blockTimeSeconds: number;
   // Reorg protection
   confirmationBlocks: number;
+  // ETH/USD Chainlink price feed address for native ETH valuation
+  ethPriceFeedAddress: string;
   tokens: TokenConfig[];
 }
 
@@ -124,6 +126,7 @@ const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     defaultRpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
     blockTimeSeconds: 12,
     confirmationBlocks: 12,
+    ethPriceFeedAddress: CHAINLINK_SEPOLIA.ETH_USD,
     tokens: [
       // Underlying tokens
       {
@@ -244,6 +247,7 @@ const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     defaultRpcUrl: "https://mainnet.base.org",
     blockTimeSeconds: 2,
     confirmationBlocks: 3,
+    ethPriceFeedAddress: CHAINLINK_BASE.ETH_USD,
     tokens: [
       // Underlying tokens
       {
@@ -327,6 +331,7 @@ const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     defaultRpcUrl: "https://sepolia.base.org",
     blockTimeSeconds: 2,
     confirmationBlocks: 3,
+    ethPriceFeedAddress: CHAINLINK_BASE_SEPOLIA.ETH_USD,
     tokens: [
       {
         address: BASE_SEPOLIA_TOKENS.USDC,
@@ -420,6 +425,9 @@ export const config = {
 
   // Chain (viem chain object)
   chain: chainConfig.chain,
+
+  // ETH/USD price feed address (chain-specific)
+  ethPriceFeedAddress: chainConfig.ethPriceFeedAddress,
 
   // Tokens to track for safe value calculation (chain-specific)
   tokens: chainConfig.tokens,
