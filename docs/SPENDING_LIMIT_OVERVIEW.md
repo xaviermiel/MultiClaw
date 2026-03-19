@@ -46,10 +46,12 @@ Without spending limits, a compromised sub-account could drain the entire Safe. 
 - **Acquired tokens** (received from operations) → **free to use**
 
 **Critical Rules:**
+
 1. **Exact amount tracking**: Only the specific amount received is acquired (swap USDC for 0.1 ETH → only 0.1 ETH is acquired, not all ETH in Safe)
 2. **24h expiry**: Acquired status expires after 24 hours. After expiry, tokens become "original" again and cost spending to use.
 
 This allows sub-accounts to:
+
 - Swap USDC → ETH (costs spending)
 - Use that ETH for further operations (free)
 - Deposit ETH to Aave (free, since ETH was acquired)
@@ -86,19 +88,21 @@ Day Start:
 
 ## Operation Types
 
-| Operation | Costs Spending? | Output Acquired? |
-|-----------|-----------------|------------------|
-| **Swap** | Yes (original only) | Yes |
-| **Deposit** | Yes (original only) | No |
-| **Withdraw** | No (FREE) | Conditional* |
-| **Claim Rewards** | No (FREE) | Conditional** |
-| **Approve** | No (capped***) | N/A |
-| **Transfer Out** | Yes (original only****) | N/A |
+| Operation         | Costs Spending?           | Output Acquired? |
+| ----------------- | ------------------------- | ---------------- |
+| **Swap**          | Yes (original only)       | Yes              |
+| **Deposit**       | Yes (original only)       | No               |
+| **Withdraw**      | No (FREE)                 | Conditional\*    |
+| **Claim Rewards** | No (FREE)                 | Conditional\*\*  |
+| **Approve**       | No (capped\*\*\*)         | N/A              |
+| **Repay Debt**    | No (permissioned\*\*\*\*) | N/A              |
+| **Transfer Out**  | Yes (original only**\***) | N/A              |
 
 \* Only if deposit matched by the same subaccount to the same protocol in the time window.
 \*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
 \*\*\* Approve doesn't consume spending, but is capped: acquired tokens can be approved freely, original tokens approval is capped by spending allowance. Actual spending is deducted at execution (swap/deposit).
-\*\*\*\* Transfers use acquired balance first (free), then original tokens cost spending for the remainder.
+\*\*\*\* Requires DEFI_REPAY_ROLE (3). Granted via `grantRole(subAccount, 3)`. No spending check — repaying debt improves the Safe's health factor.
+\*\*\*\*\* Transfers use acquired balance first (free), then original tokens cost spending for the remainder.
 
 ---
 
@@ -125,7 +129,7 @@ Day Start:
 │       │ emits events                                            │
 │       ▼                                                         │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Off-Chain Oracle (Chainlink CRE)           │    │
+│  │              Off-Chain Oracle (test-oracle)              │    │
 │  │  1. Monitor events                                      │    │
 │  │  2. Track spending in rolling 24h window                │    │
 │  │  3. Match deposits to withdrawals (for acquired status) │    │
@@ -145,13 +149,13 @@ Day Start:
 
 ### Off-Chain Oracle Responsibilities
 
-- **Event-driven processing**: Log triggers provide instant event handling via Chainlink CRE
+- **Event-driven processing**: RPC polling for ProtocolExecution and TransferExecuted events
 - **Rolling window tracking**: Spending expires after 24 hours (one-way, no recovery)
 - **Deposit/withdrawal matching**: Mark withdrawn tokens as acquired if matched to deposit
 - **FIFO acquired balance management**: Track which tokens are free to use with timestamp inheritance
 - **Multi-module support**: Monitor multiple DeFiInteractorModule instances via registry
-- **Periodic refresh**: Cron trigger updates allowances as spending expires
-- **Portfolio valuation**: Calculate total value from balances + prices
+- **Periodic refresh**: Cron-based updates as spending expires
+- **Portfolio valuation**: Calculate total value from balances + Chainlink prices
 
 ---
 
@@ -176,7 +180,7 @@ Sub-accounts can only interact with **whitelisted protocols**. Even if compromis
 
 ### 4. Oracle Freshness Check
 
-Operations are blocked if oracle data is stale (default: >60 minutes, configurable via `maxOracleAge`). Prevents operating with outdated allowances.
+Operations are blocked if oracle data is stale (default: >60 minutes). Prevents operating with outdated allowances.
 
 ### 5. Hard Safety Cap
 
@@ -186,14 +190,14 @@ Oracle cannot set allowances above an absolute maximum (e.g., 20% of portfolio).
 
 ## Key Design Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Yield/rewards acquired? | **Conditional** | Only if deposit matched by same subaccount to same protocol in window |
-| Withdrawals become acquired? | **Conditional** | Only if deposit matched by same subaccount in time window |
-| Transfers cost spending? | **Always** | Value leaves Safe, must be controlled |
-| Approve consume spending? | **No (capped)** | Capped by allowance for original tokens, by amount acquired for acquired tokens, deducted at execution |
-| Window type | **Rolling 24h** | Smoother than fixed reset, harder to game |
-| Selector unknown? | **Revert** | Must register selector and parser for the protocol |
+| Decision                     | Choice          | Rationale                                                                                              |
+| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------------ |
+| Yield/rewards acquired?      | **Conditional** | Only if deposit matched by same subaccount to same protocol in window                                  |
+| Withdrawals become acquired? | **Conditional** | Only if deposit matched by same subaccount in time window                                              |
+| Transfers cost spending?     | **Always**      | Value leaves Safe, must be controlled                                                                  |
+| Approve consume spending?    | **No (capped)** | Capped by allowance for original tokens, by amount acquired for acquired tokens, deducted at execution |
+| Window type                  | **Rolling 24h** | Smoother than fixed reset, harder to game                                                              |
+| Selector unknown?            | **Revert**      | Must register selector and parser for the protocol                                                     |
 
 ---
 
@@ -204,15 +208,15 @@ The wallet calls a single function for all protocol interactions:
 ```typescript
 // Deposit 1000 USDC to Aave
 const calldata = aavePool.interface.encodeFunctionData("supply", [
-  USDC,    // asset
-  1000e6,  // amount
-  safe,    // onBehalfOf
-  0        // referralCode
+  USDC, // asset
+  1000e6, // amount
+  safe, // onBehalfOf
+  0, // referralCode
 ]);
 
 await module.executeOnProtocol(
-  AAVE_POOL,   // target
-  calldata     // data
+  AAVE_POOL, // target
+  calldata, // data
 );
 ```
 
@@ -222,12 +226,12 @@ The contract extracts `tokenIn` and `amountIn` from the calldata via registered 
 
 ## Emergency Controls
 
-| Control | Purpose |
-|---------|---------|
-| `pause()` | Freeze all module operations |
-| `revokeRole()` | Remove sub-account permissions instantly |
-| `unregisterSelector()` | Block specific operation types |
-| `setAllowedAddresses(false)` | Remove protocol from whitelist |
+| Control                      | Purpose                                  |
+| ---------------------------- | ---------------------------------------- |
+| `pause()`                    | Freeze all module operations             |
+| `revokeRole()`               | Remove sub-account permissions instantly |
+| `unregisterSelector()`       | Block specific operation types           |
+| `setAllowedAddresses(false)` | Remove protocol from whitelist           |
 
 ---
 
@@ -238,8 +242,7 @@ The contract extracts `tokenIn` and `amountIn` from the calldata via registered 
 3. **Acquired tokens are free to use** (from swaps, withdrawals) - only exact amounts received
 4. **Acquired status expires after 24h** - tokens become "original" and cost spending again
 5. **Spending is one-way** - once consumed, only resets when 24h window expires
-6. **Oracle uses event-driven triggers** for instant processing + cron for periodic refresh
+6. **Oracle uses RPC polling** for event processing + cron for periodic refresh
 7. **FIFO queues track acquired balances** with timestamp inheritance through swaps
 8. **On-chain verification** prevents lying about operations
 9. **Multiple safety layers** protect against compromised sub-accounts
-

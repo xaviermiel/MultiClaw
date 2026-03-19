@@ -3,7 +3,7 @@
 > A secure self-custody DeFi wallet built as a **custom Zodiac module**, combining Safe multisig security with delegated permission-restricted interactions.
 
 [![Solidity](https://img.shields.io/badge/solidity-0.8.20-blue)]()
-[![Tests](https://img.shields.io/badge/tests-109%2F109%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-450%2F450%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![Zodiac](https://img.shields.io/badge/zodiac-module-purple)]()
 
@@ -77,39 +77,48 @@ forge script script/ConfigureSubaccount.s.sol --rpc-url $RPC_URL --broadcast --p
 ## Key Features
 
 ### Streamlined Roles
+
 - **DEFI_EXECUTE_ROLE (1)**: Execute protocol operations (swaps, deposits, withdrawals, claims, approvals)
 - **DEFI_TRANSFER_ROLE (2)**: Transfer tokens out of Safe
+- **DEFI_REPAY_ROLE (3)**: Repay protocol debt (no spending check — improves Safe health)
 
 ### Acquired Balance Model
+
 The spending limit mechanism distinguishes between:
+
 - **Original tokens** (in Safe at start of window) → using them **costs spending**
 - **Acquired tokens** (received from operations) → **free to use**
 
 This allows sub-accounts to chain operations (swap → deposit → withdraw) without hitting limits on every step.
 
 **Critical Rules:**
+
 1. Only the exact amount received is marked as acquired
 2. Acquired status expires after 24 hours (tokens become "original" again)
 
 ### Operation Types
 
-| Operation | Costs Spending? | Output Acquired? |
-|-----------|-----------------|------------------|
-| **Swap** | Yes (original only) | Yes |
-| **Deposit** | Yes (original only) | No |
-| **Withdraw** | No (FREE) | Conditional* |
-| **Claim Rewards** | No (FREE) | Conditional* |
-| **Approve** | No (capped) | N/A |
-| **Transfer Out** | Always | N/A |
+| Operation         | Costs Spending?     | Output Acquired? |
+| ----------------- | ------------------- | ---------------- |
+| **Swap**          | Yes (original only) | Yes              |
+| **Deposit**       | Yes (original only) | No               |
+| **Withdraw**      | No (FREE)           | Conditional\*    |
+| **Claim Rewards** | No (FREE)           | Conditional\*    |
+| **Approve**       | No (capped)         | N/A              |
+| **Repay Debt**    | No (REPAY role\*\*) | N/A              |
+| **Transfer Out**  | Always              | N/A              |
 
 \* Only if deposit matched by the same subaccount to the same protocol in the time window.
+\*\* Requires DEFI_REPAY_ROLE (3). Granted via `grantRole(subAccount, 3)`. Improves Safe health factor.
 
 ### Granular Controls
+
 - **Per-Sub-Account Allowlists**: Each sub-account has its own protocol whitelist
 - **Custom Limits**: Configurable spending percentages per sub-account
 - **Rolling Windows**: 24-hour rolling windows prevent rapid drain attacks
 
 ### Security
+
 - **Selector-Based Classification**: Operations classified by function selector
 - **Calldata Verification**: Token/amount extracted from calldata and verified
 - **Allowlist Enforcement**: Sub-accounts can only interact with whitelisted protocols
@@ -121,6 +130,7 @@ This allows sub-accounts to chain operations (swap → deposit → withdraw) wit
 ## Default Limits
 
 If not configured, sub-accounts use:
+
 - **Max Spending**: 5% of portfolio per 24 hours
 - **Window**: Rolling 24 hours (86400 seconds)
 
@@ -140,7 +150,7 @@ If not configured, sub-accounts use:
 │  └─────────────────────────────────────────────────────────┘    │
 │       ▼                                                         │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Off-Chain Oracle (Chainlink CRE)           │    │
+│  │              Off-Chain Oracle                           │    │
 │  │  1. Monitor events                                      │    │
 │  │  2. Track spending in rolling 24h window                │    │
 │  │  3. Match deposits to withdrawals (for acquired status) │    │
@@ -165,58 +175,64 @@ forge test --match-test testGrantRole -vvv
 
 ## Emergency Controls
 
-| Control | Purpose |
-|---------|---------|
-| `pause()` | Freeze all module operations |
-| `revokeRole()` | Remove sub-account permissions instantly |
-| `unregisterSelector()` | Block specific operation types |
-| `setAllowedAddresses(false)` | Remove protocol from whitelist |
+| Control                      | Purpose                                  |
+| ---------------------------- | ---------------------------------------- |
+| `pause()`                    | Freeze all module operations             |
+| `revokeRole()`               | Remove sub-account permissions instantly |
+| `unregisterSelector()`       | Block specific operation types           |
+| `setAllowedAddresses(false)` | Remove protocol from whitelist           |
 
-## Chainlink Runtime Environment (CRE) Integration
+## Oracle Integration
 
-The **DeFiInteractorModule** includes two CRE-powered oracles for autonomous operation.
+The **DeFiInteractorModule** relies on an off-chain oracle (`test-oracle/`) for autonomous operation. See [`test-oracle/README.md`](./test-oracle/README.md) for full documentation.
 
 ### 1. Spending Oracle
 
 Monitors events and manages spending allowances for the Acquired Balance Model:
-- Real-time log triggers for instant event processing
+
+- RPC polling for `ProtocolExecution` and `TransferExecuted` events
 - FIFO tracking of acquired balances with timestamp inheritance
 - Rolling 24-hour window spending calculations
-- Multi-module support via hybrid approach (log triggers + registry discovery)
+- Multi-module support via ModuleRegistry discovery
+- Cron-based periodic refresh
 
-**Implementation:**
-- `chainlink-runtime-environment/spending-oracle/main.ts` - CRE workflow
-- `chainlink-runtime-environment/spending-oracle/config.*.json` - Configuration
+**Implementation:** `test-oracle/src/spending-oracle.ts`
 
-See [Spending Oracle README](./chainlink-runtime-environment/spending-oracle/README.md) for configuration details.
-
-### 2. Safe Value Monitoring
+### 2. Safe Value Oracle
 
 Tracks and stores the USD value of the associated Safe:
-- Runs periodically (configurable)
-- Fetches token balances from the Safe (ERC20 + DeFi positions)
-- Supports Aave aTokens, Morpho vaults, Uniswap LP, and 100+ major tokens
+
+- Runs periodically (configurable cron schedule)
+- Fetches token balances from the Safe (ERC20 + native ETH)
+- Supports Aave aTokens, Morpho vaults, Uniswap V2 LP
 - Gets USD prices from Chainlink price feeds
-- Calculates total portfolio value in USD
-- Stores value on-chain via signed Chainlink reports
+- Threshold-based updates (>1% change or staleness)
+- Stores value on-chain via oracle transaction
 
-**Implementation:**
-- `src/DeFiInteractorModule.sol` - Module with integrated value storage
-- `chainlink-runtime-environment/safe-value/safe-monitor.ts` - CRE workflow
-- `chainlink-runtime-environment/safe-value/config.safe-monitor.json` - Configuration
+**Implementation:** `test-oracle/src/safe-value.ts`
 
-**Use Cases:**
-- On-chain collateralization checks
-- Treasury value tracking
-- Automated DeFi integrations based on Safe value
-- Compliance and reporting
+### Supported Protocols
+
+| Protocol         | Parser                  | Operations                                                    |
+| ---------------- | ----------------------- | ------------------------------------------------------------- |
+| Aave V3          | `AaveV3Parser`          | Supply, Withdraw, Repay, Claim Rewards                        |
+| Morpho Vault     | `MorphoParser`          | Deposit, Mint, Withdraw, Redeem                               |
+| Morpho Blue      | `MorphoBlueParser`      | Supply, Withdraw, Repay, SupplyCollateral, WithdrawCollateral |
+| Uniswap V3       | `UniswapV3Parser`       | Swaps (exact in/out), LP Mint/Increase/Decrease/Collect       |
+| Uniswap V4       | `UniswapV4Parser`       | modifyLiquidities (Mint, Increase, Decrease, Burn)            |
+| Universal Router | `UniversalRouterParser` | V2/V3/V4 swaps, WRAP/UNWRAP ETH                               |
+| Paraswap         | `ParaswapParser`        | V5/V6 swaps                                                   |
+| 1inch            | `OneInchParser`         | swap, unoswapTo, clipperSwapTo                                |
+| KyberSwap        | `KyberSwapParser`       | swap, swapSimpleMode, swapGeneric                             |
+| Merkl            | `MerklParser`           | Reward claims                                                 |
+
+> **Note**: Fee-on-transfer tokens are not currently supported. Operations involving deflationary tokens will revert.
 
 ## Resources
 
 - [Zodiac Wiki](https://www.zodiac.wiki/)
 - [Safe Documentation](https://docs.safe.global/)
 - [Foundry Book](https://book.getfoundry.sh/)
-- [Chainlink Documentation](https://docs.chain.link/)
 
 ## License
 
