@@ -428,11 +428,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @notice Execute a protocol interaction with ETH value
      * @param target The protocol address to call
      * @param data The calldata to execute
-     * @dev Same as executeOnProtocol but allows sending ETH (msg.value)
+     * @param value The ETH value the Safe should send with the call
+     * @dev The value parameter instructs the Safe to send ETH from its own balance.
+     *      This function is NOT payable — do not send ETH to the module.
      */
-    function executeOnProtocolWithValue(address target, bytes calldata data)
+    function executeOnProtocolWithValue(address target, bytes calldata data, uint256 value)
         external
-        payable
         nonReentrant
         whenNotPaused
         returns (bytes memory)
@@ -448,7 +449,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (opType == OperationType.UNKNOWN) {
             revert UnknownSelector(bytes4(data[:4]));
         } else if (opType == OperationType.APPROVE) {
-            // APPROVE doesn't use ETH value
             return _executeApproveWithCap(msg.sender, target, data);
         }
 
@@ -456,9 +456,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
         if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
-            return _executeNoSpendingCheckWithValue(msg.sender, target, data, opType, msg.value);
+            return _executeNoSpendingCheckWithValue(msg.sender, target, data, opType, value);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-            return _executeWithSpendingCheckWithValue(msg.sender, target, data, opType, msg.value);
+            return _executeWithSpendingCheckWithValue(msg.sender, target, data, opType, value);
+        } else if (opType == OperationType.REPAY) {
             if (!repayAllowed[msg.sender]) revert RepayNotAllowed(msg.sender);
             return _executeRepay(msg.sender, target, data);
         }
