@@ -27,8 +27,10 @@ export interface VaultConfig {
   agentAddress: Address;
   /** Role to grant: 1=EXECUTE, 2=TRANSFER */
   roleId: number;
-  /** Spending limit in basis points (e.g., 500 = 5%) */
+  /** Spending limit in basis points (e.g., 500 = 5%). 0 if using USD mode */
   maxSpendingBps: bigint;
+  /** Spending limit in USD, 18 decimals (e.g., 1000e18). 0 if using BPS mode */
+  maxSpendingUSD: bigint;
   /** Rolling window duration in seconds (e.g., 86400 = 24h) */
   windowDuration: bigint;
   /** Protocol addresses the agent can interact with */
@@ -63,13 +65,15 @@ export interface VaultDeployment {
 export interface BudgetInfo {
   /** Remaining spending allowance in USD (18 decimals) */
   remainingAllowance: bigint;
-  /** Max spending in basis points */
+  /** Max spending in basis points (0 if USD mode) */
   maxSpendingBps: bigint;
+  /** Max spending in USD, 18 decimals (0 if BPS mode) */
+  maxSpendingUSD: bigint;
   /** Window duration in seconds */
   windowDuration: bigint;
   /** Total Safe value in USD (18 decimals) */
   safeValueUSD: bigint;
-  /** Max allowance = safeValue * maxSpendingBps / 10000 */
+  /** Computed max allowance for current window */
   maxAllowance: bigint;
   /** Percentage of budget used (0-100) */
   usedPercentage: number;

@@ -246,11 +246,16 @@ export class MultiClawClient {
       module.read.getSafeValue(),
     ]);
 
-    const [maxSpendingBps, windowDuration] = limits;
+    const [maxSpendingBps, maxSpendingUSD, windowDuration] = limits;
     const [safeValueUSD] = safeValue;
 
+    // Dual-mode: USD mode uses fixed amount, BPS mode calculates from Safe value
     const maxAllowance =
-      safeValueUSD > 0n ? (safeValueUSD * maxSpendingBps) / 10000n : 0n;
+      maxSpendingUSD > 0n
+        ? maxSpendingUSD
+        : safeValueUSD > 0n
+          ? (safeValueUSD * maxSpendingBps) / 10000n
+          : 0n;
 
     const usedPercentage =
       maxAllowance > 0n
@@ -262,6 +267,7 @@ export class MultiClawClient {
     return {
       remainingAllowance,
       maxSpendingBps,
+      maxSpendingUSD,
       windowDuration,
       safeValueUSD,
       maxAllowance,
