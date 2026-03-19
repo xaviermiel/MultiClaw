@@ -428,12 +428,20 @@ contract AgentVaultFactoryTest is Test {
         factory.deployVault(config);
     }
 
-    function testDeployVaultOnlyOwner() public {
+    function testDeployVaultPermissionless() public {
         AgentVaultFactory.VaultConfig memory config = _buildConfig(address(safe1));
 
-        vm.prank(agent);
-        vm.expectRevert();
-        factory.deployVault(config);
+        // Anyone can deploy a vault — not restricted to owner
+        address anyone = makeAddr("anyone");
+        vm.prank(anyone);
+        address module = factory.deployVault(config);
+
+        assertTrue(module != address(0));
+
+        // Module owner is the Safe, not the deployer
+        DeFiInteractorModule m = DeFiInteractorModule(module);
+        assertEq(m.owner(), address(safe1));
+        assertTrue(registry.isRegistered(module));
     }
 
     function testDeployVaultRevertsIfSafeAlreadyHasModule() public {

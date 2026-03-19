@@ -7,8 +7,9 @@ import {IModuleRegistry} from "./interfaces/IModuleRegistry.sol";
 
 /**
  * @title ModuleFactory
- * @notice Factory for deploying DeFiInteractorModules with deterministic CREATE2 addresses
- * @dev Ensures same module address across all EVM chains for a given Safe
+ * @notice Permissionless factory for deploying DeFiInteractorModules with deterministic CREATE2 addresses
+ * @dev Anyone can deploy a module for their Safe. Ensures same module address across all EVM chains for a given Safe.
+ *      Admin functions (setRegistry, setAutoRegister) remain owner-only.
  */
 contract ModuleFactory is Ownable {
     // ============ State Variables ============
@@ -111,26 +112,25 @@ contract ModuleFactory is Ownable {
 
     /**
      * @notice Deploy a new DeFiInteractorModule with CREATE2
+     * @dev Permissionless — anyone can deploy a module for any Safe.
+     *      The module's owner is set to the Safe address, so only the Safe can configure it.
      * @param safe The Safe address (avatar and owner)
      * @param oracle The authorized oracle address
      * @return module The deployed module address
      */
-    function deployModule(address safe, address oracle) external onlyOwner returns (address module) {
+    function deployModule(address safe, address oracle) external returns (address module) {
         return _deployModule(safe, oracle, deploymentNonce[safe]);
     }
 
     /**
      * @notice Deploy with explicit nonce (for redeployments or testing)
+     * @dev Permissionless — anyone can deploy. Module ownership is set to the Safe.
      * @param safe The Safe address
      * @param oracle The oracle address
      * @param nonce The nonce for salt generation
      * @return module The deployed module address
      */
-    function deployModuleWithNonce(address safe, address oracle, uint256 nonce)
-        external
-        onlyOwner
-        returns (address module)
-    {
+    function deployModuleWithNonce(address safe, address oracle, uint256 nonce) external returns (address module) {
         return _deployModule(safe, oracle, nonce);
     }
 

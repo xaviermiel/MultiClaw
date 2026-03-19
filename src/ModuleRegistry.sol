@@ -7,7 +7,8 @@ import {IModuleRegistry} from "./interfaces/IModuleRegistry.sol";
 /**
  * @title ModuleRegistry
  * @notice Central registry for all deployed DeFiInteractorModules
- * @dev Only callable by MultiSub team (owner), not self-service
+ * @dev Registration is open to authorized factories (permissionless deployment via factories).
+ *      Admin functions (deactivate, remove, authorize/deauthorize factories) remain owner-only.
  */
 contract ModuleRegistry is IModuleRegistry, Ownable {
     // ============ State Variables ============

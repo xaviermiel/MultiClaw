@@ -8,9 +8,10 @@ import {PresetRegistry} from "./PresetRegistry.sol";
 
 /**
  * @title AgentVaultFactory
- * @notice Deploys a fully-configured DeFiInteractorModule in one transaction
- * @dev Deploys module with factory as temporary owner, configures everything, then transfers ownership to Safe.
- *      The user must separately enable the module on their Safe (requires Safe multisig tx).
+ * @notice Permissionless factory that deploys a fully-configured DeFiInteractorModule in one transaction
+ * @dev Anyone can deploy an agent vault. The factory deploys with itself as temporary owner,
+ *      configures everything, then transfers ownership to the Safe — so only the Safe can
+ *      modify the module after deployment. Admin functions (setRegistry, setPresetRegistry) remain owner-only.
  *
  *      Supports two flows:
  *      - deployVault(VaultConfig): Full custom configuration
@@ -105,16 +106,13 @@ contract AgentVaultFactory is Ownable {
 
     /**
      * @notice Deploy a fully-configured agent vault with custom configuration
+     * @dev Permissionless — anyone can deploy. Module ownership transfers to the Safe after configuration,
+     *      so only the Safe can modify the module post-deployment.
+     *      User must separately enable the module on their Safe (requires Safe multisig tx).
      * @param config The full vault configuration
      * @return module The deployed module address
-     * @dev Flow:
-     *   1. Deploy module with CREATE2 (factory as temporary owner)
-     *   2. Configure roles, limits, allowlists, parsers, selectors, price feeds
-     *   3. Transfer ownership to Safe
-     *   4. Register in ModuleRegistry
-     *   User must separately enable the module on their Safe (requires Safe multisig tx).
      */
-    function deployVault(VaultConfig calldata config) external onlyOwner returns (address module) {
+    function deployVault(VaultConfig calldata config) external returns (address module) {
         // Validate inputs
         _validateConfig(config.safe, config.oracle, config.agentAddress);
         if (config.parserProtocols.length != config.parserAddresses.length) revert ArrayLengthMismatch();
@@ -153,6 +151,7 @@ contract AgentVaultFactory is Ownable {
 
     /**
      * @notice Deploy a vault using a preset template from PresetRegistry
+     * @dev Permissionless — anyone can deploy. Module ownership transfers to the Safe.
      * @param safe The Safe address
      * @param oracle The oracle address
      * @param agentAddress The AI agent's EOA
@@ -168,7 +167,7 @@ contract AgentVaultFactory is Ownable {
         uint256 presetId,
         address[] calldata priceFeedTokens,
         address[] calldata priceFeedAddresses
-    ) external onlyOwner returns (address module) {
+    ) external returns (address module) {
         if (address(presetRegistry) == address(0)) revert PresetRegistryNotSet();
         _validateConfig(safe, oracle, agentAddress);
         if (priceFeedTokens.length != priceFeedAddresses.length) revert ArrayLengthMismatch();

@@ -180,10 +180,18 @@ contract ModuleFactoryTest is Test {
         factory.deployModule(address(safe1), address(0));
     }
 
-    function testDeployModuleOnlyOwner() public {
-        vm.prank(makeAddr("notOwner"));
-        vm.expectRevert();
-        factory.deployModule(address(safe1), oracle);
+    function testDeployModulePermissionless() public {
+        // Anyone can deploy a module — not restricted to owner
+        address anyone = makeAddr("anyone");
+        vm.prank(anyone);
+        address module = factory.deployModule(address(safe1), oracle);
+
+        assertTrue(module != address(0));
+
+        // Module owner is the Safe, not the deployer
+        DeFiInteractorModule deployedModule = DeFiInteractorModule(module);
+        assertEq(deployedModule.owner(), address(safe1));
+        assertTrue(registry.isRegistered(module));
     }
 
     function testDeployModuleWithNonce() public {
