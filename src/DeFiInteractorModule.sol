@@ -1007,7 +1007,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     /**
      * @notice Cap a value to the Safe's actual token balance
-     * @dev Uses try/catch for balanceOf to handle non-contract addresses gracefully
+     * @dev Returns 0 for non-contract addresses and tokens that don't implement balanceOf,
+     *      since the Safe provably holds 0 of a non-existent token.
      */
     function _capToSafeBalance(address token, uint256 value) internal view returns (uint256) {
         if (token == address(0)) {
@@ -1015,14 +1016,14 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             return value > safeBalance ? safeBalance : value;
         }
         // Check if token is a contract before calling balanceOf
-        // (Solidity reverts on calls to non-contract addresses before try/catch can catch)
+        // Non-contract addresses cannot hold tokens — Safe balance is 0
         uint256 codeSize;
         assembly { codeSize := extcodesize(token) }
-        if (codeSize == 0) return value;
+        if (codeSize == 0) return 0;
         try IERC20(token).balanceOf(avatar) returns (uint256 safeBalance) {
             return value > safeBalance ? safeBalance : value;
         } catch {
-            return value; // If balanceOf reverts (non-ERC20), don't cap
+            return 0; // If balanceOf reverts (non-ERC20), Safe holds 0
         }
     }
 
