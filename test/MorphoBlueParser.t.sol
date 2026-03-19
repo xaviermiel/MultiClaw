@@ -28,11 +28,7 @@ contract MorphoBlueParserTest is Test {
     function setUp() public {
         parser = new MorphoBlueParser();
         marketParams = IMorphoBlue.MarketParams({
-            loanToken: LOAN_TOKEN,
-            collateralToken: COLLATERAL_TOKEN,
-            oracle: ORACLE,
-            irm: IRM,
-            lltv: LLTV
+            loanToken: LOAN_TOKEN, collateralToken: COLLATERAL_TOKEN, oracle: ORACLE, irm: IRM, lltv: LLTV
         });
     }
 
@@ -63,10 +59,10 @@ contract MorphoBlueParserTest is Test {
         bytes memory data = abi.encodeWithSelector(
             parser.SUPPLY_SELECTOR(),
             marketParams,
-            1000e6,  // assets
-            0,       // shares
-            USER,    // onBehalf
-            ""       // data
+            1000e6, // assets
+            0, // shares
+            USER, // onBehalf
+            "" // data
         );
 
         address[] memory tokens = parser.extractInputTokens(MORPHO_BLUE, data);
@@ -76,14 +72,7 @@ contract MorphoBlueParserTest is Test {
 
     function testSupplyExtractInputAmounts() public view {
         uint256 supplyAmount = 1000e6;
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            marketParams,
-            supplyAmount,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), marketParams, supplyAmount, 0, USER, "");
 
         uint256[] memory amounts = parser.extractInputAmounts(MORPHO_BLUE, data);
         assertEq(amounts.length, 1, "Should have 1 input amount");
@@ -91,42 +80,21 @@ contract MorphoBlueParserTest is Test {
     }
 
     function testSupplyExtractOutputTokens() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            marketParams,
-            1000e6,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), marketParams, 1000e6, 0, USER, "");
 
         address[] memory tokens = parser.extractOutputTokens(MORPHO_BLUE, data);
         assertEq(tokens.length, 0, "Supply should have no output tokens");
     }
 
     function testSupplyExtractRecipient() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            marketParams,
-            1000e6,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), marketParams, 1000e6, 0, USER, "");
 
         address recipient = parser.extractRecipient(MORPHO_BLUE, data, address(0));
         assertEq(recipient, USER, "Recipient should be onBehalf");
     }
 
     function testSupplyOperationType() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            marketParams,
-            1000e6,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), marketParams, 1000e6, 0, USER, "");
 
         uint8 opType = parser.getOperationType(data);
         assertEq(opType, 2, "Supply should be DEPOSIT (2)");
@@ -138,9 +106,9 @@ contract MorphoBlueParserTest is Test {
         bytes memory data = abi.encodeWithSelector(
             parser.WITHDRAW_SELECTOR(),
             marketParams,
-            1000e6,  // assets
-            0,       // shares
-            USER,    // onBehalf
+            1000e6, // assets
+            0, // shares
+            USER, // onBehalf
             RECEIVER // receiver
         );
 
@@ -149,14 +117,7 @@ contract MorphoBlueParserTest is Test {
     }
 
     function testWithdrawExtractOutputTokens() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_SELECTOR(),
-            marketParams,
-            1000e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), marketParams, 1000e6, 0, USER, RECEIVER);
 
         address[] memory tokens = parser.extractOutputTokens(MORPHO_BLUE, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -164,28 +125,14 @@ contract MorphoBlueParserTest is Test {
     }
 
     function testWithdrawExtractRecipient() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_SELECTOR(),
-            marketParams,
-            1000e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), marketParams, 1000e6, 0, USER, RECEIVER);
 
         address recipient = parser.extractRecipient(MORPHO_BLUE, data, address(0));
         assertEq(recipient, RECEIVER, "Recipient should be receiver");
     }
 
     function testWithdrawOperationType() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_SELECTOR(),
-            marketParams,
-            1000e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), marketParams, 1000e6, 0, USER, RECEIVER);
 
         uint8 opType = parser.getOperationType(data);
         assertEq(opType, 3, "Withdraw should be WITHDRAW (3)");
@@ -194,70 +141,35 @@ contract MorphoBlueParserTest is Test {
     // ============ Borrow Tests (Intentionally Not Supported) ============
 
     function testBorrowRevertsExtractInputTokens() public {
-        bytes memory data = abi.encodeWithSelector(
-            parser.BORROW_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.BORROW_SELECTOR(), marketParams, 500e6, 0, USER, RECEIVER);
 
         vm.expectRevert(MorphoBlueParser.UnsupportedSelector.selector);
         parser.extractInputTokens(MORPHO_BLUE, data);
     }
 
     function testBorrowRevertsExtractInputAmounts() public {
-        bytes memory data = abi.encodeWithSelector(
-            parser.BORROW_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.BORROW_SELECTOR(), marketParams, 500e6, 0, USER, RECEIVER);
 
         vm.expectRevert(MorphoBlueParser.UnsupportedSelector.selector);
         parser.extractInputAmounts(MORPHO_BLUE, data);
     }
 
     function testBorrowRevertsExtractOutputTokens() public {
-        bytes memory data = abi.encodeWithSelector(
-            parser.BORROW_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.BORROW_SELECTOR(), marketParams, 500e6, 0, USER, RECEIVER);
 
         vm.expectRevert(MorphoBlueParser.UnsupportedSelector.selector);
         parser.extractOutputTokens(MORPHO_BLUE, data);
     }
 
     function testBorrowRevertsExtractRecipient() public {
-        bytes memory data = abi.encodeWithSelector(
-            parser.BORROW_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.BORROW_SELECTOR(), marketParams, 500e6, 0, USER, RECEIVER);
 
         vm.expectRevert(MorphoBlueParser.UnsupportedSelector.selector);
         parser.extractRecipient(MORPHO_BLUE, data, address(0));
     }
 
     function testBorrowOperationTypeReturnsUnknown() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.BORROW_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            RECEIVER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.BORROW_SELECTOR(), marketParams, 500e6, 0, USER, RECEIVER);
 
         uint8 opType = parser.getOperationType(data);
         assertEq(opType, 0, "Borrow should return UNKNOWN (0) as it's not supported");
@@ -266,14 +178,7 @@ contract MorphoBlueParserTest is Test {
     // ============ Repay Tests ============
 
     function testRepayExtractInputTokens() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.REPAY_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), marketParams, 500e6, 0, USER, "");
 
         address[] memory tokens = parser.extractInputTokens(MORPHO_BLUE, data);
         assertEq(tokens.length, 1, "Should have 1 input token");
@@ -282,14 +187,7 @@ contract MorphoBlueParserTest is Test {
 
     function testRepayExtractInputAmounts() public view {
         uint256 repayAmount = 500e6;
-        bytes memory data = abi.encodeWithSelector(
-            parser.REPAY_SELECTOR(),
-            marketParams,
-            repayAmount,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), marketParams, repayAmount, 0, USER, "");
 
         uint256[] memory amounts = parser.extractInputAmounts(MORPHO_BLUE, data);
         assertEq(amounts.length, 1, "Should have 1 input amount");
@@ -297,31 +195,17 @@ contract MorphoBlueParserTest is Test {
     }
 
     function testRepayExtractOutputTokens() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.REPAY_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), marketParams, 500e6, 0, USER, "");
 
         address[] memory tokens = parser.extractOutputTokens(MORPHO_BLUE, data);
         assertEq(tokens.length, 0, "Repay should have no output tokens");
     }
 
     function testRepayOperationType() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.REPAY_SELECTOR(),
-            marketParams,
-            500e6,
-            0,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), marketParams, 500e6, 0, USER, "");
 
         uint8 opType = parser.getOperationType(data);
-        assertEq(opType, 2, "Repay should be DEPOSIT (2)");
+        assertEq(opType, 6, "Repay should be REPAY (6)");
     }
 
     // ============ SupplyCollateral Tests ============
@@ -330,9 +214,9 @@ contract MorphoBlueParserTest is Test {
         bytes memory data = abi.encodeWithSelector(
             parser.SUPPLY_COLLATERAL_SELECTOR(),
             marketParams,
-            1e18,   // assets (1 WETH)
-            USER,   // onBehalf
-            ""      // data
+            1e18, // assets (1 WETH)
+            USER, // onBehalf
+            "" // data
         );
 
         address[] memory tokens = parser.extractInputTokens(MORPHO_BLUE, data);
@@ -342,13 +226,8 @@ contract MorphoBlueParserTest is Test {
 
     function testSupplyCollateralExtractInputAmounts() public view {
         uint256 collateralAmount = 1e18;
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_COLLATERAL_SELECTOR(),
-            marketParams,
-            collateralAmount,
-            USER,
-            ""
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.SUPPLY_COLLATERAL_SELECTOR(), marketParams, collateralAmount, USER, "");
 
         uint256[] memory amounts = parser.extractInputAmounts(MORPHO_BLUE, data);
         assertEq(amounts.length, 1, "Should have 1 input amount");
@@ -356,26 +235,14 @@ contract MorphoBlueParserTest is Test {
     }
 
     function testSupplyCollateralExtractRecipient() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_COLLATERAL_SELECTOR(),
-            marketParams,
-            1e18,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_COLLATERAL_SELECTOR(), marketParams, 1e18, USER, "");
 
         address recipient = parser.extractRecipient(MORPHO_BLUE, data, address(0));
         assertEq(recipient, USER, "Recipient should be onBehalf");
     }
 
     function testSupplyCollateralOperationType() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_COLLATERAL_SELECTOR(),
-            marketParams,
-            1e18,
-            USER,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_COLLATERAL_SELECTOR(), marketParams, 1e18, USER, "");
 
         uint8 opType = parser.getOperationType(data);
         assertEq(opType, 2, "SupplyCollateral should be DEPOSIT (2)");
@@ -384,26 +251,16 @@ contract MorphoBlueParserTest is Test {
     // ============ WithdrawCollateral Tests ============
 
     function testWithdrawCollateralExtractInputTokens() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_COLLATERAL_SELECTOR(),
-            marketParams,
-            1e18,
-            USER,
-            RECEIVER
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.WITHDRAW_COLLATERAL_SELECTOR(), marketParams, 1e18, USER, RECEIVER);
 
         address[] memory tokens = parser.extractInputTokens(MORPHO_BLUE, data);
         assertEq(tokens.length, 0, "WithdrawCollateral should have no input tokens");
     }
 
     function testWithdrawCollateralExtractOutputTokens() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_COLLATERAL_SELECTOR(),
-            marketParams,
-            1e18,
-            USER,
-            RECEIVER
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.WITHDRAW_COLLATERAL_SELECTOR(), marketParams, 1e18, USER, RECEIVER);
 
         address[] memory tokens = parser.extractOutputTokens(MORPHO_BLUE, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -411,26 +268,16 @@ contract MorphoBlueParserTest is Test {
     }
 
     function testWithdrawCollateralExtractRecipient() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_COLLATERAL_SELECTOR(),
-            marketParams,
-            1e18,
-            USER,
-            RECEIVER
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.WITHDRAW_COLLATERAL_SELECTOR(), marketParams, 1e18, USER, RECEIVER);
 
         address recipient = parser.extractRecipient(MORPHO_BLUE, data, address(0));
         assertEq(recipient, RECEIVER, "Recipient should be receiver");
     }
 
     function testWithdrawCollateralOperationType() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_COLLATERAL_SELECTOR(),
-            marketParams,
-            1e18,
-            USER,
-            RECEIVER
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.WITHDRAW_COLLATERAL_SELECTOR(), marketParams, 1e18, USER, RECEIVER);
 
         uint8 opType = parser.getOperationType(data);
         assertEq(opType, 3, "WithdrawCollateral should be WITHDRAW (3)");
@@ -450,11 +297,7 @@ contract MorphoBlueParserTest is Test {
         // parser should return address(0) (not defaultRecipient).
         // The protocol would reject such a transaction anyway.
         IMorphoBlue.MarketParams memory params = IMorphoBlue.MarketParams({
-            loanToken: LOAN_TOKEN,
-            collateralToken: COLLATERAL_TOKEN,
-            oracle: ORACLE,
-            irm: IRM,
-            lltv: LLTV
+            loanToken: LOAN_TOKEN, collateralToken: COLLATERAL_TOKEN, oracle: ORACLE, irm: IRM, lltv: LLTV
         });
 
         bytes memory data = abi.encodeWithSelector(
@@ -477,14 +320,7 @@ contract MorphoBlueParserTest is Test {
         vm.assume(onBehalf != address(0));
         vm.assume(assets > 0 && assets < type(uint128).max);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            marketParams,
-            assets,
-            0,
-            onBehalf,
-            ""
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), marketParams, assets, 0, onBehalf, "");
 
         address[] memory tokens = parser.extractInputTokens(MORPHO_BLUE, data);
         uint256[] memory amounts = parser.extractInputAmounts(MORPHO_BLUE, data);
@@ -499,14 +335,7 @@ contract MorphoBlueParserTest is Test {
         vm.assume(receiver != address(0));
         vm.assume(assets > 0 && assets < type(uint128).max);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_SELECTOR(),
-            marketParams,
-            assets,
-            0,
-            USER,
-            receiver
-        );
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), marketParams, assets, 0, USER, receiver);
 
         address[] memory tokens = parser.extractOutputTokens(MORPHO_BLUE, data);
         address recipient = parser.extractRecipient(MORPHO_BLUE, data, address(0));
@@ -519,13 +348,8 @@ contract MorphoBlueParserTest is Test {
         vm.assume(onBehalf != address(0));
         vm.assume(assets > 0 && assets < type(uint128).max);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_COLLATERAL_SELECTOR(),
-            marketParams,
-            assets,
-            onBehalf,
-            ""
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.SUPPLY_COLLATERAL_SELECTOR(), marketParams, assets, onBehalf, "");
 
         address[] memory tokens = parser.extractInputTokens(MORPHO_BLUE, data);
         uint256[] memory amounts = parser.extractInputAmounts(MORPHO_BLUE, data);

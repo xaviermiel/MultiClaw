@@ -251,8 +251,8 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
         assertEq(module.getSpendingAllowance(subAccount1), 10000 * 10 ** 18);
         assertEq(module.getAcquiredBalance(subAccount1, tokens[0]), 500 * 10 ** 18);
-        // token2 is an EOA (no balanceOf), so acquired balance is not capped
-        assertEq(module.getAcquiredBalance(subAccount1, tokens[1]), 1000 * 10 ** 18);
+        // token2 is an EOA (no balanceOf), so acquired balance is capped to 0 (N-M-01)
+        assertEq(module.getAcquiredBalance(subAccount1, tokens[1]), 0);
     }
 
     function testOnlyOracleCanUpdate() public {

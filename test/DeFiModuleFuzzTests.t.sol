@@ -578,8 +578,9 @@ contract DeFiModuleFuzzTests is Test {
         module.batchUpdate(subAccount, allowance, tokens, balances);
 
         assertEq(module.getSpendingAllowance(subAccount), allowance);
+        // Non-contract token addresses are capped to 0 by _capToSafeBalance (N-M-01 fix)
         for (uint256 i = 0; i < numTokens; i++) {
-            assertEq(module.getAcquiredBalance(subAccount, tokens[i]), balances[i]);
+            assertEq(module.getAcquiredBalance(subAccount, tokens[i]), 0);
         }
     }
 
