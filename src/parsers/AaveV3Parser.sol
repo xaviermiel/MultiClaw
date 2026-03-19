@@ -184,9 +184,10 @@ contract AaveV3Parser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
         if (selector == SUPPLY_SELECTOR) {
             return 2; // DEPOSIT - costs spending for original tokens
-        } else if (selector == WITHDRAW_SELECTOR || selector == REPAY_SELECTOR) {
-            // REPAY is free (classified as WITHDRAW) - improves Safe health
+        } else if (selector == WITHDRAW_SELECTOR) {
             return 3; // WITHDRAW
+        } else if (selector == REPAY_SELECTOR) {
+            return 6; // REPAY - per-subaccount permission, no spending check when allowed
         } else if (_isClaimSelector(selector)) {
             return 4; // CLAIM
         }

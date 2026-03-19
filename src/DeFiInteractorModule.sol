@@ -28,6 +28,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Role ID for token transfers
     uint16 public constant DEFI_TRANSFER_ROLE = 2;
 
+    /// @notice Role ID for debt repayment (no spending check)
+    uint16 public constant DEFI_REPAY_ROLE = 3;
+
     /// @notice Default maximum spending percentage per window (basis points)
     uint256 public constant DEFAULT_MAX_SPENDING_BPS = 500; // 5%
 
@@ -44,7 +47,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         WITHDRAW, // FREE, output becomes acquired if matched to deposit
         CLAIM, // FREE, output becomes acquired if matched to deposit (same as WITHDRAW)
         APPROVE, // FREE but capped, enables future operations
-        REPAY // Per-subaccount permission, no spending check when allowed
+        REPAY // Requires DEFI_REPAY_ROLE, no spending check
     }
 
     /// @notice Registered operation type for each function selector
@@ -118,11 +121,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Maximum age for Chainlink price feed data
     uint256 public maxPriceFeedAge = 24 hours;
 
-    // ============ Repay Permissions ============
-
-    /// @notice Per-sub-account repay permission: subAccount => allowed
-    mapping(address => bool) public repayAllowed;
-
     // ============ Events ============
 
     event RoleAssigned(address indexed member, uint16 indexed roleId);
@@ -163,8 +161,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event SelectorUnregistered(bytes4 indexed selector);
     event ParserRegistered(address indexed protocol, address parser);
 
-    event RepayPermissionSet(address indexed subAccount, bool allowed);
-
     event EmergencyPaused(address indexed by);
     event EmergencyUnpaused(address indexed by);
 
@@ -196,7 +192,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error CannotBeOracle(address account);
     error CannotWhitelistCoreAddress(address account);
     error CannotRegisterParserForCoreAddress(address account);
-    error RepayNotAllowed(address subAccount);
 
     // ============ Modifiers ============
 
@@ -368,17 +363,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit AllowedAddressesSet(subAccount, targets, allowed);
     }
 
-    /**
-     * @notice Set repay permission for a sub-account
-     * @param subAccount The sub-account address
-     * @param allowed Whether the sub-account is allowed to repay debt without spending check
-     */
-    function setRepayAllowed(address subAccount, bool allowed) external onlyOwner {
-        if (subAccount == address(0)) revert InvalidAddress();
-        repayAllowed[subAccount] = allowed;
-        emit RepayPermissionSet(subAccount, allowed);
-    }
-
     // ============ Main Entry Point ============
 
     /**
@@ -393,12 +377,21 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         whenNotPaused
         returns (bytes memory)
     {
-        // 1. Validate permissions
+        // 1. Classify operation first (needed to determine which role to check)
+        OperationType opType = _classifyOperation(target, data);
+
+        // 2. Validate permissions based on operation type
+        if (opType == OperationType.REPAY) {
+            // REPAY uses its own role — does not require DEFI_EXECUTE_ROLE
+            if (!hasRole(msg.sender, DEFI_REPAY_ROLE)) revert Unauthorized();
+            _requireFreshOracle(msg.sender);
+            if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+            return _executeRepay(msg.sender, target, data);
+        }
+
+        // All other operations require DEFI_EXECUTE_ROLE
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
         _requireFreshOracle(msg.sender);
-
-        // 2. Classify operation - prefer parser-based classification for accuracy
-        OperationType opType = _classifyOperation(target, data);
 
         // 3. Route based on type
         // Note: APPROVE skips allowedAddresses check on target (the token) since
@@ -416,9 +409,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             return _executeNoSpendingCheck(msg.sender, target, data, opType);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
             return _executeWithSpendingCheck(msg.sender, target, data, opType);
-        } else if (opType == OperationType.REPAY) {
-            if (!repayAllowed[msg.sender]) revert RepayNotAllowed(msg.sender);
-            return _executeRepay(msg.sender, target, data);
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -438,12 +428,20 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         whenNotPaused
         returns (bytes memory)
     {
-        // 1. Validate permissions
+        // 1. Classify operation first (needed to determine which role to check)
+        OperationType opType = _classifyOperation(target, data);
+
+        // 2. Validate permissions based on operation type
+        if (opType == OperationType.REPAY) {
+            if (!hasRole(msg.sender, DEFI_REPAY_ROLE)) revert Unauthorized();
+            _requireFreshOracle(msg.sender);
+            if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+            return _executeRepay(msg.sender, target, data);
+        }
+
+        // All other operations require DEFI_EXECUTE_ROLE
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
         _requireFreshOracle(msg.sender);
-
-        // 2. Classify operation - prefer parser-based classification for accuracy
-        OperationType opType = _classifyOperation(target, data);
 
         // 3. Route based on type
         if (opType == OperationType.UNKNOWN) {
@@ -459,9 +457,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             return _executeNoSpendingCheckWithValue(msg.sender, target, data, opType, value);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
             return _executeWithSpendingCheckWithValue(msg.sender, target, data, opType, value);
-        } else if (opType == OperationType.REPAY) {
-            if (!repayAllowed[msg.sender]) revert RepayNotAllowed(msg.sender);
-            return _executeRepay(msg.sender, target, data);
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -549,6 +544,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!success) revert TransactionFailed();
 
         // 10. Calculate output amounts for all tokens
+        // NOTE: Fee-on-transfer tokens are NOT supported — if balanceAfter < balancesBefore
+        // due to transfer fees, this will revert with arithmetic underflow.
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
             uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
@@ -947,8 +944,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (newOracle == address(0)) revert InvalidOracleAddress();
         // Prevent Safe or Module from being oracle
         if (newOracle == avatar || newOracle == address(this)) revert CannotBeOracle(newOracle);
-        // Prevent subaccounts from being oracle (check both roles)
-        if (subAccountRoles[newOracle][DEFI_EXECUTE_ROLE] || subAccountRoles[newOracle][DEFI_TRANSFER_ROLE]) {
+        // Prevent subaccounts from being oracle (check all roles)
+        if (
+            subAccountRoles[newOracle][DEFI_EXECUTE_ROLE] || subAccountRoles[newOracle][DEFI_TRANSFER_ROLE]
+                || subAccountRoles[newOracle][DEFI_REPAY_ROLE]
+        ) {
             revert CannotBeOracle(newOracle);
         }
         address oldOracle = authorizedOracle;
