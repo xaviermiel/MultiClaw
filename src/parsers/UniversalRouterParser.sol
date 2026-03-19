@@ -312,6 +312,9 @@ contract UniversalRouterParser is ICalldataParser {
         }
 
         // Second pass: look for UNWRAP_WETH or swaps with non-intermediate recipient
+        // Track if any command uses ADDRESS_THIS without a final delivery command
+        bool sawAddressThis = false;
+
         for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
             uint8 command = uint8(commands[i]) & 0x3f;
 
@@ -320,7 +323,9 @@ contract UniversalRouterParser is ICalldataParser {
                 bytes memory wrapInput = inputs[i];
                 if (wrapInput.length >= 64) {
                     (recipient,) = abi.decode(wrapInput, (address, uint256));
-                    if (recipient != ADDRESS_THIS) {
+                    if (recipient == ADDRESS_THIS) {
+                        sawAddressThis = true;
+                    } else {
                         return _resolveRecipient(recipient, defaultRecipient);
                     }
                 }
@@ -329,7 +334,9 @@ contract UniversalRouterParser is ICalldataParser {
                 bytes memory unwrapInput = inputs[i];
                 if (unwrapInput.length >= 64) {
                     (recipient,) = abi.decode(unwrapInput, (address, uint256));
-                    if (recipient != ADDRESS_THIS) {
+                    if (recipient == ADDRESS_THIS) {
+                        sawAddressThis = true;
+                    } else {
                         return _resolveRecipient(recipient, defaultRecipient);
                     }
                 }
@@ -341,7 +348,9 @@ contract UniversalRouterParser is ICalldataParser {
                 bytes memory swapInput = inputs[i];
                 if (swapInput.length >= 32) {
                     recipient = abi.decode(swapInput, (address));
-                    if (recipient != ADDRESS_THIS) {
+                    if (recipient == ADDRESS_THIS) {
+                        sawAddressThis = true;
+                    } else {
                         return _resolveRecipient(recipient, defaultRecipient);
                     }
                 }
@@ -350,7 +359,15 @@ contract UniversalRouterParser is ICalldataParser {
             // Skip BALANCE_CHECK_ERC20 and other non-swap commands
         }
 
-        // No explicit final recipient found, use default (Safe address)
+        // If we saw ADDRESS_THIS but no final delivery command (SWEEP/UNWRAP to non-router),
+        // return ADDRESS_THIS so the module's recipient != avatar check rejects it.
+        // This prevents tokens from getting stuck in the router.
+        if (sawAddressThis) {
+            return ADDRESS_THIS;
+        }
+
+        // No explicit recipient found at all (e.g., V4-only swaps use SETTLE/TAKE),
+        // default to Safe address
         return defaultRecipient;
     }
 
@@ -360,8 +377,11 @@ contract UniversalRouterParser is ICalldataParser {
     /// @return The resolved recipient address
     function _resolveRecipient(address recipient, address defaultRecipient) internal pure returns (address) {
         if (recipient == MSG_SENDER) {
-            return defaultRecipient; // MSG_SENDER = Safe address
+            return defaultRecipient; // MSG_SENDER = Safe address (caller of Universal Router)
         }
+        // ADDRESS_THIS is NOT resolved — it means tokens go to the router, not the Safe.
+        // Callers filter it out in pass 2. If it reaches here (e.g., from SWEEP), return as-is
+        // so the module's recipient != avatar check blocks it.
         return recipient;
     }
 

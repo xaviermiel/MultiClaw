@@ -187,7 +187,10 @@ contract UniswapV4Parser is ICalldataParser {
             }
         }
 
-        // Pass 2: Fallback to settlement actions (for non-liquidity operations)
+        // Pass 2: Fallback to settlement actions (only SETTLE/SETTLE_ALL with explicit amounts)
+        // SETTLE_PAIR without a liquidity action is not a valid spending operation —
+        // it would be classified as UNKNOWN by getOperationType and revert in the module.
+        // We only return amounts for SETTLE/SETTLE_ALL which have explicit amount params.
         for (uint256 i = 0; i < actions.length; i++) {
             uint8 action = uint8(actions[i]);
 
@@ -205,15 +208,9 @@ contract UniswapV4Parser is ICalldataParser {
                     amounts[0] = _readUint256(params[i], 32);
                     return amounts;
                 }
-            } else if (action == SETTLE_PAIR) {
-                // SETTLE_PAIR params: (Currency currency0, Currency currency1)
-                // No amounts in params - return zeros to match 2 tokens from extractInputTokens
-                // Actual amounts tracked via balance changes by the module
-                amounts = new uint256[](2);
-                amounts[0] = 0;
-                amounts[1] = 0;
-                return amounts;
             }
+            // SETTLE_PAIR intentionally excluded from Pass 2 — its zero amounts
+            // should only be returned alongside MINT/INCREASE actions (handled in Pass 1)
         }
 
         return new uint256[](0);

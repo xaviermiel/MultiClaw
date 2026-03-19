@@ -45,13 +45,11 @@ contract MockPriceFeed {
         return decimals_;
     }
 
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt_,
-        uint80 answeredInRound
-    ) {
+    function latestRoundData()
+        external
+        view
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt_, uint80 answeredInRound)
+    {
         return (1, price, block.timestamp, updatedAt, 1);
     }
 
@@ -67,12 +65,7 @@ contract MockPriceFeed {
 contract MockSafe {
     bool public execSuccess = true;
 
-    function execTransactionFromModule(
-        address,
-        uint256,
-        bytes calldata,
-        uint8
-    ) external returns (bool) {
+    function execTransactionFromModule(address, uint256, bytes calldata, uint8) external returns (bool) {
         return execSuccess;
     }
 
@@ -94,20 +87,24 @@ contract MockV3PositionManager {
         token1 = _token1;
     }
 
-    function positions(uint256) external view returns (
-        uint96 nonce,
-        address operator,
-        address token0_,
-        address token1_,
-        uint24 fee,
-        int24 tickLower,
-        int24 tickUpper,
-        uint128 liquidity,
-        uint256 feeGrowthInside0LastX128,
-        uint256 feeGrowthInside1LastX128,
-        uint128 tokensOwed0,
-        uint128 tokensOwed1
-    ) {
+    function positions(uint256)
+        external
+        view
+        returns (
+            uint96 nonce,
+            address operator,
+            address token0_,
+            address token1_,
+            uint24 fee,
+            int24 tickLower,
+            int24 tickUpper,
+            uint128 liquidity,
+            uint256 feeGrowthInside0LastX128,
+            uint256 feeGrowthInside1LastX128,
+            uint128 tokensOwed0,
+            uint128 tokensOwed1
+        )
+    {
         return (0, address(0), token0, token1, 3000, -887220, 887220, 1000e6, 0, 0, 0, 0);
     }
 }
@@ -125,16 +122,20 @@ contract MockV4PositionManager {
         token1 = _token1;
     }
 
-    function getPoolAndPositionInfo(uint256) external view returns (
-        address currency0,
-        address currency1,
-        uint24 fee,
-        int24 tickSpacing,
-        address hooks,
-        int24 tickLower,
-        int24 tickUpper,
-        uint128 liquidity
-    ) {
+    function getPoolAndPositionInfo(uint256)
+        external
+        view
+        returns (
+            address currency0,
+            address currency1,
+            uint24 fee,
+            int24 tickSpacing,
+            address hooks,
+            int24 tickLower,
+            int24 tickUpper,
+            uint128 liquidity
+        )
+    {
         return (token0, token1, 3000, 60, address(0), -887220, 887220, 1000e6);
     }
 }
@@ -150,23 +151,27 @@ contract MockAavePool {
         aToken = _aToken;
     }
 
-    function getReserveData(address) external view returns (
-        uint256 configuration,
-        uint128 liquidityIndex,
-        uint128 currentLiquidityRate,
-        uint128 variableBorrowIndex,
-        uint128 currentVariableBorrowRate,
-        uint128 currentStableBorrowRate,
-        uint40 lastUpdateTimestamp,
-        uint16 id,
-        address aTokenAddress,
-        address stableDebtTokenAddress,
-        address variableDebtTokenAddress,
-        address interestRateStrategyAddress,
-        uint128 accruedToTreasury,
-        uint128 unbacked,
-        uint128 isolationModeTotalDebt
-    ) {
+    function getReserveData(address)
+        external
+        view
+        returns (
+            uint256 configuration,
+            uint128 liquidityIndex,
+            uint128 currentLiquidityRate,
+            uint128 variableBorrowIndex,
+            uint128 currentVariableBorrowRate,
+            uint128 currentStableBorrowRate,
+            uint40 lastUpdateTimestamp,
+            uint16 id,
+            address aTokenAddress,
+            address stableDebtTokenAddress,
+            address variableDebtTokenAddress,
+            address interestRateStrategyAddress,
+            uint128 accruedToTreasury,
+            uint128 unbacked,
+            uint128 isolationModeTotalDebt
+        )
+    {
         return (0, 0, 0, 0, 0, 0, 0, 0, aToken, address(0), address(0), address(0), 0, 0, 0);
     }
 }
@@ -213,11 +218,8 @@ contract FuzzTests is Test {
         params[0] = abi.encode(USDC, amount, true);
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);
         assertEq(amounts.length, 1, "Should have 1 amount");
@@ -225,10 +227,12 @@ contract FuzzTests is Test {
     }
 
     /**
-     * @notice Fuzz test: SETTLE_PAIR returns consistent arrays
-     * @dev Critical: token and amount array lengths must always match
+     * @notice Fuzz test: Standalone SETTLE_PAIR returns tokens but empty amounts
+     * @dev After M-01 fix, standalone SETTLE_PAIR without a liquidity action
+     *      returns empty amounts. This is intentional — the module's getOperationType
+     *      returns UNKNOWN for standalone SETTLE_PAIR, so it reverts before spending check.
      */
-    function testFuzzV4SettlePairArrayLengthsMatch(address token0, address token1) public view {
+    function testFuzzV4SettlePairAloneReturnsEmptyAmounts(address token0, address token1) public view {
         bytes memory actions = new bytes(1);
         actions[0] = bytes1(v4Parser.SETTLE_PAIR());
 
@@ -236,18 +240,14 @@ contract FuzzTests is Test {
         params[0] = abi.encode(token0, token1);
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         address[] memory tokens = v4Parser.extractInputTokens(address(mockV4PM), data);
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);
 
-        // Critical invariant: lengths must match
-        assertEq(tokens.length, amounts.length, "CRITICAL: Array lengths must match");
-        assertEq(tokens.length, 2, "Should have 2 tokens");
+        assertEq(tokens.length, 2, "SETTLE_PAIR should return 2 tokens");
+        assertEq(amounts.length, 0, "Standalone SETTLE_PAIR returns empty amounts (M-01 fix)");
     }
 
     /**
@@ -260,20 +260,23 @@ contract FuzzTests is Test {
 
         bytes[] memory params = new bytes[](1);
         params[0] = abi.encode(
-            USDC, WETH, uint24(3000), int24(60), address(0), // PoolKey
-            int24(-887220), int24(887220), // tick range
+            USDC,
+            WETH,
+            uint24(3000),
+            int24(60),
+            address(0), // PoolKey
+            int24(-887220),
+            int24(887220), // tick range
             uint128(1000e6), // liquidity
-            uint256(amount0Max), uint256(amount1Max), // max amounts
+            uint256(amount0Max),
+            uint256(amount1Max), // max amounts
             USER, // owner
             "" // hookData
         );
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         address[] memory tokens = v4Parser.extractInputTokens(address(mockV4PM), data);
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);
@@ -292,19 +295,16 @@ contract FuzzTests is Test {
 
         bytes[] memory params = new bytes[](1);
         params[0] = abi.encode(
-            tokenId,           // tokenId
-            uint256(1000e6),   // liquidity
-            amount0Max,        // amount0Max
-            amount1Max,        // amount1Max
-            ""                 // hookData
+            tokenId, // tokenId
+            uint256(1000e6), // liquidity
+            amount0Max, // amount0Max
+            amount1Max, // amount1Max
+            "" // hookData
         );
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         address[] memory tokens = v4Parser.extractInputTokens(address(mockV4PM), data);
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);
@@ -325,11 +325,8 @@ contract FuzzTests is Test {
         params[0] = abi.encode(tokenId, liquidity, uint128(0), uint128(0), "");
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         address[] memory tokens = v4Parser.extractOutputTokens(address(mockV4PM), data);
         assertEq(tokens.length, 2, "Should have 2 output tokens");
@@ -345,7 +342,14 @@ contract FuzzTests is Test {
     function testFuzzV3ExactInputSingleAmount(uint256 amountIn, uint256 amountOutMin) public view {
         bytes memory data = abi.encodeWithSelector(
             v3Parser.EXACT_INPUT_SINGLE_SELECTOR(),
-            USDC, WETH, uint24(3000), USER, block.timestamp, amountIn, amountOutMin, uint160(0)
+            USDC,
+            WETH,
+            uint24(3000),
+            USER,
+            block.timestamp,
+            amountIn,
+            amountOutMin,
+            uint160(0)
         );
 
         address[] memory tokens = v3Parser.extractInputTokens(address(mockV3PM), data);
@@ -361,8 +365,17 @@ contract FuzzTests is Test {
     function testFuzzV3MintAmounts(uint256 amount0Desired, uint256 amount1Desired) public view {
         bytes memory data = abi.encodeWithSelector(
             v3Parser.MINT_SELECTOR(),
-            USDC, WETH, uint24(3000), int24(-887220), int24(887220),
-            amount0Desired, amount1Desired, uint256(0), uint256(0), USER, block.timestamp
+            USDC,
+            WETH,
+            uint24(3000),
+            int24(-887220),
+            int24(887220),
+            amount0Desired,
+            amount1Desired,
+            uint256(0),
+            uint256(0),
+            USER,
+            block.timestamp
         );
 
         address[] memory tokens = v3Parser.extractInputTokens(address(mockV3PM), data);
@@ -377,10 +390,18 @@ contract FuzzTests is Test {
     /**
      * @notice Fuzz test: V3 INCREASE_LIQUIDITY amounts
      */
-    function testFuzzV3IncreaseLiquidityAmounts(uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired) public view {
+    function testFuzzV3IncreaseLiquidityAmounts(uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired)
+        public
+        view
+    {
         bytes memory data = abi.encodeWithSelector(
             v3Parser.INCREASE_LIQUIDITY_SELECTOR(),
-            tokenId, amount0Desired, amount1Desired, uint256(0), uint256(0), block.timestamp
+            tokenId,
+            amount0Desired,
+            amount1Desired,
+            uint256(0),
+            uint256(0),
+            block.timestamp
         );
 
         address[] memory tokens = v3Parser.extractInputTokens(address(mockV3PM), data);
@@ -396,8 +417,7 @@ contract FuzzTests is Test {
      */
     function testFuzzV3DecreaseLiquidityOutputTokens(uint256 tokenId, uint128 liquidity) public view {
         bytes memory data = abi.encodeWithSelector(
-            v3Parser.DECREASE_LIQUIDITY_SELECTOR(),
-            tokenId, liquidity, uint256(0), uint256(0), block.timestamp
+            v3Parser.DECREASE_LIQUIDITY_SELECTOR(), tokenId, liquidity, uint256(0), uint256(0), block.timestamp
         );
 
         address[] memory tokens = v3Parser.extractOutputTokens(address(mockV3PM), data);
@@ -410,10 +430,7 @@ contract FuzzTests is Test {
      * @notice Fuzz test: Aave supply amounts
      */
     function testFuzzAaveSupplyAmount(uint256 amount) public view {
-        bytes memory data = abi.encodeWithSelector(
-            aaveParser.SUPPLY_SELECTOR(),
-            USDC, amount, USER, uint16(0)
-        );
+        bytes memory data = abi.encodeWithSelector(aaveParser.SUPPLY_SELECTOR(), USDC, amount, USER, uint16(0));
 
         address[] memory tokens = aaveParser.extractInputTokens(address(0), data);
         uint256[] memory amounts = aaveParser.extractInputAmounts(address(0), data);
@@ -426,10 +443,7 @@ contract FuzzTests is Test {
      * @notice Fuzz test: Aave repay amounts
      */
     function testFuzzAaveRepayAmount(uint256 amount) public view {
-        bytes memory data = abi.encodeWithSelector(
-            aaveParser.REPAY_SELECTOR(),
-            USDC, amount, uint256(2), USER
-        );
+        bytes memory data = abi.encodeWithSelector(aaveParser.REPAY_SELECTOR(), USDC, amount, uint256(2), USER);
 
         address[] memory tokens = aaveParser.extractInputTokens(address(0), data);
         uint256[] memory amounts = aaveParser.extractInputAmounts(address(0), data);
@@ -453,12 +467,8 @@ contract FuzzTests is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, amountIn, amountOutMin, path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            universalParser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(universalParser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = universalParser.extractInputTokens(address(0), data);
         uint256[] memory amounts = universalParser.extractInputAmounts(address(0), data);
@@ -482,11 +492,8 @@ contract FuzzTests is Test {
         params[0] = abi.encode(USDC, uint256(0), true);
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);
         assertEq(amounts[0], 0, "Zero amount should be handled");
@@ -503,11 +510,8 @@ contract FuzzTests is Test {
         params[0] = abi.encode(USDC, type(uint256).max, true);
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);
         assertEq(amounts[0], type(uint256).max, "Max amount should be handled");
@@ -524,11 +528,8 @@ contract FuzzTests is Test {
         params[0] = abi.encode(token0, token1);
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         address[] memory tokens = v4Parser.extractInputTokens(address(mockV4PM), data);
         assertEq(tokens[0], token0, "Token0 should match");
@@ -547,10 +548,7 @@ contract FuzzTests is Test {
         address aToken = makeAddr("aToken");
         mockPool.setAToken(aToken);
 
-        bytes memory data = abi.encodeWithSelector(
-            aaveParser.SUPPLY_SELECTOR(),
-            asset, amount, USER, uint16(0)
-        );
+        bytes memory data = abi.encodeWithSelector(aaveParser.SUPPLY_SELECTOR(), asset, amount, USER, uint16(0));
 
         address[] memory tokens = aaveParser.extractOutputTokens(address(mockPool), data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -566,10 +564,7 @@ contract FuzzTests is Test {
         // Bound to large values
         amount = bound(amount, type(uint128).max, type(uint256).max);
 
-        bytes memory data = abi.encodeWithSelector(
-            aaveParser.SUPPLY_SELECTOR(),
-            USDC, amount, USER, uint16(0)
-        );
+        bytes memory data = abi.encodeWithSelector(aaveParser.SUPPLY_SELECTOR(), USDC, amount, USER, uint16(0));
 
         uint256[] memory amounts = aaveParser.extractInputAmounts(address(0), data);
         assertEq(amounts[0], amount, "Large amount should be extracted correctly");
@@ -582,10 +577,8 @@ contract FuzzTests is Test {
         uint256[4] memory testValues = [uint256(0), uint256(1), type(uint256).max - 1, type(uint256).max];
 
         for (uint256 i = 0; i < testValues.length; i++) {
-            bytes memory data = abi.encodeWithSelector(
-                aaveParser.SUPPLY_SELECTOR(),
-                USDC, testValues[i], USER, uint16(0)
-            );
+            bytes memory data =
+                abi.encodeWithSelector(aaveParser.SUPPLY_SELECTOR(), USDC, testValues[i], USER, uint16(0));
 
             uint256[] memory amounts = aaveParser.extractInputAmounts(address(0), data);
             assertEq(amounts[0], testValues[i], "Boundary value should be extracted correctly");
@@ -597,8 +590,10 @@ contract FuzzTests is Test {
      * @dev This is critical for DeFiInteractorModule to not revert with index out of bounds
      */
     function testFuzzInvariantArrayLengthsMatch(uint8 actionType, uint256 amount0, uint256 amount1) public view {
-        // Bound action type to valid V4 actions
+        // Bound action type to valid V4 actions (skip 3=SETTLE_PAIR which is intentionally
+        // excluded from Pass 2 amounts — standalone SETTLE_PAIR is not a valid spending operation)
         actionType = uint8(bound(actionType, 0, 5));
+        if (actionType == 3) actionType = 0; // redirect SETTLE_PAIR to INCREASE_LIQUIDITY
 
         bytes memory actions = new bytes(1);
         bytes[] memory params = new bytes[](1);
@@ -611,9 +606,18 @@ contract FuzzTests is Test {
             // MINT_POSITION
             actions[0] = bytes1(v4Parser.MINT_POSITION());
             params[0] = abi.encode(
-                USDC, WETH, uint24(3000), int24(60), address(0),
-                int24(-887220), int24(887220), uint128(1000e6),
-                amount0, amount1, USER, ""
+                USDC,
+                WETH,
+                uint24(3000),
+                int24(60),
+                address(0),
+                int24(-887220),
+                int24(887220),
+                uint128(1000e6),
+                amount0,
+                amount1,
+                USER,
+                ""
             );
         } else if (actionType == 2) {
             // SETTLE
@@ -634,11 +638,8 @@ contract FuzzTests is Test {
         }
 
         bytes memory unlockData = abi.encode(actions, params);
-        bytes memory data = abi.encodeWithSelector(
-            v4Parser.MODIFY_LIQUIDITIES_SELECTOR(),
-            unlockData,
-            block.timestamp + 1
-        );
+        bytes memory data =
+            abi.encodeWithSelector(v4Parser.MODIFY_LIQUIDITIES_SELECTOR(), unlockData, block.timestamp + 1);
 
         address[] memory tokens = v4Parser.extractInputTokens(address(mockV4PM), data);
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);

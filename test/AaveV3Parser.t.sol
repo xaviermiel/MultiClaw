@@ -55,7 +55,9 @@ contract AaveV3ParserTest is Test {
         // BORROW is intentionally NOT supported - only multisig can borrow
         assertEq(parser.REPAY_SELECTOR(), bytes4(0x573ade81), "Repay selector mismatch");
         assertEq(parser.CLAIM_REWARDS_SELECTOR(), bytes4(0x236300dc), "ClaimRewards selector mismatch");
-        assertEq(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR(), bytes4(0x33028b99), "ClaimRewardsOnBehalf selector mismatch");
+        assertEq(
+            parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR(), bytes4(0x33028b99), "ClaimRewardsOnBehalf selector mismatch"
+        );
         assertEq(parser.CLAIM_ALL_REWARDS_SELECTOR(), bytes4(0xbb492bf5), "ClaimAllRewards selector mismatch");
         assertEq(parser.CLAIM_ALL_ON_BEHALF_SELECTOR(), bytes4(0x9ff55db9), "ClaimAllOnBehalf selector mismatch");
     }
@@ -71,7 +73,9 @@ contract AaveV3ParserTest is Test {
 
         // Rewards operations
         assertTrue(parser.supportsSelector(parser.CLAIM_REWARDS_SELECTOR()), "Should support claimRewards");
-        assertTrue(parser.supportsSelector(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR()), "Should support claimRewardsOnBehalf");
+        assertTrue(
+            parser.supportsSelector(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR()), "Should support claimRewardsOnBehalf"
+        );
         assertTrue(parser.supportsSelector(parser.CLAIM_ALL_REWARDS_SELECTOR()), "Should support claimAllRewards");
         assertTrue(parser.supportsSelector(parser.CLAIM_ALL_ON_BEHALF_SELECTOR()), "Should support claimAllOnBehalf");
 
@@ -83,13 +87,7 @@ contract AaveV3ParserTest is Test {
 
     function testSupplyExtractInputToken() public view {
         // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            USDC,
-            1000e6,
-            USER,
-            uint16(0)
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), USDC, 1000e6, USER, uint16(0));
 
         address[] memory tokens = parser.extractInputTokens(AAVE_POOL, data);
         assertEq(tokens.length, 1, "Should have 1 input token");
@@ -97,13 +95,7 @@ contract AaveV3ParserTest is Test {
     }
 
     function testSupplyExtractInputAmounts() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            USDC,
-            1000e6,
-            USER,
-            uint16(0)
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), USDC, 1000e6, USER, uint16(0));
 
         uint256[] memory amounts = parser.extractInputAmounts(AAVE_POOL, data);
         assertEq(amounts.length, 1, "Should have 1 input amount");
@@ -112,13 +104,7 @@ contract AaveV3ParserTest is Test {
 
     function testSupplyExtractOutputTokens() public view {
         // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            USDC,
-            1000e6,
-            USER,
-            uint16(0)
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), USDC, 1000e6, USER, uint16(0));
 
         // Output should be the aToken for USDC
         address[] memory tokens = parser.extractOutputTokens(address(mockPool), data);
@@ -127,13 +113,7 @@ contract AaveV3ParserTest is Test {
     }
 
     function testSupplyExtractOutputTokensWETH() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.SUPPLY_SELECTOR(),
-            WETH,
-            1e18,
-            USER,
-            uint16(0)
-        );
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), WETH, 1e18, USER, uint16(0));
 
         address[] memory tokens = parser.extractOutputTokens(address(mockPool), data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -144,12 +124,7 @@ contract AaveV3ParserTest is Test {
 
     function testWithdrawExtractOutputTokens() public view {
         // withdraw(address asset, uint256 amount, address to)
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_SELECTOR(),
-            USDC,
-            1000e6,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), USDC, 1000e6, USER);
 
         address[] memory tokens = parser.extractOutputTokens(AAVE_POOL, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -164,13 +139,7 @@ contract AaveV3ParserTest is Test {
 
     function testRepayExtractInputTokens() public view {
         // repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)
-        bytes memory data = abi.encodeWithSelector(
-            parser.REPAY_SELECTOR(),
-            WETH,
-            1e18,
-            uint256(2),
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), WETH, 1e18, uint256(2), USER);
 
         address[] memory tokens = parser.extractInputTokens(AAVE_POOL, data);
         assertEq(tokens.length, 1, "Should have 1 input token");
@@ -178,13 +147,7 @@ contract AaveV3ParserTest is Test {
     }
 
     function testRepayExtractInputAmounts() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.REPAY_SELECTOR(),
-            WETH,
-            1e18,
-            uint256(2),
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), WETH, 1e18, uint256(2), USER);
 
         uint256[] memory amounts = parser.extractInputAmounts(AAVE_POOL, data);
         assertEq(amounts.length, 1, "Should have 1 input amount");
@@ -193,16 +156,41 @@ contract AaveV3ParserTest is Test {
 
     function testRepayExtractOutputTokens() public view {
         // repay doesn't produce output tokens (it burns debt tokens internally)
-        bytes memory data = abi.encodeWithSelector(
-            parser.REPAY_SELECTOR(),
-            WETH,
-            1e18,
-            uint256(2),
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), WETH, 1e18, uint256(2), USER);
 
         address[] memory tokens = parser.extractOutputTokens(AAVE_POOL, data);
         assertEq(tokens.length, 0, "Repay should return empty array (no output tokens)");
+    }
+
+    function testRepayOperationType() public view {
+        bytes memory data = abi.encodeWithSelector(parser.REPAY_SELECTOR(), WETH, 1e18, uint256(2), USER);
+
+        uint8 opType = parser.getOperationType(data);
+        assertEq(opType, 6, "Repay should be REPAY (6)");
+    }
+
+    function testWithdrawOperationType() public view {
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), USDC, 1000e6, USER);
+
+        uint8 opType = parser.getOperationType(data);
+        assertEq(opType, 3, "Withdraw should be WITHDRAW (3)");
+    }
+
+    function testSupplyOperationType() public view {
+        bytes memory data = abi.encodeWithSelector(parser.SUPPLY_SELECTOR(), USDC, 1000e6, USER, uint16(0));
+
+        uint8 opType = parser.getOperationType(data);
+        assertEq(opType, 2, "Supply should be DEPOSIT (2)");
+    }
+
+    function testClaimOperationType() public view {
+        address[] memory assets = new address[](1);
+        assets[0] = USDC;
+
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_REWARDS_SELECTOR(), assets, 1000e18, USER, REWARD_TOKEN);
+
+        uint8 opType = parser.getOperationType(data);
+        assertEq(opType, 4, "Claim should be CLAIM (4)");
     }
 
     // ============ Claim Rewards Tests ============
@@ -212,13 +200,7 @@ contract AaveV3ParserTest is Test {
         address[] memory assets = new address[](1);
         assets[0] = USDC;
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_REWARDS_SELECTOR(),
-            assets,
-            1000e18,
-            USER,
-            REWARD_TOKEN
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_REWARDS_SELECTOR(), assets, 1000e18, USER, REWARD_TOKEN);
 
         address[] memory tokens = parser.extractInputTokens(REWARDS_CONTROLLER, data);
         assertEq(tokens.length, 0, "Claim should have no input tokens");
@@ -228,13 +210,7 @@ contract AaveV3ParserTest is Test {
         address[] memory assets = new address[](1);
         assets[0] = USDC;
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_REWARDS_SELECTOR(),
-            assets,
-            1000e18,
-            USER,
-            REWARD_TOKEN
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_REWARDS_SELECTOR(), assets, 1000e18, USER, REWARD_TOKEN);
 
         uint256[] memory amounts = parser.extractInputAmounts(REWARDS_CONTROLLER, data);
         assertEq(amounts.length, 0, "Claim should have no input amounts");
@@ -244,13 +220,7 @@ contract AaveV3ParserTest is Test {
         address[] memory assets = new address[](1);
         assets[0] = USDC;
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_REWARDS_SELECTOR(),
-            assets,
-            1000e18,
-            USER,
-            REWARD_TOKEN
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_REWARDS_SELECTOR(), assets, 1000e18, USER, REWARD_TOKEN);
 
         address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -263,12 +233,7 @@ contract AaveV3ParserTest is Test {
         assets[0] = USDC;
 
         bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR(),
-            assets,
-            1000e18,
-            USER,
-            USER,
-            REWARD_TOKEN
+            parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR(), assets, 1000e18, USER, USER, REWARD_TOKEN
         );
 
         address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
@@ -282,11 +247,7 @@ contract AaveV3ParserTest is Test {
         assets[0] = USDC;
         assets[1] = WETH;
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_ALL_REWARDS_SELECTOR(),
-            assets,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_ALL_REWARDS_SELECTOR(), assets, USER);
 
         address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
         assertEq(tokens.length, 0, "ClaimAllRewards should return empty array (unknown tokens)");
@@ -297,12 +258,7 @@ contract AaveV3ParserTest is Test {
         address[] memory assets = new address[](1);
         assets[0] = USDC;
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_ALL_ON_BEHALF_SELECTOR(),
-            assets,
-            USER,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_ALL_ON_BEHALF_SELECTOR(), assets, USER, USER);
 
         address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
         assertEq(tokens.length, 0, "ClaimAllOnBehalf should return empty array");
@@ -325,9 +281,11 @@ contract AaveV3ParserTest is Test {
         // DEPOSIT operations
         assertEq(parser.getOperationType(supplyData), 2, "Supply should be DEPOSIT (2)");
 
-        // WITHDRAW operations (includes REPAY - repaying debt is FREE)
+        // WITHDRAW operations
         assertEq(parser.getOperationType(withdrawData), 3, "Withdraw should be WITHDRAW (3)");
-        assertEq(parser.getOperationType(repayData), 3, "Repay should be WITHDRAW (3) - FREE operation");
+
+        // REPAY operations (per-subaccount permission)
+        assertEq(parser.getOperationType(repayData), 6, "Repay should be REPAY (6)");
 
         // CLAIM operations
         assertEq(parser.getOperationType(claimRewardsData), 4, "ClaimRewards should be CLAIM (4)");
