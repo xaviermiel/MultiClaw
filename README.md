@@ -168,13 +168,29 @@ This lets agents chain operations (swap → deposit → withdraw) without burnin
 │ Layer 5   PARSER EXTRACTION   Decode tokens, amounts, recipient  │
 │ Layer 6   RECIPIENT GUARD     Output goes to Safe, not attacker  │
 │ Layer 7   SPENDING LIMIT      USD cost fits in remaining budget  │
-│ Layer 8   ACQUIRED BALANCE    Free tokens deducted first         │
-│ Layer 9   APPROVE CAP         Spender whitelisted, amount capped │
-│ Layer 10  SAFE EXECUTION      execTransactionFromModule()        │
+│ Layer 8   CUMULATIVE CAP      On-chain per-window spending limit │
+│ Layer 9   ACQUIRED BALANCE    Free tokens deducted first         │
+│ Layer 10  SWAP MARKING        Swap outputs auto-marked acquired  │
+│ Layer 11  APPROVE CAP         Spender whitelisted, amount capped │
+│ Layer 12  SAFE EXECUTION      execTransactionFromModule()        │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 Every transaction must pass all applicable layers. Failure at any layer = revert.
+
+### Oracle Compromise Protection
+
+Even if the oracle key is compromised, on-chain cumulative counters limit damage:
+
+| Protection                   | Mechanism                                                         | Default |
+| ---------------------------- | ----------------------------------------------------------------- | ------- |
+| **Cumulative spending cap**  | `cumulativeSpent` tracked on-chain, oracle cannot reset           | 20%     |
+| **Safe value snapshot**      | `windowSafeValue` frozen at window start, inflation has no effect | —       |
+| **Oracle acquired budget**   | `cumulativeOracleGrantedUSD` caps oracle's acquired grants        | 20%     |
+| **Swap marking (trustless)** | Swap outputs auto-marked acquired on-chain, no oracle needed      | —       |
+| **Per-account USD cap**      | USD-mode sub-accounts capped by `maxSpendingUSD`                  | —       |
+
+Max damage per window: `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 40%). See [`oracle/ORACLE_SECURITY.md`](./oracle/ORACLE_SECURITY.md).
 
 ## Agent Framework Integrations
 
