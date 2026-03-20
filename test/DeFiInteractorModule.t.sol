@@ -958,18 +958,18 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Mint enough tokens so _capToSafeBalance doesn't interfere
         token.transfer(address(safe), 900000e18);
 
-        // maxOracleAcquiredBps = 5000 (50%), safeValue = $1M → max grant = $500K
-        // Set acquired balance to $500K worth of tokens (500K tokens at $1)
+        // maxOracleAcquiredBps = 2000 (20%), safeValue = $1M → max grant = $200K
+        // Set acquired balance to $200K worth of tokens (200K tokens at $1)
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
         uint256[] memory balances = new uint256[](1);
-        balances[0] = 500000e18;
-        module.batchUpdate(subAccount1, 50000e18, tokens, balances);
+        balances[0] = 200000e18;
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
 
         // Now try to increase by $1 more — should revert (budget exhausted)
-        balances[0] = 500001e18;
+        balances[0] = 200001e18;
         vm.expectRevert();
-        module.batchUpdate(subAccount1, 50000e18, tokens, balances);
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
     }
 
     function testOracleAcquiredBudgetWindowReset() public {
@@ -978,12 +978,12 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Mint enough tokens
         token.transfer(address(safe), 900000e18);
 
-        // Max grant = $500K (50% of $1M)
+        // Max grant = $200K (20% of $1M)
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
         uint256[] memory balances = new uint256[](1);
-        balances[0] = 500000e18;
-        module.batchUpdate(subAccount1, 50000e18, tokens, balances);
+        balances[0] = 200000e18;
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
 
         // Budget exhausted in this window. Warp past window.
         vm.warp(block.timestamp + 1 days + 1);
@@ -991,15 +991,15 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSafeValue(1_000_000e18);
 
         // New window — budget resets, should succeed again
-        balances[0] = 500001e18; // increase by $1
-        module.batchUpdate(subAccount1, 50000e18, tokens, balances);
+        balances[0] = 200001e18; // increase by $1
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
     }
 
     function testOracleAcquiredDecreaseAlwaysAllowed() public {
-        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+        module.setSubAccountLimits(subAccount1, 200, 0, 1 days);
 
-        // Set acquired to $500K
-        module.updateAcquiredBalance(subAccount1, address(token), 500000e18);
+        // Set acquired to $200K
+        module.updateAcquiredBalance(subAccount1, address(token), 200000e18);
 
         // Decrease to $100K — should always work (not tracked)
         module.updateAcquiredBalance(subAccount1, address(token), 100000e18);
