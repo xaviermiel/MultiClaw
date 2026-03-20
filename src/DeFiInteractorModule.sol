@@ -106,6 +106,29 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Per-sub-account limit configuration
     mapping(address => SubAccountLimits) public subAccountLimits;
 
+    // ============ On-Chain Cumulative Spending Tracker ============
+
+    /// @notice Start of the current spending window per sub-account
+    mapping(address => uint256) public windowStart;
+
+    /// @notice Safe value snapshot at window start per sub-account
+    mapping(address => uint256) public windowSafeValue;
+
+    /// @notice Cumulative spending in current window per sub-account (USD with 18 decimals)
+    mapping(address => uint256) public cumulativeSpent;
+
+    // ============ Oracle Acquired Budget ============
+
+    /// @notice Start of oracle acquired grant window per sub-account
+    mapping(address => uint256) public acquiredGrantWindowStart;
+
+    /// @notice Cumulative USD value of oracle-granted acquired increases per window
+    mapping(address => uint256) public cumulativeOracleGrantedUSD;
+
+    /// @notice Maximum percentage of safe value the oracle can grant as acquired per window (basis points)
+    /// @dev Default 20% (2000 bps). Limits oracle's ability to inflate acquired balances.
+    uint256 public maxOracleAcquiredBps = 2000;
+
     /// @notice Per-sub-account allowed addresses: subAccount => target => allowed
     mapping(address => mapping(address => bool)) public allowedAddresses;
 
@@ -165,6 +188,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event SelectorUnregistered(bytes4 indexed selector);
     event ParserRegistered(address indexed protocol, address parser);
 
+    event CumulativeSpendingReset(address indexed subAccount, uint256 windowSafeValue);
+    event OracleAcquiredBudgetReset(address indexed subAccount);
+
     event EmergencyPaused(address indexed by);
     event EmergencyUnpaused(address indexed by);
 
@@ -198,6 +224,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error CannotRegisterParserForCoreAddress(address account);
     error BothLimitModesSet();
     error NeitherLimitModeSet();
+    error ExceedsCumulativeSpendingLimit(uint256 cumulative, uint256 maximum);
+    error ExceedsOracleAcquiredBudget(uint256 cumulative, uint256 maximum);
 
     // ============ Modifiers ============
 
@@ -568,8 +596,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert ExceedsSpendingLimit();
         }
 
-        // 8. Deduct spending allowance
+        // 8. Deduct spending allowance and track cumulative spending
         spendingAllowance[subAccount] -= spendingCost;
+        _trackCumulativeSpending(subAccount, spendingCost);
 
         // 9. Capture balances before for output tracking (multiple tokens)
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
@@ -591,7 +620,16 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
-        // 12. Emit event for oracle
+        // 12. Mark swap outputs as acquired on-chain
+        if (opType == OperationType.SWAP) {
+            for (uint256 i = 0; i < tokensOut.length; i++) {
+                if (amountsOut[i] > 0) {
+                    acquiredBalance[subAccount][tokensOut[i]] += amountsOut[i];
+                }
+            }
+        }
+
+        // 13. Emit event for oracle
         emit ProtocolExecution(subAccount, target, opType, tokensIn, amountsIn, tokensOut, amountsOut, spendingCost);
 
         return "";
@@ -787,8 +825,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert ExceedsSpendingLimit();
         }
 
-        // Deduct spending allowance and acquired balance
+        // Deduct spending allowance, track cumulative, and deduct acquired balance
         spendingAllowance[msg.sender] -= spendingCost;
+        _trackCumulativeSpending(msg.sender, spendingCost);
         acquiredBalance[msg.sender][token] -= usedFromAcquired;
 
         // Execute transfer
@@ -813,15 +852,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     }
 
     function updateSpendingAllowance(address subAccount, uint256 newAllowance) external onlyOracle {
-        _enforceAllowanceCap(newAllowance);
+        _enforceAllowanceCap(subAccount, newAllowance);
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
         emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
     function updateAcquiredBalance(address subAccount, address token, uint256 newBalance) external onlyOracle {
-        // Cap acquired balance to Safe's actual token balance (H-01)
+        // Cap acquired balance to Safe's actual token balance
         newBalance = _capToSafeBalance(token, newBalance);
+        // Track oracle-granted acquired increases
+        _trackOracleAcquiredGrant(subAccount, token, acquiredBalance[subAccount][token], newBalance);
         acquiredBalance[subAccount][token] = newBalance;
         lastOracleUpdate[subAccount] = block.timestamp;
 
@@ -838,14 +879,16 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256[] calldata balances
     ) external onlyOracle {
         if (tokens.length != balances.length) revert LengthMismatch();
-        _enforceAllowanceCap(newAllowance);
+        _enforceAllowanceCap(subAccount, newAllowance);
 
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
 
         for (uint256 i = 0; i < tokens.length; i++) {
-            // Cap acquired balance to Safe's actual token balance (H-01)
+            // Cap acquired balance to Safe's actual token balance
             uint256 cappedBalance = _capToSafeBalance(tokens[i], balances[i]);
+            // Track oracle-granted acquired increases
+            _trackOracleAcquiredGrant(subAccount, tokens[i], acquiredBalance[subAccount][tokens[i]], cappedBalance);
             acquiredBalance[subAccount][tokens[i]] = cappedBalance;
             emit AcquiredBalanceUpdated(subAccount, tokens[i], cappedBalance);
         }
@@ -876,6 +919,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     function setAbsoluteMaxSpendingBps(uint256 newMaxBps) external onlyOwner {
         if (newMaxBps > 10000) revert ExceedsMaxBps();
         absoluteMaxSpendingBps = newMaxBps;
+    }
+
+    /// @notice Set the maximum oracle acquired budget percentage
+    /// @param newMaxBps New maximum in basis points (e.g., 5000 = 50%)
+    function setMaxOracleAcquiredBps(uint256 newMaxBps) external onlyOwner {
+        if (newMaxBps > 10000) revert ExceedsMaxBps();
+        maxOracleAcquiredBps = newMaxBps;
     }
 
     // ============ Price Feed Functions ============
@@ -933,11 +983,98 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    function _enforceAllowanceCap(uint256 newAllowance) internal view {
+    /// @notice Enforce allowance cap: minimum of global absolute cap and per-account USD cap
+    function _enforceAllowanceCap(address subAccount, uint256 newAllowance) internal view {
         _requireFreshSafeValue();
         uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
+
+        // In USD mode, also enforce per-account cap (take the stricter limit)
+        SubAccountLimits storage limits = subAccountLimits[subAccount];
+        if (limits.isConfigured && limits.maxSpendingUSD > 0 && limits.maxSpendingUSD < maxAllowance) {
+            maxAllowance = limits.maxSpendingUSD;
+        }
+
         if (newAllowance > maxAllowance) {
             revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
+        }
+    }
+
+    /// @notice Track cumulative spending per window
+    /// @param subAccount The sub-account that is spending
+    /// @param spendingCost The USD cost of this operation (18 decimals)
+    function _trackCumulativeSpending(address subAccount, uint256 spendingCost) internal {
+        if (spendingCost == 0) return;
+
+        (uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration) = getSubAccountLimits(subAccount);
+
+        // Check if window is uninitialized or expired — start a new one
+        if (windowStart[subAccount] == 0 || block.timestamp > windowStart[subAccount] + windowDuration) {
+            _requireFreshSafeValue();
+            windowStart[subAccount] = block.timestamp;
+            windowSafeValue[subAccount] = safeValue.totalValueUSD;
+            cumulativeSpent[subAccount] = 0;
+            emit CumulativeSpendingReset(subAccount, safeValue.totalValueUSD);
+        }
+
+        // Increment cumulative spending
+        cumulativeSpent[subAccount] += spendingCost;
+
+        // Compute maximum spending for this window (dual-mode)
+        uint256 maxSpending;
+        if (maxSpendingUSD > 0) {
+            maxSpending = maxSpendingUSD;
+        } else {
+            maxSpending = (windowSafeValue[subAccount] * maxSpendingBps) / 10000;
+        }
+
+        // Also cap by absolute maximum (safety backstop)
+        uint256 absoluteMax = (windowSafeValue[subAccount] * absoluteMaxSpendingBps) / 10000;
+        if (absoluteMax < maxSpending) {
+            maxSpending = absoluteMax;
+        }
+
+        if (cumulativeSpent[subAccount] > maxSpending) {
+            revert ExceedsCumulativeSpendingLimit(cumulativeSpent[subAccount], maxSpending);
+        }
+    }
+
+    /// @notice Track oracle-granted acquired balance increases
+    /// @param subAccount The sub-account receiving acquired balance
+    /// @param token The token being marked as acquired
+    /// @param oldBalance The previous acquired balance
+    /// @param newBalance The new acquired balance being set
+    function _trackOracleAcquiredGrant(address subAccount, address token, uint256 oldBalance, uint256 newBalance)
+        internal
+    {
+        // Only track increases (decreases are fine — oracle is reducing exposure)
+        if (newBalance <= oldBalance) return;
+
+        // Calculate USD value of the increase
+        uint256 increaseValueUSD = _estimateTokenValueUSD(token, newBalance - oldBalance);
+        if (increaseValueUSD == 0) return;
+
+        // Get window duration from sub-account limits
+        (,, uint256 windowDuration) = getSubAccountLimits(subAccount);
+
+        // Check if grant window is uninitialized or expired
+        if (
+            acquiredGrantWindowStart[subAccount] == 0
+                || block.timestamp > acquiredGrantWindowStart[subAccount] + windowDuration
+        ) {
+            acquiredGrantWindowStart[subAccount] = block.timestamp;
+            cumulativeOracleGrantedUSD[subAccount] = 0;
+            emit OracleAcquiredBudgetReset(subAccount);
+        }
+
+        // Increment cumulative granted amount
+        cumulativeOracleGrantedUSD[subAccount] += increaseValueUSD;
+
+        // Compute maximum grant budget using snapshotted safe value (if available)
+        uint256 refValue = windowSafeValue[subAccount] > 0 ? windowSafeValue[subAccount] : safeValue.totalValueUSD;
+        uint256 maxGrant = (refValue * maxOracleAcquiredBps) / 10000;
+
+        if (cumulativeOracleGrantedUSD[subAccount] > maxGrant) {
+            revert ExceedsOracleAcquiredBudget(cumulativeOracleGrantedUSD[subAccount], maxGrant);
         }
     }
 
@@ -961,7 +1098,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint8 tokenDecimals = token == address(0) ? 18 : IERC20Metadata(token).decimals();
 
         // Calculate USD value with 18 decimals
-        // Use mulDiv to avoid amount * price overflow (H-05)
+        // Use mulDiv to avoid amount * price overflow
         valueUSD =
             Math.mulDiv(amount, price * (10 ** 18), 10 ** uint256(tokenDecimals + priceDecimals), Math.Rounding.Ceil);
     }
