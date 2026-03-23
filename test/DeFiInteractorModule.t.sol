@@ -532,7 +532,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Make price feed stale (but keep oracle and Safe value fresh)
         vm.warp(block.timestamp + 25 hours);
         module.updateSafeValue(1_000_000 * 10 ** 18); // Refresh Safe value first
-        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18); // Then refresh oracle
+        module.updateSpendingAllowance(subAccount1, 1, 10000 * 10 ** 18); // Then refresh oracle
 
         bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
@@ -851,7 +851,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Refresh oracle data and price feed (required after time warp)
         priceFeed.setPrice(1_00000000);
         module.updateSafeValue(1_000_000e18);
-        module.updateSpendingAllowance(subAccount1, 0, 50000e18);
+        module.updateSpendingAllowance(subAccount1, 2, 50000e18);
 
         // Spend again — new window, cumulative reset
         vm.prank(subAccount1);
