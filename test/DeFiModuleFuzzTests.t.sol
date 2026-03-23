@@ -235,7 +235,8 @@ contract DeFiModuleFuzzTests is Test {
             bytes4 errorSelector = bytes4(reason);
             assertTrue(
                 errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector
-                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector,
+                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector
+                    || errorSelector == DeFiInteractorModule.ExceedsCumulativeSpendingLimit.selector,
                 "Should not have arithmetic overflow"
             );
         }
@@ -277,7 +278,8 @@ contract DeFiModuleFuzzTests is Test {
             bytes4 errorSelector = bytes4(reason);
             assertTrue(
                 errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector
-                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector,
+                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector
+                    || errorSelector == DeFiInteractorModule.ExceedsCumulativeSpendingLimit.selector,
                 "Should not have arithmetic overflow"
             );
         }
@@ -552,15 +554,17 @@ contract DeFiModuleFuzzTests is Test {
         uint256 maxAllowance = (safeValue * maxBps) / 10000;
 
         // Should succeed when at or below cap
+        uint256 currentVersion = 0;
         if (maxAllowance > 0) {
-            module.updateSpendingAllowance(subAccount, 0, maxAllowance);
+            module.updateSpendingAllowance(subAccount, currentVersion, maxAllowance);
+            currentVersion++;
             assertEq(module.getSpendingAllowance(subAccount), maxAllowance);
         }
 
         // Should revert when above cap (if cap > 0)
         if (maxAllowance < type(uint256).max && maxBps > 0) {
             vm.expectRevert();
-            module.updateSpendingAllowance(subAccount, 0, maxAllowance + 1);
+            module.updateSpendingAllowance(subAccount, currentVersion, maxAllowance + 1);
         }
     }
 
