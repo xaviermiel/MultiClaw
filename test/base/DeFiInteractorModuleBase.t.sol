@@ -76,4 +76,12 @@ abstract contract DeFiInteractorModuleBase is Test {
         // Register parser for protocol (required for spending check operations)
         module.registerParser(address(protocol), address(parser));
     }
+
+    /// @dev Helper: batchUpdate with version 0 for all fields (fresh test state)
+    function _batchUpdate(address subAccount, uint256 newAllowance, address[] memory tokens, uint256[] memory balances)
+        internal
+    {
+        uint256[] memory zeroVersions = new uint256[](tokens.length);
+        module.batchUpdate(subAccount, 0, newAllowance, tokens, zeroVersions, balances);
+    }
 }
