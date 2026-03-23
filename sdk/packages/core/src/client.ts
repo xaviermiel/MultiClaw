@@ -180,8 +180,7 @@ export class MultiClawClient {
       address: moduleAddress,
       abi: DeFiInteractorModuleAbi,
       functionName: "executeOnProtocolWithValue",
-      args: [target, data],
-      value,
+      args: [target, data, value],
       account,
       chain: this.chain,
     });

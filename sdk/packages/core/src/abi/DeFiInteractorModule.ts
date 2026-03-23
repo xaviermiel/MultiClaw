@@ -132,9 +132,10 @@ export const DeFiInteractorModuleAbi = [
     inputs: [
       { name: "target", type: "address", internalType: "address" },
       { name: "data", type: "bytes", internalType: "bytes" },
+      { name: "value", type: "uint256", internalType: "uint256" },
     ],
     outputs: [{ name: "", type: "bytes", internalType: "bytes" }],
-    stateMutability: "payable",
+    stateMutability: "nonpayable",
   },
   {
     type: "function",
@@ -995,6 +996,64 @@ export const DeFiInteractorModuleAbi = [
   { type: "error", name: "StalePortfolioValue", inputs: [] },
   { type: "error", name: "StalePriceFeed", inputs: [] },
   { type: "error", name: "TransactionFailed", inputs: [] },
+  // ============ New Security State ============
+  {
+    type: "function",
+    name: "DEFI_REPAY_ROLE",
+    inputs: [],
+    outputs: [{ name: "", type: "uint16", internalType: "uint16" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "windowStart",
+    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "windowSafeValue",
+    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "cumulativeSpent",
+    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "acquiredGrantWindowStart",
+    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "cumulativeOracleGrantedUSD",
+    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "maxOracleAcquiredBps",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "setMaxOracleAcquiredBps",
+    inputs: [{ name: "newMaxBps", type: "uint256", internalType: "uint256" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  // ============ Errors ============
   { type: "error", name: "Unauthorized", inputs: [] },
   {
     type: "error",
