@@ -189,6 +189,7 @@ Even if the oracle key is compromised, on-chain cumulative counters limit damage
 | **Oracle acquired budget**   | `cumulativeOracleGrantedUSD` caps oracle's acquired grants        | 20%     |
 | **Swap marking (trustless)** | Swap outputs auto-marked acquired on-chain, no oracle needed      | —       |
 | **Per-account USD cap**      | USD-mode sub-accounts capped by `maxSpendingUSD`                  | —       |
+| **Version counters**         | Oracle must pass expected version; stale writes are skipped       | —       |
 
 Max damage per window: `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 40%). See [`oracle/ORACLE_SECURITY.md`](./oracle/ORACLE_SECURITY.md).
 
