@@ -45,6 +45,23 @@ export const DeFiInteractorModuleAbi = [
   },
   {
     type: "function",
+    name: "allowanceVersion",
+    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "acquiredBalanceVersion",
+    inputs: [
+      { name: "subAccount", type: "address", internalType: "address" },
+      { name: "token", type: "address", internalType: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "acquiredBalance",
     inputs: [
       { name: "", type: "address", internalType: "address" },
@@ -82,8 +99,18 @@ export const DeFiInteractorModuleAbi = [
     name: "batchUpdate",
     inputs: [
       { name: "subAccount", type: "address", internalType: "address" },
+      {
+        name: "expectedAllowanceVersion",
+        type: "uint256",
+        internalType: "uint256",
+      },
       { name: "newAllowance", type: "uint256", internalType: "uint256" },
       { name: "tokens", type: "address[]", internalType: "address[]" },
+      {
+        name: "expectedTokenVersions",
+        type: "uint256[]",
+        internalType: "uint256[]",
+      },
       { name: "balances", type: "uint256[]", internalType: "uint256[]" },
     ],
     outputs: [],
@@ -475,6 +502,7 @@ export const DeFiInteractorModuleAbi = [
     inputs: [
       { name: "subAccount", type: "address", internalType: "address" },
       { name: "token", type: "address", internalType: "address" },
+      { name: "expectedVersion", type: "uint256", internalType: "uint256" },
       { name: "newBalance", type: "uint256", internalType: "uint256" },
     ],
     outputs: [],
@@ -494,6 +522,7 @@ export const DeFiInteractorModuleAbi = [
     name: "updateSpendingAllowance",
     inputs: [
       { name: "subAccount", type: "address", internalType: "address" },
+      { name: "expectedVersion", type: "uint256", internalType: "uint256" },
       { name: "newAllowance", type: "uint256", internalType: "uint256" },
     ],
     outputs: [],
