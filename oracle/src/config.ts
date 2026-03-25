@@ -108,14 +108,32 @@ const BASE_TOKENS = {
 };
 
 // ============ Chainlink Base Sepolia Price Feeds ============
+// Source: bgd-labs/aave-address-book AaveV3BaseSepolia + Chainlink docs
 const CHAINLINK_BASE_SEPOLIA = {
-  ETH_USD: "0x4aDC67D04f6Ff2B21933cF4D6919e65E1afFdcB1",
+  ETH_USD: "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",
+  BTC_USD: "0x0FB99723Aee6f420beAD13e6bBB79b7E6F034298",
+  LINK_USD: "0xb113F5A928BCfF189C998ab20d753a47F9dE5A61",
   USDC_USD: "0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165",
+  USDT_USD: "0x3ec8593F930EA45ea58c968260e6e9FF53FC934f",
 };
 
 const BASE_SEPOLIA_TOKENS = {
-  USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  // Underlying tokens
   WETH: "0x4200000000000000000000000000000000000006",
+  USDC_CIRCLE: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  USDC_AAVE: "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f",
+  USDT: "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a",
+  WBTC: "0x54114591963CF60EF3aA63bEfD6eC263D98145a4",
+  LINK: "0x810D46F9a9027E28F9B01F75E2bdde839dA61115",
+  cbETH: "0xD171b9694f7A2597Ed006D41f7509aaD4B485c4B",
+  EURC: "0x808456652fdb597867f38412077A9182bf77359F",
+  // Aave V3 aTokens (Base Sepolia)
+  aWETH: "0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb",
+  aUSDC: "0x10F1A9D11CDf50041f3f8cB7191CBE2f31750ACC",
+  aUSDT: "0xcE3CAae5Ed17A7AafCEEbc897DE843fA6CC0c018",
+  aWBTC: "0x47Db195BAf46898302C06c31bCF46c01C64ACcF9",
+  aLINK: "0x0aD46dE765522399d7b25B438b230A894d72272B",
+  acbETH: "0x9Fd6d1DBAd7c052e0c43f46df36eEc6a68814B63",
 };
 
 // ============ Per-Chain Configurations ============
@@ -333,17 +351,91 @@ const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     confirmationBlocks: 3,
     ethPriceFeedAddress: CHAINLINK_BASE_SEPOLIA.ETH_USD,
     tokens: [
-      {
-        address: BASE_SEPOLIA_TOKENS.USDC,
-        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.USDC_USD,
-        symbol: "USDC",
-        type: "erc20",
-      },
+      // Underlying tokens
       {
         address: BASE_SEPOLIA_TOKENS.WETH,
         priceFeedAddress: CHAINLINK_BASE_SEPOLIA.ETH_USD,
         symbol: "WETH",
         type: "erc20",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.USDC_CIRCLE,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.USDC_USD,
+        symbol: "USDC",
+        type: "erc20",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.USDC_AAVE,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.USDC_USD,
+        symbol: "USDC (Aave)",
+        type: "erc20",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.USDT,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.USDT_USD,
+        symbol: "USDT",
+        type: "erc20",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.WBTC,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.BTC_USD,
+        symbol: "WBTC",
+        type: "erc20",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.LINK,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.LINK_USD,
+        symbol: "LINK",
+        type: "erc20",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.cbETH,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.ETH_USD,
+        symbol: "cbETH",
+        type: "erc20",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.EURC,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.USDC_USD,
+        symbol: "EURC",
+        type: "erc20",
+      },
+      // Aave V3 aTokens (1:1 with underlying)
+      {
+        address: BASE_SEPOLIA_TOKENS.aWETH,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.ETH_USD,
+        symbol: "aBasSepWETH",
+        type: "aave-atoken",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.aUSDC,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.USDC_USD,
+        symbol: "aBasSepUSDC",
+        type: "aave-atoken",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.aUSDT,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.USDT_USD,
+        symbol: "aBasSepUSDT",
+        type: "aave-atoken",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.aWBTC,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.BTC_USD,
+        symbol: "aBasSepWBTC",
+        type: "aave-atoken",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.aLINK,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.LINK_USD,
+        symbol: "aBasSepLINK",
+        type: "aave-atoken",
+      },
+      {
+        address: BASE_SEPOLIA_TOKENS.acbETH,
+        priceFeedAddress: CHAINLINK_BASE_SEPOLIA.ETH_USD,
+        symbol: "aBasSepcbETH",
+        type: "aave-atoken",
       },
     ] as TokenConfig[],
   },

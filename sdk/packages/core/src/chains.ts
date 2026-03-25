@@ -28,10 +28,9 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     chain: baseSepolia,
     defaultRpcUrl: "https://sepolia.base.org",
     addresses: {
-      // TODO: fill after Base Sepolia deployment
-      agentVaultFactory: "0x0000000000000000000000000000000000000000",
-      presetRegistry: "0x0000000000000000000000000000000000000000",
-      moduleRegistry: "0x0000000000000000000000000000000000000000",
+      agentVaultFactory: "0xa4D6FdE6f8F6f873BB00d5059541B657468E6179",
+      presetRegistry: "0x33c487FEf63198c3d88E0F27EC1529bA1f978F60",
+      moduleRegistry: "0x8694D31eCE22F827fd4353C2948B33B0CcCaE76C",
     },
   },
 };
