@@ -1,4 +1,5 @@
-import { MultiClawClient } from "@multiclaw/core";
+// import { MultiClawClient } from "@multiclaw/core";
+import { MultiClawClient } from "../../sdk/packages/core/src/index";
 import { privateKeyToAccount } from "viem/accounts";
 import { formatEther, type Address, type Hex } from "viem";
 

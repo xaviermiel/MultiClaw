@@ -8,11 +8,15 @@
     "dev": "tsx watch src/server.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
     "@multiclaw/core": "file:../sdk/packages/core",
+    "ai": "^4.0.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
     "express": "^4.21.0",
-    "viem": "^2.21.0"
+    "viem": "^2.21.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
