@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { chatHandler } from "./chat";
+import { chatHandler, clearConversation } from "./chat";
 import { statsHandler } from "./stats";
 
 const PORT = parseInt(process.env.PORT || "3001");
@@ -16,6 +16,13 @@ app.post("/api/chat", chatHandler);
 
 // Stats endpoint — returns vault balance and attempt count
 app.get("/api/stats", statsHandler);
+
+// Clear conversation history for a session
+app.post("/api/chat/reset", (req, res) => {
+  const { sessionId = "default" } = req.body;
+  clearConversation(sessionId);
+  res.json({ ok: true });
+});
 
 // Health check
 app.get("/api/health", (_req, res) => {

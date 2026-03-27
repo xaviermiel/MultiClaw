@@ -38,6 +38,13 @@ abstract contract Module {
      * @param _owner The owner address
      */
     constructor(address _avatar, address _target, address _owner) {
+        _initModule(_avatar, _target, _owner);
+    }
+
+    /**
+     * @notice Internal initializer — called by constructor and by proxy initialize()
+     */
+    function _initModule(address _avatar, address _target, address _owner) internal {
         if (_avatar == address(0) || _target == address(0) || _owner == address(0)) {
             revert InvalidAddress();
         }

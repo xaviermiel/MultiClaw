@@ -1,7 +1,7 @@
 /**
  * Failed Transaction Analyzer
  *
- * Analyzes failed transactions on Sepolia by:
+ * Analyzes failed transactions by:
  * 1. Fetching transaction data
  * 2. Decoding the calldata with full argument parsing
  * 3. Re-simulating to get the error (with trace support)
@@ -24,7 +24,7 @@ import {
   type Address,
   type PublicClient,
 } from "viem";
-import { sepolia } from "viem/chains";
+import { sepolia, baseSepolia } from "viem/chains";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -413,12 +413,14 @@ interface TxData {
   hash: string;
 }
 
+const defaultChain = baseSepolia;
+const defaultChainId = defaultChain.id;
+
 // ============ Client Setup ============
-function getClient(): PublicClient {
-  const rpcUrl =
-    process.env.RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
+function getClient(chain = defaultChain): PublicClient {
+  const rpcUrl = process.env.RPC_URL;
   return createPublicClient({
-    chain: sepolia,
+    chain,
     transport: http(rpcUrl),
   });
 }
@@ -783,7 +785,7 @@ function decodeContractError(
 // ============ Tenderly Trace Fetching ============
 async function fetchTenderlyTrace(
   txHash: string,
-  chainId: number = 11155111, // Sepolia
+  chainId: number = defaultChainId,
 ): Promise<{ errorData?: Hex; error?: string } | null> {
   try {
     const response = await fetch(

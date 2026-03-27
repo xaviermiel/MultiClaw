@@ -237,6 +237,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error NeitherLimitModeSet();
     error ExceedsCumulativeSpendingLimit(uint256 cumulative, uint256 maximum);
     error ExceedsOracleAcquiredBudget(uint256 cumulative, uint256 maximum);
+    error AlreadyInitialized();
 
     // ============ Modifiers ============
 
@@ -245,16 +246,35 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         _;
     }
 
+    /// @dev Guards against double-initialization (for proxy deployments)
+    bool private _initialized;
+
     // ============ Constructor ============
 
     /**
-     * @notice Initialize the DeFi Interactor Module
+     * @notice Initialize the DeFi Interactor Module (direct deployment)
      * @param _avatar The Safe address (avatar)
      * @param _owner The owner address (typically the Safe itself)
      * @param _authorizedOracle The Chainlink CRE address authorized to update state
      */
     constructor(address _avatar, address _owner, address _authorizedOracle) Module(_avatar, _avatar, _owner) {
         if (_authorizedOracle == address(0)) revert InvalidOracleAddress();
+        authorizedOracle = _authorizedOracle;
+        _initialized = true;
+    }
+
+    /**
+     * @notice Initialize a proxy clone of this module
+     * @dev Called by AgentVaultFactory after cloning the implementation. Can only be called once.
+     * @param _avatar The Safe address (avatar)
+     * @param _owner The owner address (factory, then transferred to Safe)
+     * @param _authorizedOracle The Chainlink CRE address authorized to update state
+     */
+    function initialize(address _avatar, address _owner, address _authorizedOracle) external {
+        if (_initialized) revert AlreadyInitialized();
+        _initialized = true;
+        if (_authorizedOracle == address(0)) revert InvalidOracleAddress();
+        _initModule(_avatar, _avatar, _owner);
         authorizedOracle = _authorizedOracle;
     }
 

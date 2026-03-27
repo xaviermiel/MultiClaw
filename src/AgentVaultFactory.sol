@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {DeFiInteractorModule} from "./DeFiInteractorModule.sol";
 import {IModuleRegistry} from "./interfaces/IModuleRegistry.sol";
 import {PresetRegistry} from "./PresetRegistry.sol";
@@ -19,6 +20,9 @@ import {PresetRegistry} from "./PresetRegistry.sol";
  */
 contract AgentVaultFactory is Ownable {
     // ============ State Variables ============
+
+    /// @notice Implementation contract cloned for each new module
+    address public implementation;
 
     /// @notice Registry for module registration
     IModuleRegistry public registry;
@@ -57,12 +61,14 @@ contract AgentVaultFactory is Ownable {
     event AgentVaultCreated(address indexed safe, address indexed agentAddress, address module, uint256 presetId);
     event RegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event PresetRegistryUpdated(address indexed oldPresetRegistry, address indexed newPresetRegistry);
+    event ImplementationUpdated(address indexed oldImplementation, address indexed newImplementation);
 
     // ============ Errors ============
 
     error InvalidAddress();
     error InvalidConfig();
     error PresetRegistryNotSet();
+    error ImplementationNotSet();
     error ArrayLengthMismatch();
     error SafeAlreadyHasModule(address safe, address existingModule);
 
@@ -73,13 +79,28 @@ contract AgentVaultFactory is Ownable {
      * @param _initialOwner The factory owner (MultiClaw team)
      * @param _registry The ModuleRegistry address (can be address(0) initially)
      * @param _presetRegistry The PresetRegistry address (can be address(0) if not using presets)
+     * @param _implementation The DeFiInteractorModule implementation to clone
      */
-    constructor(address _initialOwner, address _registry, address _presetRegistry) Ownable(_initialOwner) {
+    constructor(address _initialOwner, address _registry, address _presetRegistry, address _implementation)
+        Ownable(_initialOwner)
+    {
         registry = IModuleRegistry(_registry);
         presetRegistry = PresetRegistry(_presetRegistry);
+        implementation = _implementation;
     }
 
     // ============ Configuration ============
+
+    /**
+     * @notice Set the DeFiInteractorModule implementation address
+     * @param _implementation The new implementation address
+     */
+    function setImplementation(address _implementation) external onlyOwner {
+        if (_implementation == address(0)) revert InvalidAddress();
+        address old = implementation;
+        implementation = _implementation;
+        emit ImplementationUpdated(old, _implementation);
+    }
 
     /**
      * @notice Set the module registry address
@@ -217,25 +238,23 @@ contract AgentVaultFactory is Ownable {
     // ============ Internal: Deployment ============
 
     /**
-     * @notice Deploy a DeFiInteractorModule with CREATE2
-     * @dev Module is deployed with avatar=safe, owner=factory (temporary), oracle.
+     * @notice Deploy a DeFiInteractorModule clone with CREATE2
+     * @dev Clones the implementation using ERC-1167 minimal proxy, then initializes it.
      *      Factory configures the module, then transfers ownership to the Safe.
      * @param safe The Safe address (becomes avatar and eventual owner)
      * @param oracle The authorized oracle address
      * @return module The deployed module address
      */
     function _deployModule(address safe, address oracle) internal returns (address module) {
+        if (implementation == address(0)) revert ImplementationNotSet();
         uint256 nonce = vaultNonce[safe]++;
         bytes32 salt = keccak256(abi.encodePacked(safe, nonce));
 
-        // Deploy with avatar=safe, owner=this (factory), oracle
-        module = address(
-            new DeFiInteractorModule{salt: salt}(
-                safe, // avatar (the Safe)
-                address(this), // temporary owner (factory configures, then transfers)
-                oracle // authorized oracle
-            )
-        );
+        // Clone the implementation deterministically
+        module = Clones.cloneDeterministic(implementation, salt);
+
+        // Initialize: avatar=safe, owner=this (factory configures, then transfers), oracle
+        DeFiInteractorModule(module).initialize(safe, address(this), oracle);
 
         _deployedModules[safe].push(module);
     }
@@ -290,16 +309,12 @@ contract AgentVaultFactory is Ownable {
     /**
      * @notice Compute the address a module would be deployed to
      * @param safe The Safe address
-     * @param oracle The oracle address
      * @return predicted The predicted module address
      */
-    function computeModuleAddress(address safe, address oracle) external view returns (address predicted) {
+    function computeModuleAddress(address safe) external view returns (address predicted) {
         uint256 nonce = vaultNonce[safe];
         bytes32 salt = keccak256(abi.encodePacked(safe, nonce));
-        bytes memory bytecode =
-            abi.encodePacked(type(DeFiInteractorModule).creationCode, abi.encode(safe, address(this), oracle));
-        bytes32 hash = keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, keccak256(bytecode)));
-        return address(uint160(uint256(hash)));
+        return Clones.predictDeterministicAddress(implementation, salt, address(this));
     }
 
     /**

@@ -53,10 +53,11 @@ contract AgentVaultFactoryTest is Test {
         // Deploy mock price feed
         priceFeed = new MockChainlinkPriceFeed(100000000000, 8); // $1000 with 8 decimals
 
-        // Deploy registry and factory
+        // Deploy registry, implementation, and factory
         registry = new ModuleRegistry(owner);
         presetRegistry = new PresetRegistry(owner);
-        factory = new AgentVaultFactory(owner, address(registry), address(presetRegistry));
+        DeFiInteractorModule impl = new DeFiInteractorModule(owner, owner, owner);
+        factory = new AgentVaultFactory(owner, address(registry), address(presetRegistry), address(impl));
 
         // Authorize factory in registry
         registry.authorizeFactory(address(factory));
@@ -142,7 +143,8 @@ contract AgentVaultFactoryTest is Test {
     }
 
     function testConstructorWithoutRegistries() public {
-        AgentVaultFactory f = new AgentVaultFactory(owner, address(0), address(0));
+        DeFiInteractorModule impl = new DeFiInteractorModule(owner, owner, owner);
+        AgentVaultFactory f = new AgentVaultFactory(owner, address(0), address(0), address(impl));
         assertEq(address(f.registry()), address(0));
         assertEq(address(f.presetRegistry()), address(0));
     }
@@ -338,7 +340,7 @@ contract AgentVaultFactoryTest is Test {
     function testDeployVaultDeterministicAddress() public {
         AgentVaultFactory.VaultConfig memory config = _buildConfig(address(safe1));
 
-        address predicted = factory.computeModuleAddress(address(safe1), oracle);
+        address predicted = factory.computeModuleAddress(address(safe1));
         address module = factory.deployVault(config);
 
         assertEq(module, predicted);
@@ -380,7 +382,8 @@ contract AgentVaultFactoryTest is Test {
     }
 
     function testDeployFromPresetRevertsIfNoPresetRegistry() public {
-        AgentVaultFactory factoryNoPr = new AgentVaultFactory(owner, address(registry), address(0));
+        DeFiInteractorModule impl = new DeFiInteractorModule(owner, owner, owner);
+        AgentVaultFactory factoryNoPr = new AgentVaultFactory(owner, address(registry), address(0), address(impl));
         registry.authorizeFactory(address(factoryNoPr));
 
         address[] memory empty = new address[](0);
@@ -460,7 +463,8 @@ contract AgentVaultFactoryTest is Test {
     // ============ No Registry Tests ============
 
     function testDeployVaultWithoutRegistry() public {
-        AgentVaultFactory factoryNoReg = new AgentVaultFactory(owner, address(0), address(presetRegistry));
+        DeFiInteractorModule impl = new DeFiInteractorModule(owner, owner, owner);
+        AgentVaultFactory factoryNoReg = new AgentVaultFactory(owner, address(0), address(presetRegistry), address(impl));
 
         AgentVaultFactory.VaultConfig memory config = _buildConfig(address(safe1));
         address module = factoryNoReg.deployVault(config);
