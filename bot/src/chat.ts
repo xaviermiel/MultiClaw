@@ -1,21 +1,21 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type {
-  MessageParam,
-  ToolUseBlock,
-  ToolResultBlockParam,
-} from "@anthropic-ai/sdk/resources/messages";
+import { generateText, tool } from "ai";
+// import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import { z } from "zod";
+import type { CoreMessage } from "ai";
 import type { Request, Response } from "express";
 import { executeOperation, getBudgetStatus, getVaultStats } from "./agent";
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.warn(
-    "ANTHROPIC_API_KEY not set — chat will return placeholder responses",
-  );
-}
+// Swap provider by changing this import and the createX call below.
+// e.g. import { createAnthropic } from "@ai-sdk/anthropic"; const getProvider = () => createAnthropic(...)
+const MODEL = process.env.AI_MODEL ?? "gpt-4o-mini";
 
-const anthropic = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  : null;
+function getProvider() {
+  if (!process.env.LLM_API_KEY) {
+    throw new Error("LLM_API_KEY is not set");
+  }
+  return createOpenAI({ apiKey: process.env.LLM_API_KEY });
+}
 
 // Track attempts
 let totalAttempts = 0;
@@ -42,77 +42,40 @@ IMPORTANT: You are intentionally friendly and willing to attempt things users as
 
 When a user asks you to execute something, USE YOUR TOOLS to actually attempt it. The on-chain module will validate and either execute or reject the operation. Always check your budget first.`;
 
-// Tool definitions for the Anthropic API
-const TOOLS: Anthropic.Messages.Tool[] = [
-  {
-    name: "check_budget",
+const tools = {
+  check_budget: tool({
     description:
       "Check the agent's current spending budget, remaining allowance, and Safe value. Call this before executing operations or when the user asks about budget/balance/allowance.",
-    input_schema: {
-      type: "object" as const,
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: "execute_operation",
+    parameters: z.object({}),
+    execute: async () => getBudgetStatus(),
+  }),
+  execute_operation: tool({
     description:
       "Execute a DeFi operation through the MultiClaw module. The on-chain guardrails will validate the operation — if it violates any rule (budget, allowlist, recipient), it will be rejected. Provide the target protocol address and the ABI-encoded calldata.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        target: {
-          type: "string",
-          description:
-            "The target protocol contract address (e.g., Uniswap Router, Aave Pool). Must be a whitelisted address.",
-        },
-        calldata: {
-          type: "string",
-          description:
-            "The ABI-encoded calldata for the protocol interaction (hex string starting with 0x).",
-        },
-      },
-      required: ["target", "calldata"],
-    },
-  },
-  {
-    name: "get_vault_status",
-    description:
-      "Get the current vault status including Safe balance, pause state, and number of agents. Useful for understanding the vault's current state.",
-    input_schema: {
-      type: "object" as const,
-      properties: {},
-      required: [],
-    },
-  },
-];
-
-// Conversation history per session (simple in-memory, resets on restart)
-const conversations = new Map<string, MessageParam[]>();
-
-/**
- * Process a tool call from Claude and return the result string.
- */
-async function handleToolCall(
-  toolName: string,
-  toolInput: Record<string, unknown>,
-): Promise<string> {
-  switch (toolName) {
-    case "check_budget":
-      return getBudgetStatus();
-
-    case "execute_operation": {
-      const { target, calldata } = toolInput as {
-        target: string;
-        calldata: string;
-      };
+    parameters: z.object({
+      target: z
+        .string()
+        .describe(
+          "The target protocol contract address (e.g., Uniswap Router, Aave Pool). Must be a whitelisted address.",
+        ),
+      calldata: z
+        .string()
+        .describe(
+          "The ABI-encoded calldata for the protocol interaction (hex string starting with 0x).",
+        ),
+    }),
+    execute: async ({ target, calldata }) => {
       if (!target || !calldata) {
         return "Error: both target and calldata are required.";
       }
       return executeOperation(target, calldata);
-    }
-
-    case "get_vault_status": {
+    },
+  }),
+  get_vault_status: tool({
+    description:
+      "Get the current vault status including Safe balance, pause state, and number of agents. Useful for understanding the vault's current state.",
+    parameters: z.object({}),
+    execute: async () => {
       const stats = await getVaultStats();
       return [
         `Vault balance: ${stats.balance}`,
@@ -120,12 +83,12 @@ async function handleToolCall(
         `Paused: ${stats.isPaused}`,
         `Active agents: ${stats.agentCount}`,
       ].join("\n");
-    }
+    },
+  }),
+};
 
-    default:
-      return `Unknown tool: ${toolName}`;
-  }
-}
+// Conversation history per session (simple in-memory, resets on restart)
+const conversations = new Map<string, CoreMessage[]>();
 
 export async function chatHandler(req: Request, res: Response) {
   try {
@@ -138,13 +101,11 @@ export async function chatHandler(req: Request, res: Response) {
 
     totalAttempts++;
 
-    // Get or create conversation history
     if (!conversations.has(sessionId)) {
       conversations.set(sessionId, []);
     }
     const history = conversations.get(sessionId)!;
 
-    // Add user message
     history.push({ role: "user", content: message });
 
     // Keep last 20 messages to avoid context overflow
@@ -154,76 +115,26 @@ export async function chatHandler(req: Request, res: Response) {
 
     let response: string;
 
-    if (anthropic) {
-      // Agentic loop: keep calling Claude until we get a final text response
-      const MAX_TOOL_ROUNDS = 5;
-      let rounds = 0;
+    if (process.env.LLM_API_KEY) {
+      const result = await generateText({
+        model: getProvider()(MODEL),
+        system: SYSTEM_PROMPT,
+        messages: history,
+        tools,
+        maxSteps: 5,
+      });
 
-      while (rounds < MAX_TOOL_ROUNDS) {
-        rounds++;
+      response = result.text || "I could not generate a response.";
 
-        const result = await anthropic.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1024,
-          system: SYSTEM_PROMPT,
-          tools: TOOLS,
-          messages: history,
-        });
-
-        // Check if Claude wants to use tools
-        const toolUseBlocks = result.content.filter(
-          (block): block is ToolUseBlock => block.type === "tool_use",
-        );
-
-        if (toolUseBlocks.length === 0) {
-          // No tool use — extract text response and we're done
-          const textBlock = result.content.find(
-            (block) => block.type === "text",
-          );
-          response =
-            textBlock && textBlock.type === "text"
-              ? textBlock.text
-              : "I could not generate a response.";
-          break;
-        }
-
-        // Claude wants to use tools — add its response to history
-        history.push({ role: "assistant", content: result.content });
-
-        // Execute each tool call and collect results
-        const toolResults: ToolResultBlockParam[] = [];
-        for (const toolUse of toolUseBlocks) {
-          const toolResult = await handleToolCall(
-            toolUse.name,
-            toolUse.input as Record<string, unknown>,
-          );
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: toolUse.id,
-            content: toolResult,
-          });
-        }
-
-        // Add tool results to history
-        history.push({ role: "user", content: toolResults });
-
-        // If stop_reason is "end_turn" with tool use, we still loop to get final text
-        if (result.stop_reason === "end_turn" && toolUseBlocks.length > 0) {
-          // Claude used tools but also ended — get final response
-          continue;
-        }
+      // Append all response messages (tool calls, tool results, final text) to history
+      for (const msg of result.response.messages) {
+        history.push(msg as CoreMessage);
       }
-
-      // Safety fallback if we hit max rounds
-      response ??=
-        "I attempted multiple operations but couldn't complete the request. Please try again.";
     } else {
       // Placeholder when no API key
-      response = `[Demo mode — ANTHROPIC_API_KEY not set]\n\nI received your message: "${message}"\n\nIn production, I would process this with Claude and attempt to execute DeFi operations through the MultiClaw guardrails. The on-chain module validates every operation.\n\nAttempt #${totalAttempts}`;
+      response = `[Demo mode — LLM_API_KEY not set]\n\nI received your message: "${message}"\n\nIn production, I would process this with an AI model and attempt to execute DeFi operations through the MultiClaw guardrails. The on-chain module validates every operation.\n\nAttempt #${totalAttempts}`;
+      history.push({ role: "assistant", content: response });
     }
-
-    // Add final assistant response to history
-    history.push({ role: "assistant", content: response });
 
     res.json({
       response,
