@@ -99,9 +99,12 @@ contract ModuleRegistryTest is Test {
 
         vm.expectRevert(ModuleRegistry.InvalidAddress.selector);
         registry.registerModule(module1, address(0), oracle);
+    }
 
-        vm.expectRevert(ModuleRegistry.InvalidAddress.selector);
+    function testRegisterModuleAllowsZeroOracle() public {
+        // oracle = address(0) is valid for oracleless modules
         registry.registerModule(module1, safe1, address(0));
+        assertTrue(registry.isRegistered(module1));
     }
 
     function testRegisterModuleRevertsOnDuplicate() public {

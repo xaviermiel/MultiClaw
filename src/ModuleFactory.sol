@@ -142,13 +142,13 @@ contract ModuleFactory is Ownable {
      * @return module The deployed module address
      */
     function _deployModule(address safe, address oracle, uint256 nonce) internal returns (address module) {
-        // Validate addresses
-        if (safe == address(0) || oracle == address(0)) {
+        // Validate addresses — oracle can be address(0) for oracleless mode
+        if (safe == address(0)) {
             revert InvalidAddress();
         }
 
         // Validate oracle is not Safe or Factory (prevents self-authorization)
-        if (oracle == safe || oracle == address(this)) {
+        if (oracle != address(0) && (oracle == safe || oracle == address(this))) {
             revert InvalidOracleAddress(oracle);
         }
 

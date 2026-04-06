@@ -172,12 +172,15 @@ contract ModuleFactoryTest is Test {
         assertEq(modules[0], module);
     }
 
-    function testDeployModuleRevertsOnZeroAddress() public {
+    function testDeployModuleRevertsOnZeroSafe() public {
         vm.expectRevert(ModuleFactory.InvalidAddress.selector);
         factory.deployModule(address(0), oracle);
+    }
 
-        vm.expectRevert(ModuleFactory.InvalidAddress.selector);
-        factory.deployModule(address(safe1), address(0));
+    function testDeployModuleAllowsZeroOracle() public {
+        // oracle = address(0) is valid for oracleless mode
+        address module = factory.deployModule(address(safe1), address(0));
+        assertTrue(module != address(0));
     }
 
     function testDeployModulePermissionless() public {

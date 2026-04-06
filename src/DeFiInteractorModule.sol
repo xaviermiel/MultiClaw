@@ -239,6 +239,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error ExceedsOracleAcquiredBudget(uint256 cumulative, uint256 maximum);
     error AlreadyInitialized();
     error OraclelessRequiresUSDMode();
+    error SubAccountHasBPSLimits(address subAccount);
 
     // ============ Modifiers ============
 
@@ -277,6 +278,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // address(0) = oracleless mode (spending governed solely by on-chain cumulative limits)
         _initModule(_avatar, _avatar, _owner);
         authorizedOracle = _authorizedOracle;
+        // Set defaults that inline initializers provide for constructor-deployed contracts
+        // but are zero-initialized in ERC-1167 clones (clones skip the constructor)
+        maxOracleAge = 60 minutes;
+        maxSafeValueAge = 60 minutes;
+        maxPriceFeedAge = 24 hours;
+        absoluteMaxSpendingBps = 2000;
+        maxOracleAcquiredBps = 2000;
     }
 
     // ============ Emergency Controls ============
@@ -719,7 +727,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
-        // 6. Emit event for oracle to:
+        // 6. WITHDRAW/CLAIM outputs are NOT auto-marked as acquired.
+        //    In oracle mode: the oracle grants acquired status only if matched to a prior deposit.
+        //    In oracleless mode: same policy — withdrawn tokens are treated as original tokens.
+        //    This prevents the deposit-withdraw "laundering" cycle where original tokens
+        //    could be converted to acquired status and re-used without spending cost.
+
+        // 7. Emit event for oracle to:
         //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
         emit ProtocolExecution(
             subAccount,
@@ -791,7 +805,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         returns (bytes memory)
     {
         // 1. Extract spender and amount from calldata
-        // approve(address spender, uint256 amount) - spender is first arg, amount is second
+        // approve(address spender, uint256 amount) - selector(4) + address(32) + uint256(32) = 68 bytes
+        if (data.length < 68) revert LengthMismatch();
         address spender;
         uint256 amount;
         assembly {
@@ -817,9 +832,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             uint256 originalValueUSD = _estimateTokenValueUSD(tokenIn, originalPortion);
             if (isOracleless()) {
                 // In oracleless mode, cap against remaining cumulative budget
-                (, uint256 maxSpendingUSD,) = getSubAccountLimits(subAccount);
-                uint256 remaining =
-                    maxSpendingUSD > cumulativeSpent[subAccount] ? maxSpendingUSD - cumulativeSpent[subAccount] : 0;
+                (, uint256 maxSpendingUSD, uint256 windowDuration) = getSubAccountLimits(subAccount);
+                // Account for expired window — next spending op will reset cumulativeSpent to 0
+                uint256 spent = cumulativeSpent[subAccount];
+                if (windowStart[subAccount] != 0 && block.timestamp > windowStart[subAccount] + windowDuration) {
+                    spent = 0;
+                }
+                uint256 remaining = maxSpendingUSD > spent ? maxSpendingUSD - spent : 0;
                 if (originalValueUSD > remaining) {
                     revert ApprovalExceedsLimit();
                 }
@@ -1011,8 +1030,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     }
 
     /// @notice Set the authorized oracle address. Use address(0) for oracleless mode.
+    /// @dev When switching to oracleless, reverts if any sub-account has BPS-only limits.
     function setAuthorizedOracle(address newOracle) external onlyOwner {
-        // address(0) = oracleless mode (no oracle dependency)
         if (newOracle != address(0)) {
             // Prevent Safe or Module from being oracle
             if (newOracle == avatar || newOracle == address(this)) revert CannotBeOracle(newOracle);
@@ -1022,6 +1041,18 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
                     || subAccountRoles[newOracle][DEFI_REPAY_ROLE]
             ) {
                 revert CannotBeOracle(newOracle);
+            }
+        } else {
+            // Switching to oracleless — verify all sub-accounts use USD mode
+            uint16[3] memory roles = [DEFI_EXECUTE_ROLE, DEFI_TRANSFER_ROLE, DEFI_REPAY_ROLE];
+            for (uint256 r = 0; r < 3; r++) {
+                address[] storage accounts = subaccounts[roles[r]];
+                for (uint256 i = 0; i < accounts.length; i++) {
+                    SubAccountLimits storage limits = subAccountLimits[accounts[i]];
+                    if (!limits.isConfigured || limits.maxSpendingUSD == 0) {
+                        revert SubAccountHasBPSLimits(accounts[i]);
+                    }
+                }
             }
         }
         address oldOracle = authorizedOracle;
@@ -1043,6 +1074,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     function setMaxOracleAcquiredBps(uint256 newMaxBps) external onlyOwner {
         if (newMaxBps > 10000) revert ExceedsMaxBps();
         maxOracleAcquiredBps = newMaxBps;
+    }
+
+    /// @notice Set the maximum oracle data age before operations are blocked
+    /// @param newMaxAge New maximum age in seconds (minimum 10 minutes)
+    function setMaxOracleAge(uint256 newMaxAge) external onlyOwner {
+        if (newMaxAge < 10 minutes) revert InvalidLimitConfiguration();
+        maxOracleAge = newMaxAge;
+    }
+
+    /// @notice Set the maximum Safe value age before considered stale
+    /// @param newMaxAge New maximum age in seconds (minimum 10 minutes)
+    function setMaxSafeValueAge(uint256 newMaxAge) external onlyOwner {
+        if (newMaxAge < 10 minutes) revert InvalidLimitConfiguration();
+        maxSafeValueAge = newMaxAge;
+    }
+
+    /// @notice Set the maximum Chainlink price feed data age
+    /// @param newMaxAge New maximum age in seconds (minimum 1 hour)
+    function setMaxPriceFeedAge(uint256 newMaxAge) external onlyOwner {
+        if (newMaxAge < 1 hours) revert InvalidLimitConfiguration();
+        maxPriceFeedAge = newMaxAge;
     }
 
     // ============ Price Feed Functions ============

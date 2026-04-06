@@ -111,7 +111,8 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      * @param oracle The oracle address
      */
     function _registerModule(address module, address safe, address oracle) internal {
-        if (module == address(0) || safe == address(0) || oracle == address(0)) {
+        // oracle can be address(0) for oracleless modules
+        if (module == address(0) || safe == address(0)) {
             revert InvalidAddress();
         }
         if (_isRegistered[module]) {

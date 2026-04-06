@@ -8,6 +8,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockProtocol} from "./mocks/MockProtocol.sol";
 import {MockChainlinkPriceFeed} from "./mocks/MockChainlinkPriceFeed.sol";
 import {MockParser} from "./mocks/MockParser.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 /**
  * @title OraclelessModeTest
@@ -288,5 +289,128 @@ contract OraclelessModeTest is Test {
         vm.prank(agent);
         vm.expectRevert(DeFiInteractorModule.ApprovalExceedsLimit.selector);
         module.executeOnProtocol(address(token), data);
+    }
+
+    // ============ WITHDRAW does NOT auto-mark acquired in oracleless ============
+
+    function testWithdrawOutputNotMarkedAcquiredInOracleless() public {
+        _setupAgent();
+
+        // First deposit $500 (costs spending)
+        bytes memory depositData = abi.encodeWithSelector(DEPOSIT_SELECTOR, 500e18, address(safe));
+        vm.prank(agent);
+        module.executeOnProtocol(address(protocol), depositData);
+        assertEq(module.cumulativeSpent(agent), 500e18);
+
+        // Withdraw — output is NOT marked acquired in oracleless (same as oracle mode)
+        // This prevents the deposit-withdraw "laundering" cycle
+        bytes memory withdrawData = abi.encodeWithSelector(WITHDRAW_SELECTOR, 500e18, address(safe));
+        vm.prank(agent);
+        module.executeOnProtocol(address(protocol), withdrawData);
+
+        // Withdraw is free (no spending cost) but tokens are NOT acquired
+        assertEq(module.cumulativeSpent(agent), 500e18);
+        assertEq(module.acquiredBalance(agent, address(token)), 0);
+    }
+
+    // ============ Fix #3: Approve cap handles expired window ============
+
+    function testApproveCapResetsOnExpiredWindow() public {
+        _setupAgent(); // $1000/day
+
+        // Spend $900 in window 1
+        bytes memory data = abi.encodeWithSelector(DEPOSIT_SELECTOR, 900e18, address(safe));
+        vm.prank(agent);
+        module.executeOnProtocol(address(protocol), data);
+
+        // Advance past window
+        vm.warp(block.timestamp + 1 days + 1);
+        priceFeed.setPrice(1_00000000);
+
+        // Approve $800 — should succeed because window expired (fresh $1000 budget)
+        bytes memory approveData = abi.encodeWithSelector(APPROVE_SELECTOR, address(protocol), 800e18);
+        vm.prank(agent);
+        module.executeOnProtocol(address(token), approveData);
+    }
+
+    // ============ Fix #5: setAuthorizedOracle rejects BPS sub-accounts ============
+
+    function testSwitchToOraclelessRevertsWithBPSSubAccounts() public {
+        // Deploy with oracle
+        DeFiInteractorModule m2 = new DeFiInteractorModule(address(safe), owner, makeAddr("oracle2"));
+
+        // Configure sub-account with BPS limits
+        address agent2 = makeAddr("agent2");
+        m2.grantRole(agent2, m2.DEFI_EXECUTE_ROLE());
+        m2.setSubAccountLimits(agent2, 500, 0, 1 days); // BPS mode
+
+        // Switching to oracleless should revert
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.SubAccountHasBPSLimits.selector, agent2));
+        m2.setAuthorizedOracle(address(0));
+    }
+
+    function testSwitchToOraclelessSucceedsWithUSDSubAccounts() public {
+        // Deploy with oracle
+        DeFiInteractorModule m2 = new DeFiInteractorModule(address(safe), owner, makeAddr("oracle3"));
+
+        // Configure sub-account with USD limits
+        address agent2 = makeAddr("agent2");
+        m2.grantRole(agent2, m2.DEFI_EXECUTE_ROLE());
+        m2.setSubAccountLimits(agent2, 0, 1000e18, 1 days); // USD mode
+
+        // Switching to oracleless should succeed
+        m2.setAuthorizedOracle(address(0));
+        assertTrue(m2.isOracleless());
+    }
+
+    // ============ Fix #5b: Unconfigured sub-accounts also blocked ============
+
+    function testSwitchToOraclelessRevertsWithUnconfiguredSubAccounts() public {
+        // Deploy with oracle
+        DeFiInteractorModule m2 = new DeFiInteractorModule(address(safe), owner, makeAddr("oracle4"));
+
+        // Grant role but do NOT configure limits (defaults to BPS mode)
+        address agent2 = makeAddr("agent2");
+        m2.grantRole(agent2, m2.DEFI_EXECUTE_ROLE());
+
+        // Switching to oracleless should revert (unconfigured = default BPS)
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.SubAccountHasBPSLimits.selector, agent2));
+        m2.setAuthorizedOracle(address(0));
+    }
+
+    // ============ Clone initialization defaults ============
+
+    function testCloneInitializationSetsDefaults() public {
+        // Deploy implementation
+        DeFiInteractorModule impl = new DeFiInteractorModule(address(safe), owner, owner);
+
+        // Clone it (simulating what the factory does)
+        address cloneAddr = Clones.cloneDeterministic(address(impl), bytes32(uint256(42)));
+        DeFiInteractorModule clone = DeFiInteractorModule(cloneAddr);
+        clone.initialize(address(safe), owner, address(0)); // oracleless clone
+
+        // Verify defaults are set correctly
+        assertEq(clone.maxOracleAge(), 60 minutes);
+        assertEq(clone.maxSafeValueAge(), 60 minutes);
+        assertEq(clone.maxPriceFeedAge(), 24 hours);
+        assertEq(clone.absoluteMaxSpendingBps(), 2000);
+        assertEq(clone.maxOracleAcquiredBps(), 2000);
+    }
+
+    // ============ Staleness setters ============
+
+    function testSetMaxOracleAge() public {
+        module.setMaxOracleAge(30 minutes);
+        assertEq(module.maxOracleAge(), 30 minutes);
+    }
+
+    function testSetMaxSafeValueAge() public {
+        module.setMaxSafeValueAge(2 hours);
+        assertEq(module.maxSafeValueAge(), 2 hours);
+    }
+
+    function testSetMaxPriceFeedAge() public {
+        module.setMaxPriceFeedAge(12 hours);
+        assertEq(module.maxPriceFeedAge(), 12 hours);
     }
 }

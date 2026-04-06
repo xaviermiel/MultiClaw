@@ -212,6 +212,9 @@ contract AgentVaultFactory is Ownable {
             uint8[] memory selectorTypes
         ) = presetRegistry.getPresetFull(presetId);
 
+        // Oracleless mode requires USD spending limits
+        if (oracle == address(0) && maxSpendingUSD == 0) revert InvalidConfig();
+
         // 1. Deploy module with CREATE2
         module = _deployModule(safe, oracle);
         DeFiInteractorModule m = DeFiInteractorModule(module);
