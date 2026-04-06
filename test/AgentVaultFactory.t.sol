@@ -402,11 +402,11 @@ contract AgentVaultFactoryTest is Test {
         factory.deployVault(config);
     }
 
-    function testDeployVaultRevertsOnZeroOracle() public {
+    function testDeployVaultOraclelessRequiresUSDMode() public {
         AgentVaultFactory.VaultConfig memory config = _buildConfig(address(safe1));
         config.oracle = address(0);
-
-        vm.expectRevert(AgentVaultFactory.InvalidAddress.selector);
+        // BPS mode (maxSpendingUSD == 0) is not allowed in oracleless mode
+        vm.expectRevert(AgentVaultFactory.InvalidConfig.selector);
         factory.deployVault(config);
     }
 
@@ -464,7 +464,8 @@ contract AgentVaultFactoryTest is Test {
 
     function testDeployVaultWithoutRegistry() public {
         DeFiInteractorModule impl = new DeFiInteractorModule(owner, owner, owner);
-        AgentVaultFactory factoryNoReg = new AgentVaultFactory(owner, address(0), address(presetRegistry), address(impl));
+        AgentVaultFactory factoryNoReg =
+            new AgentVaultFactory(owner, address(0), address(presetRegistry), address(impl));
 
         AgentVaultFactory.VaultConfig memory config = _buildConfig(address(safe1));
         address module = factoryNoReg.deployVault(config);

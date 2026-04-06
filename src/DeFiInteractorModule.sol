@@ -238,6 +238,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error ExceedsCumulativeSpendingLimit(uint256 cumulative, uint256 maximum);
     error ExceedsOracleAcquiredBudget(uint256 cumulative, uint256 maximum);
     error AlreadyInitialized();
+    error OraclelessRequiresUSDMode();
 
     // ============ Modifiers ============
 
@@ -258,7 +259,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param _authorizedOracle The Chainlink CRE address authorized to update state
      */
     constructor(address _avatar, address _owner, address _authorizedOracle) Module(_avatar, _avatar, _owner) {
-        if (_authorizedOracle == address(0)) revert InvalidOracleAddress();
+        // address(0) = oracleless mode (spending governed solely by on-chain cumulative limits)
         authorizedOracle = _authorizedOracle;
         _initialized = true;
     }
@@ -273,7 +274,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     function initialize(address _avatar, address _owner, address _authorizedOracle) external {
         if (_initialized) revert AlreadyInitialized();
         _initialized = true;
-        if (_authorizedOracle == address(0)) revert InvalidOracleAddress();
+        // address(0) = oracleless mode (spending governed solely by on-chain cumulative limits)
         _initModule(_avatar, _avatar, _owner);
         authorizedOracle = _authorizedOracle;
     }
@@ -390,6 +391,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (subAccount == avatar || subAccount == address(this)) revert CannotBeSubaccount(subAccount);
         if (maxSpendingBps > 0 && maxSpendingUSD > 0) revert BothLimitModesSet();
         if (maxSpendingBps == 0 && maxSpendingUSD == 0) revert NeitherLimitModeSet();
+        // Oracleless mode requires USD limits (BPS needs safe value from oracle)
+        if (isOracleless() && maxSpendingUSD == 0) revert OraclelessRequiresUSDMode();
         if (maxSpendingBps > 10000 || windowDuration < 1 hours) {
             revert InvalidLimitConfiguration();
         }
@@ -627,14 +630,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
 
         // 7. Check spending allowance (reverts restore all state changes including acquired balance)
-        if (spendingCost > spendingAllowance[subAccount]) {
-            revert ExceedsSpendingLimit();
-        }
+        //    In oracleless mode, skip oracle-managed allowance — only cumulative cap applies
+        if (!isOracleless()) {
+            if (spendingCost > spendingAllowance[subAccount]) {
+                revert ExceedsSpendingLimit();
+            }
 
-        // 8. Deduct spending allowance and track cumulative spending
-        if (spendingCost > 0) {
-            spendingAllowance[subAccount] -= spendingCost;
-            allowanceVersion[subAccount]++;
+            // 8. Deduct spending allowance
+            if (spendingCost > 0) {
+                spendingAllowance[subAccount] -= spendingCost;
+                allowanceVersion[subAccount]++;
+            }
         }
         _trackCumulativeSpending(subAccount, spendingCost);
 
@@ -806,11 +812,21 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 acquired = acquiredBalance[subAccount][tokenIn];
 
         if (amount > acquired) {
-            // Portion from original tokens - must fit in spending allowance
+            // Portion from original tokens - must fit in spending budget
             uint256 originalPortion = amount - acquired;
             uint256 originalValueUSD = _estimateTokenValueUSD(tokenIn, originalPortion);
-            if (originalValueUSD > spendingAllowance[subAccount]) {
-                revert ApprovalExceedsLimit();
+            if (isOracleless()) {
+                // In oracleless mode, cap against remaining cumulative budget
+                (, uint256 maxSpendingUSD,) = getSubAccountLimits(subAccount);
+                uint256 remaining =
+                    maxSpendingUSD > cumulativeSpent[subAccount] ? maxSpendingUSD - cumulativeSpent[subAccount] : 0;
+                if (originalValueUSD > remaining) {
+                    revert ApprovalExceedsLimit();
+                }
+            } else {
+                if (originalValueUSD > spendingAllowance[subAccount]) {
+                    revert ApprovalExceedsLimit();
+                }
             }
         }
 
@@ -860,14 +876,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 fromOriginal = amount - usedFromAcquired;
         uint256 spendingCost = _estimateTokenValueUSD(token, fromOriginal);
 
-        if (spendingCost > spendingAllowance[msg.sender]) {
-            revert ExceedsSpendingLimit();
-        }
+        // In oracleless mode, skip oracle-managed allowance — only cumulative cap applies
+        if (!isOracleless()) {
+            if (spendingCost > spendingAllowance[msg.sender]) {
+                revert ExceedsSpendingLimit();
+            }
 
-        // Deduct spending allowance, track cumulative, and deduct acquired balance
-        if (spendingCost > 0) {
-            spendingAllowance[msg.sender] -= spendingCost;
-            allowanceVersion[msg.sender]++;
+            // Deduct spending allowance
+            if (spendingCost > 0) {
+                spendingAllowance[msg.sender] -= spendingCost;
+                allowanceVersion[msg.sender]++;
+            }
         }
         _trackCumulativeSpending(msg.sender, spendingCost);
         if (usedFromAcquired > 0) {
@@ -991,16 +1010,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
+    /// @notice Set the authorized oracle address. Use address(0) for oracleless mode.
     function setAuthorizedOracle(address newOracle) external onlyOwner {
-        if (newOracle == address(0)) revert InvalidOracleAddress();
-        // Prevent Safe or Module from being oracle
-        if (newOracle == avatar || newOracle == address(this)) revert CannotBeOracle(newOracle);
-        // Prevent subaccounts from being oracle (check all roles)
-        if (
-            subAccountRoles[newOracle][DEFI_EXECUTE_ROLE] || subAccountRoles[newOracle][DEFI_TRANSFER_ROLE]
-                || subAccountRoles[newOracle][DEFI_REPAY_ROLE]
-        ) {
-            revert CannotBeOracle(newOracle);
+        // address(0) = oracleless mode (no oracle dependency)
+        if (newOracle != address(0)) {
+            // Prevent Safe or Module from being oracle
+            if (newOracle == avatar || newOracle == address(this)) revert CannotBeOracle(newOracle);
+            // Prevent subaccounts from being oracle (check all roles)
+            if (
+                subAccountRoles[newOracle][DEFI_EXECUTE_ROLE] || subAccountRoles[newOracle][DEFI_TRANSFER_ROLE]
+                    || subAccountRoles[newOracle][DEFI_REPAY_ROLE]
+            ) {
+                revert CannotBeOracle(newOracle);
+            }
         }
         address oldOracle = authorizedOracle;
         authorizedOracle = newOracle;
@@ -1042,7 +1064,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Internal Helpers ============
 
+    /// @notice Check if the module is in oracleless mode (no off-chain oracle dependency)
+    function isOracleless() public view returns (bool) {
+        return authorizedOracle == address(0);
+    }
+
     function _requireFreshOracle(address subAccount) internal view {
+        if (isOracleless()) return;
         if (lastOracleUpdate[subAccount] == 0) revert StaleOracleData();
         if (block.timestamp - lastOracleUpdate[subAccount] > maxOracleAge) {
             revert StaleOracleData();
@@ -1050,6 +1078,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     }
 
     function _requireFreshSafeValue() internal view {
+        if (isOracleless()) return;
         if (safeValue.lastUpdated == 0) revert StalePortfolioValue();
         if (block.timestamp - safeValue.lastUpdated > maxSafeValueAge) {
             revert StalePortfolioValue();
@@ -1102,19 +1131,32 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         (uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration) = getSubAccountLimits(subAccount);
 
+        bool _oracleless = isOracleless();
+
+        // Oracleless mode requires USD limits (BPS needs safe value from oracle)
+        if (_oracleless && maxSpendingUSD == 0) revert OraclelessRequiresUSDMode();
+
         // Check if window is uninitialized or expired — start a new one
         if (windowStart[subAccount] == 0 || block.timestamp > windowStart[subAccount] + windowDuration) {
-            _requireFreshSafeValue();
-            windowStart[subAccount] = block.timestamp;
-            windowSafeValue[subAccount] = safeValue.totalValueUSD;
-            cumulativeSpent[subAccount] = 0;
-            emit CumulativeSpendingReset(subAccount, safeValue.totalValueUSD);
+            if (_oracleless) {
+                // No safe value needed — window resets with 0 (unused in USD mode)
+                windowStart[subAccount] = block.timestamp;
+                windowSafeValue[subAccount] = 0;
+                cumulativeSpent[subAccount] = 0;
+                emit CumulativeSpendingReset(subAccount, 0);
+            } else {
+                _requireFreshSafeValue();
+                windowStart[subAccount] = block.timestamp;
+                windowSafeValue[subAccount] = safeValue.totalValueUSD;
+                cumulativeSpent[subAccount] = 0;
+                emit CumulativeSpendingReset(subAccount, safeValue.totalValueUSD);
+            }
         }
 
         // Increment cumulative spending
         cumulativeSpent[subAccount] += spendingCost;
 
-        // Compute maximum spending for this window (dual-mode)
+        // Compute maximum spending for this window
         uint256 maxSpending;
         if (maxSpendingUSD > 0) {
             maxSpending = maxSpendingUSD;
@@ -1122,10 +1164,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             maxSpending = (windowSafeValue[subAccount] * maxSpendingBps) / 10000;
         }
 
-        // Also cap by absolute maximum (safety backstop)
-        uint256 absoluteMax = (windowSafeValue[subAccount] * absoluteMaxSpendingBps) / 10000;
-        if (absoluteMax < maxSpending) {
-            maxSpending = absoluteMax;
+        // In oracle mode, also cap by absolute maximum (safety backstop)
+        if (!_oracleless && windowSafeValue[subAccount] > 0) {
+            uint256 absoluteMax = (windowSafeValue[subAccount] * absoluteMaxSpendingBps) / 10000;
+            if (absoluteMax < maxSpending) {
+                maxSpending = absoluteMax;
+            }
         }
 
         if (cumulativeSpent[subAccount] > maxSpending) {

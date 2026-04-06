@@ -91,5 +91,17 @@ The Safe owner can always:
 - Grant or revoke agent roles
 - Change spending limits
 - Add or remove protocol allowlists
-- Update the oracle address
+- Update the oracle address (or set to `address(0)` for oracleless mode)
 - Remove the module entirely
+
+## Oracleless mode
+
+Vaults can be deployed without an oracle (`oracle = address(0)`). In this mode:
+
+- Spending is governed solely by on-chain cumulative tracking against a fixed USD limit
+- No oracle freshness checks — agents can operate without any off-chain dependency
+- Only Tier 1 acquired balance works (swap outputs marked on-chain)
+- BPS-based spending limits are not available (they require portfolio valuation)
+- The Safe owner can switch to oracle mode later via `setAuthorizedOracle()`
+
+This is ideal for public-facing agents, payment bots, or any vault where minimizing trust surface matters more than dynamic portfolio-based limits. See [Security Model — Oracleless mode](../security#oracleless-mode) for the full analysis.

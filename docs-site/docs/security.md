@@ -107,6 +107,46 @@ Both caps are **configurable by the Safe owner** via `setAbsoluteMaxSpendingBps(
 
 The contracts have undergone an internal security review. See the [Security Audit document](https://github.com/xaviermiel/MultiClaw/blob/main/docs/SECURITY_AUDIT.md) for findings and remediation status. An external audit is planned before mainnet launch.
 
+## Oracleless mode
+
+For vaults that want **zero off-chain trust**, MultiClaw supports oracleless mode. Deploy with `oracle = address(0)` and the module operates with no oracle dependency at all.
+
+### How it works
+
+| Feature                          | Normal mode                                                   | Oracleless mode                           |
+| -------------------------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| Oracle freshness check           | Required (60 min)                                             | Skipped                                   |
+| Safe value updates               | Oracle-driven                                                 | Not needed                                |
+| Spending limit mode              | BPS or USD                                                    | **USD only**                              |
+| `spendingAllowance` check        | Oracle sets it                                                | Skipped — only `cumulativeSpent` enforced |
+| Tier 1 acquired (swaps)          | On-chain                                                      | On-chain (unchanged)                      |
+| Tier 2 acquired (withdraw/claim) | Oracle grants                                                 | Disabled                                  |
+| Max damage per window            | `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 40%) | `maxSpendingUSD` (fixed, deterministic)   |
+
+### Trade-offs
+
+- **No BPS mode** — percentage-of-portfolio limits require a portfolio valuation, which needs an oracle. Only fixed USD limits are available.
+- **No Tier 2 acquired balance** — tokens received from withdrawals and claims are not automatically marked as acquired (only swap outputs are, via on-chain Tier 1 marking). This means withdrawals and claims use spending budget when the tokens are later re-used.
+- **Simpler trust model** — the worst-case damage is exactly `maxSpendingUSD` per window. No oracle compromise risk. Fully deterministic.
+
+### When to use oracleless mode
+
+- Public-facing agents (e.g., "Break the Vault" challenges) where minimizing trust surface is critical
+- Simple transfer or payment agents with fixed dollar budgets
+- Any vault where eliminating oracle dependency outweighs the convenience of BPS-based limits
+
+### Switching modes
+
+The Safe owner can switch between modes at any time:
+
+```solidity
+// Enter oracleless mode
+module.setAuthorizedOracle(address(0));
+
+// Return to oracle mode
+module.setAuthorizedOracle(newOracleAddress);
+```
+
 ## Design principles
 
 1. **Defense in depth** — 12 layers, not one

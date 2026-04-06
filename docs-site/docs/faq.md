@@ -69,6 +69,10 @@ Agent operations freeze after 60 minutes (the oracle staleness threshold). The S
 
 No. The oracle can only update spending state — it cannot submit transactions through the module. A compromised oracle alone cannot extract any funds. Only when combined with a compromised agent (or a publicly usable one) can it increase the damage from the normal budget to the hard cap of 40% of Safe value per window (default settings).
 
+### Can I run a vault without an oracle?
+
+Yes. Deploy with `oracle = address(0)` for oracleless mode. Spending is enforced solely by on-chain cumulative tracking against a fixed USD limit (`maxSpendingUSD`). No oracle updates needed, no oracle staleness risk, no oracle compromise risk. The trade-off: only fixed USD limits are available (not percentage-of-portfolio), and only Tier 1 acquired balance works (swap outputs). See [Security Model — Oracleless mode](./security#oracleless-mode).
+
 ## Deployment
 
 ### Do I need permission to deploy a vault?

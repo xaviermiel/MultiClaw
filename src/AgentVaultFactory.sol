@@ -137,6 +137,8 @@ contract AgentVaultFactory is Ownable {
     function deployVault(VaultConfig calldata config) external returns (address module) {
         // Validate inputs
         _validateConfig(config.safe, config.oracle, config.agentAddress);
+        // Oracleless mode requires USD spending limits
+        if (config.oracle == address(0) && config.maxSpendingUSD == 0) revert InvalidConfig();
         if (config.parserProtocols.length != config.parserAddresses.length) revert ArrayLengthMismatch();
         if (config.selectors.length != config.selectorTypes.length) revert ArrayLengthMismatch();
         if (config.priceFeedTokens.length != config.priceFeedAddresses.length) revert ArrayLengthMismatch();
@@ -281,10 +283,11 @@ contract AgentVaultFactory is Ownable {
 
     /// @notice Validate that core addresses are non-zero and oracle != safe
     function _validateConfig(address safe, address oracle, address agentAddress) internal pure {
-        if (safe == address(0) || oracle == address(0) || agentAddress == address(0)) {
+        // oracle can be address(0) for oracleless mode
+        if (safe == address(0) || agentAddress == address(0)) {
             revert InvalidAddress();
         }
-        if (oracle == safe) revert InvalidConfig();
+        if (oracle != address(0) && oracle == safe) revert InvalidConfig();
     }
 
     /// @notice Check that the Safe doesn't already have a module registered

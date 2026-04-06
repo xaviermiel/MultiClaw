@@ -130,6 +130,34 @@ Available presets:
 | 1   | Yield Farmer  | Aave V3           | 10%/day |
 | 2   | Payment Agent | Transfer only     | 1%/day  |
 
+## Oracleless deployment
+
+For vaults that need zero off-chain trust, deploy without an oracle by setting `oracle` to `address(0)`. This requires USD-mode spending limits (BPS mode needs portfolio valuation from an oracle).
+
+```typescript
+const vault = await client.createAgentVault(
+  {
+    safe: "0xYOUR_SAFE_ADDRESS",
+    oracle: "0x0000000000000000000000000000000000000000", // oracleless
+    agentAddress: "0xAGENT_WALLET",
+    roleId: 1,
+    maxSpendingBps: 0n, // must be 0 in oracleless mode
+    maxSpendingUSD: BigInt(1000e18), // $1,000/day fixed limit
+    windowDuration: 86400n,
+    allowedProtocols: ["0xAAVE_V3_POOL"],
+    parserProtocols: ["0xAAVE_V3_POOL"],
+    parserAddresses: ["0xAAVE_PARSER"],
+    selectors: ["0x617ba037", "0x69328dec"],
+    selectorTypes: [2, 3],
+    priceFeedTokens: ["0xUSDC", "0xWETH"],
+    priceFeedAddresses: ["0xUSDC_FEED", "0xWETH_FEED"],
+  },
+  deployer,
+);
+```
+
+In oracleless mode: spending is enforced solely by on-chain cumulative tracking against `maxSpendingUSD`. No oracle updates needed, no oracle staleness risk. Swap outputs are still marked as acquired on-chain (Tier 1). See [Security Model — Oracleless mode](./security#oracleless-mode) for details.
+
 ---
 
 ## Agent operation examples
