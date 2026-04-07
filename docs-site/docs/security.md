@@ -61,14 +61,24 @@ The oracle is an off-chain service (EOA) that updates spending state on the modu
 ### Maximum damage per window
 
 ```
-Worst case = absoluteMaxSpendingBps + maxOracleAcquiredBps
-           = 20% + 20%
-           = 40% of Safe value per rolling window
+Spending budget ceiling = absoluteMaxSpendingBps + maxOracleAcquiredBps
+                        = 20% + 20%
+                        = 40% of Safe value per rolling window
 ```
 
-With default settings, a compromised oracle **combined with** a compromised agent (or a publicly usable agent) can extract at most **40% of Safe value per 24-hour window**. A compromised oracle alone cannot extract anything — it has no ability to submit transactions through the module.
+**This is the maximum spending budget the on-chain caps allow — not the amount an attacker can extract.** Even with both the oracle and the agent fully compromised, the attacker is still constrained to the agent's normal scope of operations. They cannot escape the other 11 guardrail layers:
 
-Both caps are **configurable by the Safe owner** via `setAbsoluteMaxSpendingBps()` and `setMaxOracleAcquiredBps()`. Lowering them directly reduces worst-case exposure. For example, setting both to 10% limits maximum damage to 20% per window instead of 40%.
+- They can only call protocols on the agent's **allowlist**. Random target contracts revert.
+- They can only execute **registered operation types** (swap / deposit / withdraw / approve / repay).
+- The **recipient** of every swap, deposit, and withdrawal must be the Safe itself — never an attacker address. Parsers extract the recipient from calldata and the module reverts otherwise.
+- **Approve calls** are capped against the same spending budget, with the spender forced to be on the allowlist.
+- The **role check** still applies — the agent's identity is fixed to its granted role.
+
+In practical terms: the 40% number is the size of the daily "budget bucket" that hostile inputs can drain — but only by performing operations the agent was already configured to perform. For a yield-farming agent restricted to Aave V3 supply/withdraw with the Safe as recipient, the worst case is that the attacker repeatedly supplies and withdraws — annoying but not value-extracting. For a payment agent with a small recipient allowlist, the worst case is that the attacker exhausts the daily budget paying out to those exact addresses. In every case, no funds reach an address the operator did not explicitly authorize.
+
+The 40% ceiling matters most when the agent has very broad permissions (e.g. swap authority across many DEXs with arbitrary token outputs). For tightly-scoped agents, the on-chain budget is rarely the binding constraint — the allowlist and recipient checks are.
+
+Both ceiling caps are **configurable by the Safe owner** via `setAbsoluteMaxSpendingBps()` and `setMaxOracleAcquiredBps()`. Lowering them shrinks the budget bucket further. Setting both to 10% gives a 20% per-window ceiling instead of 40%. For maximum determinism, switch to oracleless mode and the ceiling becomes a fixed USD amount you set yourself.
 
 ### Mitigation layers
 
@@ -113,15 +123,16 @@ For vaults that want **zero off-chain trust**, MultiClaw supports oracleless mod
 
 ### How it works
 
-| Feature                          | Normal mode                                                   | Oracleless mode                           |
-| -------------------------------- | ------------------------------------------------------------- | ----------------------------------------- |
-| Oracle freshness check           | Required (60 min)                                             | Skipped                                   |
-| Safe value updates               | Oracle-driven                                                 | Not needed                                |
-| Spending limit mode              | BPS or USD                                                    | **USD only**                              |
-| `spendingAllowance` check        | Oracle sets it                                                | Skipped — only `cumulativeSpent` enforced |
-| Tier 1 acquired (swaps)          | On-chain                                                      | On-chain (unchanged)                      |
-| Tier 2 acquired (withdraw/claim) | Oracle grants                                                 | Disabled                                  |
-| Max damage per window            | `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 40%) | `maxSpendingUSD` (fixed, deterministic)   |
+| Feature                                       | Normal mode                                                   | Oracleless mode                           |
+| --------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| Oracle freshness check                        | Required (60 min)                                             | Skipped                                   |
+| Safe value updates                            | Oracle-driven                                                 | Not needed                                |
+| Spending limit mode                           | BPS or USD                                                    | **USD only**                              |
+| `spendingAllowance` check                     | Oracle sets it                                                | Skipped — only `cumulativeSpent` enforced |
+| Tier 1 acquired (swaps)                       | On-chain                                                      | On-chain (unchanged)                      |
+| Tier 2 acquired (withdraw/claim)              | Oracle grants                                                 | Disabled                                  |
+| Spending budget ceiling                       | `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 40%) | `maxSpendingUSD` (fixed, deterministic)   |
+| Other guardrails (allowlist, recipient, role) | Always enforced                                               | Always enforced                           |
 
 ### Trade-offs
 

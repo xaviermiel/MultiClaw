@@ -31,7 +31,7 @@ The on-chain guardrails still apply. A compromised agent cannot exceed its spend
 
 ### Can an agent drain the Safe?
 
-No. The worst case requires **both** the oracle and the agent to be compromised (or the agent to be publicly usable). Even then, the maximum extractable amount per window is `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default: 40% of Safe value per 24 hours). A compromised oracle alone cannot execute transactions, and a compromised agent alone is limited to the normal spending budget. The on-chain cumulative counter cannot be reset by either. Both caps are configurable by the Safe owner — lowering them reduces worst-case exposure further.
+No. Even in the worst case — both the oracle and the agent fully compromised — the attacker is still bound by every guardrail except the spending budget cap. They can only call protocols on the agent's allowlist, only execute registered operation types, and the recipient of every swap/deposit/withdrawal is forced to be the Safe itself (parsers extract it from calldata and the module reverts otherwise). The 40% figure (`absoluteMaxSpendingBps + maxOracleAcquiredBps` by default) is the size of the **spending budget bucket** — not what an attacker walks away with. For a tightly-scoped agent (e.g. Aave V3 supply/withdraw, Safe as recipient), the worst case is the attacker repeatedly cycles deposits — annoying but no value leaves the Safe. For a payment agent with a small recipient allowlist, they can at most exhaust the daily budget paying out to those exact addresses. No funds reach an address the operator did not explicitly authorize. Both budget caps are configurable; switching to oracleless mode replaces them with a fixed USD limit you set yourself.
 
 ### Can I have multiple agents on one Safe?
 
@@ -67,7 +67,7 @@ Agent operations freeze after 60 minutes (the oracle staleness threshold). The S
 
 ### Can the oracle steal funds?
 
-No. The oracle can only update spending state — it cannot submit transactions through the module. A compromised oracle alone cannot extract any funds. Only when combined with a compromised agent (or a publicly usable one) can it increase the damage from the normal budget to the hard cap of 40% of Safe value per window (default settings).
+No. The oracle can only update spending state — it cannot submit transactions through the module. A compromised oracle alone cannot extract any funds. Combined with a compromised agent, it can raise the spending budget to the hard cap (default 40% per window), but the attacker is still constrained to the agent's allowlist and recipient rules — they can only spend within the operations the agent was already configured to perform. They cannot redirect funds to attacker-controlled addresses.
 
 ### Can I run a vault without an oracle?
 

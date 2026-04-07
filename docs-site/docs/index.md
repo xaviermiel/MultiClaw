@@ -32,7 +32,7 @@ AI Agent  ──>  DeFiInteractorModule  ──>  Safe Multisig  ──>  DeFi P
 - **Permissionless deployment** — anyone can deploy an Agent Vault via factory contracts, no approval needed
 - **Dual spending limit modes** — percentage of Safe value (BPS) or fixed USD amount
 - **Acquired Balance Model** — tokens received from operations are free to re-use, preventing double-counting
-- **Oracle compromise protection** — even a compromised oracle can only cause bounded damage (default: 40% per window)
+- **Oracle compromise protection** — a compromised oracle cannot redirect funds; even combined with a compromised agent, the attacker is bound to the agent's allowlist and the Safe is the only valid recipient
 - **10 protocol parsers** — Aave V3, Morpho, Uniswap V3/V4, 1inch, KyberSwap, Paraswap, Merkl
 - **Framework adapters** — LangChain, Eliza, GOAT integrations out of the box
 

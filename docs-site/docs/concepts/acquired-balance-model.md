@@ -89,12 +89,13 @@ The agent executed 4 operations but only consumed $500 of budget — the initial
 
 ## Oracle compromise protection
 
-A compromised oracle alone cannot extract funds — it can only update state, not execute transactions. The worst case requires **both** the oracle and the agent to be compromised (or the agent to be publicly usable, e.g., in a challenge scenario):
+A compromised oracle alone cannot extract funds — it can only update state, not execute transactions. Combined with a compromised agent, the on-chain spending budget cap is:
 
 ```
-absoluteMaxSpendingBps + maxOracleAcquiredBps = 20% + 20% = 40%
+spending budget ceiling = absoluteMaxSpendingBps + maxOracleAcquiredBps
+                        = 20% + 20% = 40% per window
 ```
 
-The oracle can grant up to 20% of Safe value as acquired tokens and the spending cap is 20%. Combined worst case with a compromised agent: 40% of Safe value per window. This is enforced on-chain and cannot be exceeded.
+**This is the size of the spending budget bucket — not what an attacker walks away with.** The agent is still bound by every other guardrail: protocol allowlist, registered operation types, recipient validation (must be the Safe), approve cap. An attacker can only perform operations the agent was already configured to perform — they cannot redirect funds to addresses outside the allowlist.
 
-Both caps are configurable by the Safe owner — lowering `absoluteMaxSpendingBps` and `maxOracleAcquiredBps` directly reduces worst-case exposure (e.g., 10% + 10% = 20% max).
+Both ceiling caps are configurable by the Safe owner. Lowering `absoluteMaxSpendingBps` and `maxOracleAcquiredBps` shrinks the budget bucket further (e.g., 10% + 10% = 20% ceiling). For maximum determinism, switch to oracleless mode and the ceiling becomes a fixed USD amount.
