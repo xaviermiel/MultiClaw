@@ -65,12 +65,12 @@ Create a `.env` file in the project root:
 ```env
 # Required
 PRIVATE_KEY=0x...           # Oracle wallet private key
-MODULE_ADDRESS=0x...        # DeFiInteractorModule contract address
+REGISTRY_ADDRESS=0x...      # Recommended: ModuleRegistry for shared multi-module support
 
 # Optional
-CHAIN=sepolia               # Chain: sepolia | base | base-sepolia (default: sepolia)
+CHAIN=base-sepolia          # Chain: sepolia | base | base-sepolia
 RPC_URL=https://...         # RPC endpoint (default: public node for selected chain)
-REGISTRY_ADDRESS=0x...      # ModuleRegistry for multi-module support
+MODULE_ADDRESS=0x...        # Optional single-module fallback when not using registry mode
 SAFE_VALUE_CRON="0 */10 * * * *"      # Safe value update schedule (default: every 10 min)
 SPENDING_ORACLE_CRON="0 */2 * * * *"  # Spending oracle schedule (default: every 2 min)
 POLL_INTERVAL_MS=24000      # Event polling interval in ms (default: 2x chain block time)

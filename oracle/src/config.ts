@@ -530,7 +530,9 @@ export function validateConfig() {
   if (!config.privateKey) {
     throw new Error("PRIVATE_KEY environment variable is required");
   }
-  if (!config.moduleAddress) {
-    throw new Error("MODULE_ADDRESS environment variable is required");
+  if (!config.moduleAddress && !config.registryAddress) {
+    throw new Error(
+      "Either MODULE_ADDRESS or REGISTRY_ADDRESS environment variable is required",
+    );
   }
 }

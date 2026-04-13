@@ -11,7 +11,7 @@
 
 import { startCron as startSafeValue } from "./safe-value.js";
 import { start as startSpendingOracle } from "./spending-oracle.js";
-import { validateConfig } from "./config.js";
+import { config, validateConfig } from "./config.js";
 
 function main() {
   console.log("===========================================");
@@ -26,10 +26,24 @@ function main() {
     console.error("");
     console.error("Please copy .env.example to .env and configure:");
     console.error("  - PRIVATE_KEY: Private key of the authorized updater");
-    console.error("  - MODULE_ADDRESS: DeFiInteractorModule contract address");
+    console.error(
+      "  - REGISTRY_ADDRESS: ModuleRegistry address for shared multi-module mode",
+    );
+    console.error(
+      "    or MODULE_ADDRESS: DeFiInteractorModule contract address for single-module mode",
+    );
     console.error("  - RPC_URL: Ethereum RPC URL");
     process.exit(1);
   }
+
+  console.log(`Chain: ${config.chainName}`);
+  console.log(`RPC URL: ${config.rpcUrl}`);
+  if (config.registryAddress) {
+    console.log(`Registry mode: ${config.registryAddress}`);
+  } else {
+    console.log(`Single-module mode: ${config.moduleAddress}`);
+  }
+  console.log("");
 
   console.log("Starting Safe Value Oracle...");
   startSafeValue();
