@@ -13,25 +13,18 @@ import "../src/PresetRegistry.sol";
  *   1 — Yield Farmer   (Aave V3 supply/withdraw/repay)
  *   2 — Payment Agent  (transfer only, no DeFi)
  *
- * Parser addresses reused from existing deployed module 0xbB2470...
+ * Parser addresses are supplied via environment variables so presets do not
+ * silently point at stale parser deployments.
  *
  * Usage:
  *   forge script script/CreatePresets.s.sol --rpc-url $BASE_SEPOLIA_RPC_URL --broadcast
  */
 contract CreatePresets is Script {
-    // ── Preset Registry ──────────────────────────────────────────────────────
-    address constant PRESET_REGISTRY = 0xA71ab152747c34834119dDfb9C8244169fdE6010;
-
     // ── Protocol addresses (Base Sepolia) ────────────────────────────────────
     address constant AAVE_V3_POOL        = 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27;
     address constant AAVE_V3_REWARDS     = 0x71B448405c803A3982aBa448133133D2DEAFBE5F;
     address constant UNISWAP_V3_ROUTER   = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
     address constant UNIVERSAL_ROUTER    = 0x492E6456D9528771018DeB9E87ef7750EF184104;
-
-    // ── Deployed parser addresses (from existing module 0xbB2470...) ──────────
-    address constant AAVE_PARSER         = 0x36683D4a7A8561911b0c00138D943b0CF61a437C;
-    address constant UNISWAP_V3_PARSER   = 0x37F53B27CAAcCb1cDc100d0bC0E52d8B09937aCc;
-    address constant UNIVERSAL_PARSER    = 0x0e5A08b67BB89E8050A361f19Bcb70D9Ba6bF568;
 
     // ── Role IDs ─────────────────────────────────────────────────────────────
     uint16 constant DEFI_EXECUTE_ROLE  = 1;
@@ -48,10 +41,14 @@ contract CreatePresets is Script {
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address presetRegistryAddress = vm.envAddress("PRESET_REGISTRY_ADDRESS");
+        address aaveParser = vm.envAddress("AAVE_PARSER_ADDRESS");
+        address uniswapV3Parser = vm.envAddress("UNISWAP_V3_PARSER_ADDRESS");
+        address universalParser = vm.envAddress("UNIVERSAL_PARSER_ADDRESS");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        PresetRegistry registry = PresetRegistry(PRESET_REGISTRY);
+        PresetRegistry registry = PresetRegistry(presetRegistryAddress);
 
         // ── Preset 0: DeFi Trader ─────────────────────────────────────────────
         {
@@ -68,10 +65,10 @@ contract CreatePresets is Script {
             parserProtocols[3] = UNIVERSAL_ROUTER;
 
             address[] memory parserAddresses = new address[](4);
-            parserAddresses[0] = AAVE_PARSER;
-            parserAddresses[1] = AAVE_PARSER;
-            parserAddresses[2] = UNISWAP_V3_PARSER;
-            parserAddresses[3] = UNIVERSAL_PARSER;
+            parserAddresses[0] = aaveParser;
+            parserAddresses[1] = aaveParser;
+            parserAddresses[2] = uniswapV3Parser;
+            parserAddresses[3] = universalParser;
 
             bytes4[] memory selectors = new bytes4[](11);
             selectors[0]  = 0x095ea7b3; // ERC20 approve
@@ -125,8 +122,8 @@ contract CreatePresets is Script {
             parserProtocols[1] = AAVE_V3_REWARDS;
 
             address[] memory parserAddresses = new address[](2);
-            parserAddresses[0] = AAVE_PARSER;
-            parserAddresses[1] = AAVE_PARSER;
+            parserAddresses[0] = aaveParser;
+            parserAddresses[1] = aaveParser;
 
             bytes4[] memory selectors = new bytes4[](7);
             selectors[0] = 0x095ea7b3; // approve
