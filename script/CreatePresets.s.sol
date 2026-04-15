@@ -25,6 +25,7 @@ contract CreatePresets is Script {
     address constant AAVE_V3_REWARDS     = 0x71B448405c803A3982aBa448133133D2DEAFBE5F;
     address constant UNISWAP_V3_ROUTER   = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
     address constant UNIVERSAL_ROUTER    = 0x492E6456D9528771018DeB9E87ef7750EF184104;
+    address constant MORPHO_BLUE         = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
 
     // ── Role IDs ─────────────────────────────────────────────────────────────
     uint16 constant DEFI_EXECUTE_ROLE  = 1;
@@ -45,6 +46,7 @@ contract CreatePresets is Script {
         address aaveParser = vm.envAddress("AAVE_PARSER_ADDRESS");
         address uniswapV3Parser = vm.envAddress("UNISWAP_V3_PARSER_ADDRESS");
         address universalParser = vm.envAddress("UNIVERSAL_PARSER_ADDRESS");
+        address morphoBlueParser = vm.envAddress("MORPHO_BLUE_PARSER_ADDRESS");
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -113,35 +115,52 @@ contract CreatePresets is Script {
 
         // ── Preset 1: Yield Farmer ────────────────────────────────────────────
         {
-            address[] memory protocols = new address[](2);
+            address[] memory protocols = new address[](3);
             protocols[0] = AAVE_V3_POOL;
             protocols[1] = AAVE_V3_REWARDS;
+            protocols[2] = MORPHO_BLUE;
 
-            address[] memory parserProtocols = new address[](2);
+            address[] memory parserProtocols = new address[](3);
             parserProtocols[0] = AAVE_V3_POOL;
             parserProtocols[1] = AAVE_V3_REWARDS;
+            parserProtocols[2] = MORPHO_BLUE;
 
-            address[] memory parserAddresses = new address[](2);
+            address[] memory parserAddresses = new address[](3);
             parserAddresses[0] = aaveParser;
             parserAddresses[1] = aaveParser;
+            parserAddresses[2] = morphoBlueParser;
 
-            bytes4[] memory selectors = new bytes4[](7);
-            selectors[0] = 0x095ea7b3; // approve
-            selectors[1] = 0x617ba037; // supply    -> DEPOSIT
-            selectors[2] = 0x69328dec; // withdraw  -> WITHDRAW
-            selectors[3] = 0xa415bcad; // borrow    -> WITHDRAW
-            selectors[4] = 0x573ade81; // repay     -> REPAY
-            selectors[5] = 0x236300dc; // claimRewards     -> CLAIM
-            selectors[6] = 0xbb492bf5; // claimAllRewards  -> CLAIM
+            bytes4[] memory selectors = new bytes4[](12);
+            selectors[0]  = 0x095ea7b3; // approve
+            // Aave V3
+            selectors[1]  = 0x617ba037; // Aave supply            -> DEPOSIT
+            selectors[2]  = 0x69328dec; // Aave withdraw           -> WITHDRAW
+            selectors[3]  = 0xa415bcad; // Aave borrow             -> WITHDRAW
+            selectors[4]  = 0x573ade81; // Aave repay              -> REPAY
+            selectors[5]  = 0x236300dc; // claimRewards            -> CLAIM
+            selectors[6]  = 0xbb492bf5; // claimAllRewards         -> CLAIM
+            // Morpho Blue
+            selectors[7]  = 0xa99aad89; // Morpho supply           -> DEPOSIT
+            selectors[8]  = 0x5c2bea49; // Morpho withdraw         -> WITHDRAW
+            selectors[9]  = 0x20b76e81; // Morpho repay            -> REPAY
+            selectors[10] = 0x238d6579; // Morpho supplyCollateral  -> DEPOSIT
+            selectors[11] = 0x8720316d; // Morpho withdrawCollateral -> WITHDRAW
 
-            uint8[] memory selectorTypes = new uint8[](7);
-            selectorTypes[0] = APPROVE;
-            selectorTypes[1] = DEPOSIT;
-            selectorTypes[2] = WITHDRAW;
-            selectorTypes[3] = WITHDRAW;
-            selectorTypes[4] = REPAY;
-            selectorTypes[5] = CLAIM;
-            selectorTypes[6] = CLAIM;
+            uint8[] memory selectorTypes = new uint8[](12);
+            selectorTypes[0]  = APPROVE;
+            // Aave V3
+            selectorTypes[1]  = DEPOSIT;
+            selectorTypes[2]  = WITHDRAW;
+            selectorTypes[3]  = WITHDRAW;
+            selectorTypes[4]  = REPAY;
+            selectorTypes[5]  = CLAIM;
+            selectorTypes[6]  = CLAIM;
+            // Morpho Blue
+            selectorTypes[7]  = DEPOSIT;   // supply
+            selectorTypes[8]  = WITHDRAW;  // withdraw
+            selectorTypes[9]  = REPAY;     // repay
+            selectorTypes[10] = DEPOSIT;   // supplyCollateral
+            selectorTypes[11] = WITHDRAW;  // withdrawCollateral
 
             registry.createPreset(
                 "Yield Farmer",
