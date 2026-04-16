@@ -2146,6 +2146,16 @@ async function waitForPendingTransactions(): Promise<void> {
             }),
           `waitForTransactionReceipt(${tx.hash.slice(0, 10)})`,
         );
+        // waitForTransactionReceipt resolves for any mined tx, including reverts.
+        // We must check receipt.status to distinguish success from on-chain revert.
+        if (receipt.status !== "success") {
+          log(
+            `Transaction ${tx.hash.slice(0, 10)}... REVERTED on-chain in block ${receipt.blockNumber} (${tx.subAccount}) — gasUsed=${receipt.gasUsed}`,
+          );
+          throw new Error(
+            `Transaction reverted on-chain (block ${receipt.blockNumber}, tx ${tx.hash})`,
+          );
+        }
         log(
           `Transaction ${tx.hash.slice(0, 10)}... confirmed in block ${receipt.blockNumber} (${tx.subAccount})`,
         );

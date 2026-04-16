@@ -1,0 +1,204 @@
+
+> oracle@1.0.0 start
+> npx tsx src/index.ts
+
+[SpendingOracle 2026-04-16T16:40:58.509Z] Initialized RPC client manager with 1 endpoint(s)
+===========================================
+  MultiClaw Local Oracle
+===========================================
+
+Chain: base-sepolia
+RPC URL: https://sepolia.base.org
+Registry mode: 0xB19a2AAf5472b1e49e35eEa14f4c0dD25D89Ab96
+
+Starting Safe Value Oracle...
+[SafeValue 2026-04-16T16:40:58.524Z] Starting Safe Value Oracle with cron: */30 * * * * *
+[SafeValue 2026-04-16T16:40:58.524Z] Module address: 0x16D44268C4e3a567c5ff87cCCa10Fe46f8a656Bb
+[SafeValue 2026-04-16T16:40:58.524Z] Updater address: 0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E
+[SafeValue 2026-04-16T16:40:58.525Z] === Safe Value Monitor: Starting check ===
+
+Starting Spending Oracle...
+[SpendingOracle 2026-04-16T16:40:58.534Z] Starting Spending Oracle
+[SpendingOracle 2026-04-16T16:40:58.534Z] Module address: 0x16D44268C4e3a567c5ff87cCCa10Fe46f8a656Bb
+[SpendingOracle 2026-04-16T16:40:58.534Z] Registry address: 0xB19a2AAf5472b1e49e35eEa14f4c0dD25D89Ab96 (multi-module mode)
+[SpendingOracle 2026-04-16T16:40:58.534Z] Updater address: 0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E
+[SpendingOracle 2026-04-16T16:40:58.534Z] Poll interval: 4000ms
+[SpendingOracle 2026-04-16T16:40:58.534Z] Cron schedule: */5 * * * *
+[SpendingOracle 2026-04-16T16:40:58.535Z] === Spending Oracle: Periodic Refresh ===
+
+Both oracles are now running.
+Press Ctrl+C to stop.
+[SafeValue 2026-04-16T16:40:58.693Z] Found 2 active modules in registry
+[SafeValue 2026-04-16T16:40:58.693Z] Processing 2 module(s)
+[SafeValue 2026-04-16T16:40:58.693Z] --- Processing module: 0x16D44268C4e3a567c5ff87cCCa10Fe46f8a656Bb ---
+[SpendingOracle 2026-04-16T16:40:58.698Z] Found 2 active modules in registry
+[SpendingOracle 2026-04-16T16:40:58.713Z] Processing 2 module(s)
+[SpendingOracle 2026-04-16T16:40:58.713Z] --- Processing module: 0x16D44268C4e3a567c5ff87cCCa10Fe46f8a656Bb ---
+[SafeValue 2026-04-16T16:40:59.145Z] Monitoring Safe: 0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C (module: 0x16D44268C4e3a567c5ff87cCCa10Fe46f8a656Bb)
+[SpendingOracle 2026-04-16T16:40:59.148Z] Found 1 active subaccounts
+[SpendingOracle 2026-04-16T16:40:59.149Z] Processing subaccount: 0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+[SafeValue 2026-04-16T16:40:59.270Z] Processing native ETH
+[SafeValue 2026-04-16T16:40:59.510Z]   ETH: balance=0.0646, price=2325.64140523 USD
+[SafeValue 2026-04-16T16:40:59.510Z]   Value: $150.236434777858 USD
+[SpendingOracle 2026-04-16T16:40:59.579Z] Processing 0 events for 0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c (FIFO mode, 0 protocol + 0 transfers)
+[SpendingOracle 2026-04-16T16:40:59.579Z] State built: spending=0, acquired tokens=0
+[SafeValue 2026-04-16T16:40:59.637Z] Processing erc20: WETH (0x4200000000000000000000000000000000000006)
+[SafeValue 2026-04-16T16:40:59.637Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:40:59.637Z] Processing erc20: USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+[SpendingOracle 2026-04-16T16:40:59.810Z] Allowance: safeValue=255.553468320284, mode=BPS, max=25.5553468320284, spent=0, new=25.5553468320284
+[SafeValue 2026-04-16T16:41:00.008Z]   USDC: balance=84.161345, price=0.9998872 USD
+[SafeValue 2026-04-16T16:41:00.008Z]   Value: $84.151851600284 USD
+[SafeValue 2026-04-16T16:41:00.008Z] Processing erc20: USDC (Aave) (0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f)
+[SafeValue 2026-04-16T16:41:00.008Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.008Z] Processing erc20: USDT (0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a)
+[SafeValue 2026-04-16T16:41:00.008Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.008Z] Processing erc20: WBTC (0x54114591963CF60EF3aA63bEfD6eC263D98145a4)
+[SafeValue 2026-04-16T16:41:00.008Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.008Z] Processing erc20: LINK (0x810D46F9a9027E28F9B01F75E2bdde839dA61115)
+[SafeValue 2026-04-16T16:41:00.008Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.008Z] Processing erc20: cbETH (0xD171b9694f7A2597Ed006D41f7509aaD4B485c4B)
+[SafeValue 2026-04-16T16:41:00.008Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.008Z] Processing erc20: EURC (0x808456652fdb597867f38412077A9182bf77359F)
+[SpendingOracle 2026-04-16T16:41:00.036Z] Querying historical tokens from block 38998685 to 40294685 (1296000 blocks, max 5000 per query)
+[SafeValue 2026-04-16T16:41:00.359Z]   EURC: balance=20, price=0.9998872 USD
+[SafeValue 2026-04-16T16:41:00.359Z]   Value: $19.997744 USD
+[SafeValue 2026-04-16T16:41:00.359Z] Processing aave-atoken: aBasSepWETH (0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb)
+[SafeValue 2026-04-16T16:41:00.359Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.359Z] Processing aave-atoken: aBasSepUSDC (0x10F1A9D11CDf50041f3f8cB7191CBE2f31750ACC)
+[SafeValue 2026-04-16T16:41:00.359Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.359Z] Processing aave-atoken: aBasSepUSDT (0xcE3CAae5Ed17A7AafCEEbc897DE843fA6CC0c018)
+[SafeValue 2026-04-16T16:41:00.359Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.359Z] Processing aave-atoken: aBasSepWBTC (0x47Db195BAf46898302C06c31bCF46c01C64ACcF9)
+[SafeValue 2026-04-16T16:41:00.359Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.360Z] Processing aave-atoken: aBasSepLINK (0x0aD46dE765522399d7b25B438b230A894d72272B)
+[SafeValue 2026-04-16T16:41:00.360Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.360Z] Processing aave-atoken: aBasSepcbETH (0x9Fd6d1DBAd7c052e0c43f46df36eEc6a68814B63)
+[SafeValue 2026-04-16T16:41:00.360Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.360Z] Total USD Value: $254.386030378142 (on-chain: $255.553468320284)
+[SafeValue 2026-04-16T16:41:00.360Z] Last updated: 1766s ago (max staleness: 2700s)
+[SafeValue 2026-04-16T16:41:00.360Z] Skipping update - value change within threshold:
+[SafeValue 2026-04-16T16:41:00.360Z]   Diff: $1.167437942142 (45bps, threshold: 100bps)
+[SafeValue 2026-04-16T16:41:00.360Z]   Time since update: 1766s (max: 2700s)
+[SafeValue 2026-04-16T16:41:00.360Z] --- Processing module: 0x92Aa3cbE7Bb110a842897673A8F9A3a83c7864bE ---
+[SafeValue 2026-04-16T16:41:00.484Z] Monitoring Safe: 0x962aCEB4C3C53f09110106D08364A8B40eA54568 (module: 0x92Aa3cbE7Bb110a842897673A8F9A3a83c7864bE)
+[SafeValue 2026-04-16T16:41:00.528Z] === Safe Value Monitor: Starting check ===
+[SafeValue 2026-04-16T16:41:00.604Z] Processing native ETH
+[SafeValue 2026-04-16T16:41:00.651Z] Found 2 active modules in registry
+[SafeValue 2026-04-16T16:41:00.652Z] Processing 2 module(s)
+[SafeValue 2026-04-16T16:41:00.652Z] --- Processing module: 0x16D44268C4e3a567c5ff87cCCa10Fe46f8a656Bb ---
+[SafeValue 2026-04-16T16:41:00.794Z] Monitoring Safe: 0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C (module: 0x16D44268C4e3a567c5ff87cCCa10Fe46f8a656Bb)
+[SafeValue 2026-04-16T16:41:00.836Z]   ETH: balance=0.109444582905092441, price=2325.64140523 USD
+[SafeValue 2026-04-16T16:41:00.836Z]   Value: $254.52885358221042021 USD
+[SafeValue 2026-04-16T16:41:00.904Z] Processing native ETH
+[SafeValue 2026-04-16T16:41:00.948Z] Processing erc20: WETH (0x4200000000000000000000000000000000000006)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing erc20: USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing erc20: USDC (Aave) (0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing erc20: USDT (0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing erc20: WBTC (0x54114591963CF60EF3aA63bEfD6eC263D98145a4)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing erc20: LINK (0x810D46F9a9027E28F9B01F75E2bdde839dA61115)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing erc20: cbETH (0xD171b9694f7A2597Ed006D41f7509aaD4B485c4B)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing erc20: EURC (0x808456652fdb597867f38412077A9182bf77359F)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing aave-atoken: aBasSepWETH (0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing aave-atoken: aBasSepUSDC (0x10F1A9D11CDf50041f3f8cB7191CBE2f31750ACC)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing aave-atoken: aBasSepUSDT (0xcE3CAae5Ed17A7AafCEEbc897DE843fA6CC0c018)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing aave-atoken: aBasSepWBTC (0x47Db195BAf46898302C06c31bCF46c01C64ACcF9)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing aave-atoken: aBasSepLINK (0x0aD46dE765522399d7b25B438b230A894d72272B)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Processing aave-atoken: aBasSepcbETH (0x9Fd6d1DBAd7c052e0c43f46df36eEc6a68814B63)
+[SafeValue 2026-04-16T16:41:00.949Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:00.949Z] Total USD Value: $254.52885358221042021 (on-chain: $255.905870912532861046)
+[SafeValue 2026-04-16T16:41:00.949Z] Last updated: 2726s ago (max staleness: 2700s)
+[SafeValue 2026-04-16T16:41:00.949Z] Updating due to staleness (2726s > 2700s)
+[SafeValue 2026-04-16T16:41:00.950Z] Writing Safe value to chain: 254528853582210420210 ($254.52885358221042021 USD) for module 0x92Aa3cbE7Bb110a842897673A8F9A3a83c7864bE
+[SafeValue 2026-04-16T16:41:01.131Z]   ETH: balance=0.0646, price=2325.64140523 USD
+[SafeValue 2026-04-16T16:41:01.131Z]   Value: $150.236434777858 USD
+[SafeValue 2026-04-16T16:41:01.254Z] Processing erc20: WETH (0x4200000000000000000000000000000000000006)
+[SafeValue 2026-04-16T16:41:01.254Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:01.254Z] Processing erc20: USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+[SafeValue 2026-04-16T16:41:01.611Z] Transaction submitted: 0xc98f87af1d7f8218bbf99b4a4de588a42492a64b0caec1dbbd861c9251f672b0
+[SafeValue 2026-04-16T16:41:01.632Z]   USDC: balance=84.161345, price=0.9998872 USD
+[SafeValue 2026-04-16T16:41:01.633Z]   Value: $84.151851600284 USD
+[SafeValue 2026-04-16T16:41:01.633Z] Processing erc20: USDC (Aave) (0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f)
+[SafeValue 2026-04-16T16:41:01.633Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:01.633Z] Processing erc20: USDT (0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a)
+[SafeValue 2026-04-16T16:41:01.633Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:01.633Z] Processing erc20: WBTC (0x54114591963CF60EF3aA63bEfD6eC263D98145a4)
+[SafeValue 2026-04-16T16:41:01.633Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:01.633Z] Processing erc20: LINK (0x810D46F9a9027E28F9B01F75E2bdde839dA61115)
+[SafeValue 2026-04-16T16:41:01.633Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:01.633Z] Processing erc20: cbETH (0xD171b9694f7A2597Ed006D41f7509aaD4B485c4B)
+[SafeValue 2026-04-16T16:41:01.633Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:01.633Z] Processing erc20: EURC (0x808456652fdb597867f38412077A9182bf77359F)
+[SafeValue 2026-04-16T16:41:02.006Z]   EURC: balance=20, price=0.9998872 USD
+[SafeValue 2026-04-16T16:41:02.006Z]   Value: $19.997744 USD
+[SafeValue 2026-04-16T16:41:02.006Z] Processing aave-atoken: aBasSepWETH (0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb)
+[SafeValue 2026-04-16T16:41:02.006Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.006Z] Processing aave-atoken: aBasSepUSDC (0x10F1A9D11CDf50041f3f8cB7191CBE2f31750ACC)
+[SafeValue 2026-04-16T16:41:02.006Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.006Z] Processing aave-atoken: aBasSepUSDT (0xcE3CAae5Ed17A7AafCEEbc897DE843fA6CC0c018)
+[SafeValue 2026-04-16T16:41:02.006Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.006Z] Processing aave-atoken: aBasSepWBTC (0x47Db195BAf46898302C06c31bCF46c01C64ACcF9)
+[SafeValue 2026-04-16T16:41:02.006Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.006Z] Processing aave-atoken: aBasSepLINK (0x0aD46dE765522399d7b25B438b230A894d72272B)
+[SafeValue 2026-04-16T16:41:02.006Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.006Z] Processing aave-atoken: aBasSepcbETH (0x9Fd6d1DBAd7c052e0c43f46df36eEc6a68814B63)
+[SafeValue 2026-04-16T16:41:02.006Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.006Z] Total USD Value: $254.386030378142 (on-chain: $255.553468320284)
+[SafeValue 2026-04-16T16:41:02.006Z] Last updated: 1768s ago (max staleness: 2700s)
+[SafeValue 2026-04-16T16:41:02.006Z] Skipping update - value change within threshold:
+[SafeValue 2026-04-16T16:41:02.006Z]   Diff: $1.167437942142 (45bps, threshold: 100bps)
+[SafeValue 2026-04-16T16:41:02.006Z]   Time since update: 1768s (max: 2700s)
+[SafeValue 2026-04-16T16:41:02.006Z] --- Processing module: 0x92Aa3cbE7Bb110a842897673A8F9A3a83c7864bE ---
+[SafeValue 2026-04-16T16:41:02.131Z] Monitoring Safe: 0x962aCEB4C3C53f09110106D08364A8B40eA54568 (module: 0x92Aa3cbE7Bb110a842897673A8F9A3a83c7864bE)
+[SafeValue 2026-04-16T16:41:02.252Z] Processing native ETH
+[SafeValue 2026-04-16T16:41:02.369Z] Transaction confirmed in block 40294688
+[SafeValue 2026-04-16T16:41:02.369Z] === Safe Value Monitor: Complete ===
+[SafeValue 2026-04-16T16:41:02.480Z]   ETH: balance=0.109444582905092441, price=2325.64140523 USD
+[SafeValue 2026-04-16T16:41:02.480Z]   Value: $254.52885358221042021 USD
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: WETH (0x4200000000000000000000000000000000000006)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: USDC (Aave) (0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: USDT (0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: WBTC (0x54114591963CF60EF3aA63bEfD6eC263D98145a4)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: LINK (0x810D46F9a9027E28F9B01F75E2bdde839dA61115)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: cbETH (0xD171b9694f7A2597Ed006D41f7509aaD4B485c4B)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing erc20: EURC (0x808456652fdb597867f38412077A9182bf77359F)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing aave-atoken: aBasSepWETH (0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing aave-atoken: aBasSepUSDC (0x10F1A9D11CDf50041f3f8cB7191CBE2f31750ACC)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing aave-atoken: aBasSepUSDT (0xcE3CAae5Ed17A7AafCEEbc897DE843fA6CC0c018)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing aave-atoken: aBasSepWBTC (0x47Db195BAf46898302C06c31bCF46c01C64ACcF9)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing aave-atoken: aBasSepLINK (0x0aD46dE765522399d7b25B438b230A894d72272B)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Processing aave-atoken: aBasSepcbETH (0x9Fd6d1DBAd7c052e0c43f46df36eEc6a68814B63)
+[SafeValue 2026-04-16T16:41:02.602Z]   Balance: 0, skipping
+[SafeValue 2026-04-16T16:41:02.602Z] Total USD Value: $254.52885358221042021 (on-chain: $255.905870912532861046)
+[SafeValue 2026-04-16T16:41:02.602Z] Last updated: 2728s ago (max staleness: 2700s)
+[SafeValue 2026-04-16T16:41:02.602Z] Updating due to staleness (2728s > 2700s)
+[SafeValue 2026-04-16T16:41:02.602Z] Writing Safe value to chain: 254528853582210420210 ($254.52885358221042021 USD) for module 0x92Aa3cbE7Bb110a842897673A8F9A3a83c7864bE
+[SafeValue 2026-04-16T16:41:03.081Z] Transaction submitted: 0x4b5761cb3d0c674c43e3386c3b2bc7f0ebde55491521d8946f34eed96fd768d8
+[SafeValue 2026-04-16T16:41:03.563Z] Transaction confirmed in block 40294688
+[SafeValue 2026-04-16T16:41:03.563Z] === Safe Value Monitor: Complete ===
