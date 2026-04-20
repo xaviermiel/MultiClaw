@@ -393,7 +393,6 @@ contract OraclelessModeTest is Test {
         assertEq(clone.maxOracleAge(), 60 minutes);
         assertEq(clone.maxSafeValueAge(), 60 minutes);
         assertEq(clone.maxPriceFeedAge(), 24 hours);
-        assertEq(clone.absoluteMaxSpendingBps(), 2000);
         assertEq(clone.maxOracleAcquiredBps(), 2000);
     }
 

@@ -38,13 +38,6 @@ export const DeFiInteractorModuleAbi = [
   },
   {
     type: "function",
-    name: "absoluteMaxSpendingBps",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
     name: "allowanceVersion",
     inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
     outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
@@ -334,13 +327,6 @@ export const DeFiInteractorModuleAbi = [
       },
     ],
     stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "setAbsoluteMaxSpendingBps",
-    inputs: [{ name: "newMaxBps", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
   },
   {
     type: "function",
@@ -959,7 +945,7 @@ export const DeFiInteractorModuleAbi = [
   { type: "error", name: "EnforcedPause", inputs: [] },
   {
     type: "error",
-    name: "ExceedsAbsoluteMaxSpending",
+    name: "ExceedsAllowanceCap",
     inputs: [
       { name: "requested", type: "uint256", internalType: "uint256" },
       { name: "maximum", type: "uint256", internalType: "uint256" },

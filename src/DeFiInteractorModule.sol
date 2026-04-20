@@ -88,10 +88,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Maximum age for Safe value before considered stale
     uint256 public maxSafeValueAge = 60 minutes;
 
-    /// @notice Absolute maximum spending percentage (safety backstop, oracle cannot exceed)
-    /// @dev Default 20% (2000 basis points). Even if oracle is compromised, cannot exceed this.
-    uint256 public absoluteMaxSpendingBps = 2000;
-
     // ============ Sub-Account Configuration ============
 
     /// @notice Configuration for sub-account limits (dual-mode: BPS or fixed USD)
@@ -224,7 +220,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error ApprovalExceedsLimit();
     error SpenderNotAllowed();
     error NoParserRegistered(address target);
-    error ExceedsAbsoluteMaxSpending(uint256 requested, uint256 maximum);
+    error ExceedsAllowanceCap(uint256 requested, uint256 maximum);
     error CannotRegisterUnknown();
     error LengthMismatch();
     error ExceedsMaxBps();
@@ -283,7 +279,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         maxOracleAge = 60 minutes;
         maxSafeValueAge = 60 minutes;
         maxPriceFeedAge = 24 hours;
-        absoluteMaxSpendingBps = 2000;
         maxOracleAcquiredBps = 2000;
     }
 
@@ -1060,15 +1055,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit OracleUpdated(oldOracle, newOracle);
     }
 
-    /**
-     * @notice Set the absolute maximum spending percentage (safety backstop)
-     * @param newMaxBps New maximum in basis points (e.g., 2000 = 20%)
-     */
-    function setAbsoluteMaxSpendingBps(uint256 newMaxBps) external onlyOwner {
-        if (newMaxBps > 10000) revert ExceedsMaxBps();
-        absoluteMaxSpendingBps = newMaxBps;
-    }
-
     /// @notice Set the maximum oracle acquired budget percentage
     /// @param newMaxBps New maximum in basis points (e.g., 5000 = 50%)
     function setMaxOracleAcquiredBps(uint256 newMaxBps) external onlyOwner {
@@ -1159,19 +1145,22 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    /// @notice Enforce allowance cap: minimum of global absolute cap and per-account USD cap
+    /// @notice Enforce allowance cap based on the sub-account's configured limit.
+    /// @dev USD mode uses maxSpendingUSD directly. BPS mode uses maxSpendingBps % of Safe value,
+    ///      which requires fresh Safe value. Unconfigured accounts use defaults from getSubAccountLimits.
     function _enforceAllowanceCap(address subAccount, uint256 newAllowance) internal view {
-        _requireFreshSafeValue();
-        uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
+        (uint256 maxSpendingBps, uint256 maxSpendingUSD,) = getSubAccountLimits(subAccount);
 
-        // In USD mode, also enforce per-account cap (take the stricter limit)
-        SubAccountLimits storage limits = subAccountLimits[subAccount];
-        if (limits.isConfigured && limits.maxSpendingUSD > 0 && limits.maxSpendingUSD < maxAllowance) {
-            maxAllowance = limits.maxSpendingUSD;
+        uint256 maxAllowance;
+        if (maxSpendingUSD > 0) {
+            maxAllowance = maxSpendingUSD;
+        } else {
+            _requireFreshSafeValue();
+            maxAllowance = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
         }
 
         if (newAllowance > maxAllowance) {
-            revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
+            revert ExceedsAllowanceCap(newAllowance, maxAllowance);
         }
     }
 
@@ -1214,14 +1203,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             maxSpending = maxSpendingUSD;
         } else {
             maxSpending = (windowSafeValue[subAccount] * maxSpendingBps) / 10000;
-        }
-
-        // In oracle mode, also cap by absolute maximum (safety backstop)
-        if (!_oracleless && windowSafeValue[subAccount] > 0) {
-            uint256 absoluteMax = (windowSafeValue[subAccount] * absoluteMaxSpendingBps) / 10000;
-            if (absoluteMax < maxSpending) {
-                maxSpending = absoluteMax;
-            }
         }
 
         if (cumulativeSpent[subAccount] > maxSpending) {
