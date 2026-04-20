@@ -45,13 +45,14 @@ Acquired tokens (from prior operations) are deducted first — they don't cost s
 
 ### 8. Cumulative cap
 
-On-chain cumulative spending check. Even if the oracle sets a generous allowance, `cumulativeSpent[subAccount]` tracks total spending within the current window. The module enforces:
+On-chain cumulative spending check. Even if the oracle sets a generous allowance, `cumulativeSpent[subAccount]` tracks total spending within the current window. The module enforces the sub-account's configured per-account cap:
 
 ```
-cumulativeSpent + costUSD <= windowSafeValue * absoluteMaxSpendingBps / 10000
+cumulativeSpent + costUSD <= maxSpendingUSD               // USD mode
+cumulativeSpent + costUSD <= windowSafeValue * maxSpendingBps / 10000   // BPS mode
 ```
 
-This is the hard safety backstop (default: 20% of Safe value per window). The oracle **cannot** reset this counter.
+The oracle **cannot** reset this counter.
 
 ### 9. Acquired balance tracking
 

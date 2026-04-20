@@ -133,7 +133,7 @@ Each sub-account's spending limit can be configured in one of two modes:
 - **BPS mode** (`maxSpendingBps`): Percentage of Safe value per window (e.g., 500 = 5%). Scales with portfolio.
 - **USD mode** (`maxSpendingUSD`): Fixed dollar amount per window (e.g., $1,000/day). Does not scale.
 
-Exactly one must be set. The `absoluteMaxSpendingBps` hard cap (20%) still applies in both modes — even a fixed $1M limit cannot exceed 20% of the Safe's value.
+Exactly one must be set. The oracle-set allowance is capped by the sub-account's configured limit (`maxSpendingBps * safeValue / 10000` for BPS mode, or `maxSpendingUSD` for USD mode).
 
 ## Acquired Balance Model
 
@@ -182,16 +182,16 @@ Every transaction must pass all applicable layers. Failure at any layer = revert
 
 Even if the oracle key is compromised, on-chain cumulative counters limit damage:
 
-| Protection                   | Mechanism                                                         | Default |
-| ---------------------------- | ----------------------------------------------------------------- | ------- |
-| **Cumulative spending cap**  | `cumulativeSpent` tracked on-chain, oracle cannot reset           | 20%     |
-| **Safe value snapshot**      | `windowSafeValue` frozen at window start, inflation has no effect | —       |
-| **Oracle acquired budget**   | `cumulativeOracleGrantedUSD` caps oracle's acquired grants        | 20%     |
-| **Swap marking (trustless)** | Swap outputs auto-marked acquired on-chain, no oracle needed      | —       |
-| **Per-account USD cap**      | USD-mode sub-accounts capped by `maxSpendingUSD`                  | —       |
-| **Version counters**         | Oracle must pass expected version; stale writes are skipped       | —       |
+| Protection                    | Mechanism                                                         | Default |
+| ----------------------------- | ----------------------------------------------------------------- | ------- |
+| **Cumulative spending cap**   | `cumulativeSpent` tracked on-chain, oracle cannot reset           | 20%     |
+| **Safe value snapshot**       | `windowSafeValue` frozen at window start, inflation has no effect | —       |
+| **Oracle acquired budget**    | `cumulativeOracleGrantedUSD` caps oracle's acquired grants        | 20%     |
+| **Swap marking (trustless)**  | Swap outputs auto-marked acquired on-chain, no oracle needed      | —       |
+| **Per-account allowance cap** | Allowance cap = `maxSpendingBps * safeValue` or `maxSpendingUSD`  | —       |
+| **Version counters**          | Oracle must pass expected version; stale writes are skipped       | —       |
 
-Max damage per window: `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 40%). See [`oracle/ORACLE_SECURITY.md`](./oracle/ORACLE_SECURITY.md).
+Max damage per window: per-account spending cap (`maxSpendingBps` or `maxSpendingUSD`) + `maxOracleAcquiredBps` (default 20%). See [`oracle/ORACLE_SECURITY.md`](./oracle/ORACLE_SECURITY.md).
 
 ## Agent Framework Integrations
 

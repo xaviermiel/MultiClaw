@@ -105,7 +105,6 @@ function setTokenPriceFeeds(address[] calldata tokens, address[] calldata priceF
 ### Safety caps
 
 ```solidity
-function setAbsoluteMaxSpendingBps(uint256 newMaxBps) external onlyOwner
 function setMaxOracleAcquiredBps(uint256 newMaxBps) external onlyOwner
 ```
 
@@ -144,15 +143,14 @@ function hasRole(address member, uint16 roleId) external view returns (bool)
 
 ## Key storage
 
-| Variable                 | Type                                              | Description                                      |
-| ------------------------ | ------------------------------------------------- | ------------------------------------------------ |
-| `spendingAllowance`      | `mapping(address => uint256)`                     | Oracle-managed remaining budget                  |
-| `acquiredBalance`        | `mapping(address => mapping(address => uint256))` | Free-to-use token balances                       |
-| `cumulativeSpent`        | `mapping(address => uint256)`                     | On-chain spending counter (oracle cannot reset)  |
-| `windowStart`            | `mapping(address => uint256)`                     | Current window start timestamp                   |
-| `windowSafeValue`        | `mapping(address => uint256)`                     | Safe value snapshot at window start              |
-| `absoluteMaxSpendingBps` | `uint256`                                         | Hard spending cap (default: 2000 = 20%)          |
-| `maxOracleAcquiredBps`   | `uint256`                                         | Oracle acquired budget cap (default: 2000 = 20%) |
+| Variable               | Type                                              | Description                                      |
+| ---------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| `spendingAllowance`    | `mapping(address => uint256)`                     | Oracle-managed remaining budget                  |
+| `acquiredBalance`      | `mapping(address => mapping(address => uint256))` | Free-to-use token balances                       |
+| `cumulativeSpent`      | `mapping(address => uint256)`                     | On-chain spending counter (oracle cannot reset)  |
+| `windowStart`          | `mapping(address => uint256)`                     | Current window start timestamp                   |
+| `windowSafeValue`      | `mapping(address => uint256)`                     | Safe value snapshot at window start              |
+| `maxOracleAcquiredBps` | `uint256`                                         | Oracle acquired budget cap (default: 2000 = 20%) |
 
 ## Events
 

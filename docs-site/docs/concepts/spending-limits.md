@@ -47,12 +47,13 @@ Spending is tracked in rolling windows (default: 24 hours). The window resets wh
 
 The oracle updates `spendingAllowance` within each window based on operations observed on-chain.
 
-## Hard safety cap
+## Per-account cap
 
-The `absoluteMaxSpendingBps` (default: 2000 = 20%) is a global backstop enforced on-chain:
+The on-chain cumulative counter enforces the sub-account's own configured limit:
 
 ```
-cumulativeSpent + newCost <= windowSafeValue * absoluteMaxSpendingBps / 10000
+cumulativeSpent + newCost <= maxSpendingUSD                               // USD mode
+cumulativeSpent + newCost <= windowSafeValue * maxSpendingBps / 10000     // BPS mode
 ```
 
 This cap **cannot be exceeded** regardless of what the oracle reports. Even if the oracle is compromised and sets a high `spendingAllowance`, the cumulative on-chain counter blocks overspending.
@@ -93,9 +94,8 @@ module.setSubAccountLimits(
 );
 ```
 
-The owner can also adjust the global safety caps:
+The owner can also adjust the oracle-acquired budget cap:
 
 ```solidity
-module.setAbsoluteMaxSpendingBps(3000);  // raise hard cap to 30%
 module.setMaxOracleAcquiredBps(1500);    // lower oracle budget to 15%
 ```
