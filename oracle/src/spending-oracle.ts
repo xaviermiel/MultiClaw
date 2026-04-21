@@ -1897,19 +1897,36 @@ export function buildSubAccountState(
 
 // ============ Allowance Calculation ============
 
+async function getAbsoluteMaxSpendingBps(
+  moduleAddress: Address,
+): Promise<bigint> {
+  const bps = await rpcManager.executeWithFallback(
+    (client) =>
+      client.readContract({
+        address: moduleAddress,
+        abi: DeFiInteractorModuleABI,
+        functionName: "absoluteMaxSpendingBps",
+      }),
+    "absoluteMaxSpendingBps",
+  );
+  return bps as bigint;
+}
+
 async function calculateSpendingAllowance(
   moduleAddress: Address,
   subAccount: Address,
   state: SubAccountState,
 ): Promise<bigint> {
-  const safeValue = await getSafeValue(moduleAddress);
+  const [safeValue, absoluteMaxBps] = await Promise.all([
+    getSafeValue(moduleAddress),
+    getAbsoluteMaxSpendingBps(moduleAddress),
+  ]);
   const { maxSpendingBps, maxSpendingUSD } = await getSubAccountLimits(
     moduleAddress,
     subAccount,
   );
 
-  // Mirrors _enforceAllowanceCap: USD mode uses maxSpendingUSD directly,
-  // BPS mode uses maxSpendingBps % of Safe value
+  // Dual-mode: fixed USD takes precedence, otherwise compute from BPS
   let maxSpending: bigint;
   const mode = maxSpendingUSD > 0n ? "USD" : "BPS";
   if (maxSpendingUSD > 0n) {
@@ -1918,10 +1935,27 @@ async function calculateSpendingAllowance(
     maxSpending = (safeValue * maxSpendingBps) / 10000n;
   }
 
-  const newAllowance =
+  let newAllowance =
     maxSpending > state.totalSpendingInWindow
       ? maxSpending - state.totalSpendingInWindow
       : 0n;
+
+  // Cap to the on-chain absolute maximum (mirrors _enforceAllowanceCap in the contract)
+  // Without this, batchUpdate reverts with ExceedsAbsoluteMaxSpending
+  const absoluteMaxAllowance = (safeValue * absoluteMaxBps) / 10000n;
+
+  // In USD mode, also take the per-account cap (take the stricter limit)
+  let effectiveCap = absoluteMaxAllowance;
+  if (maxSpendingUSD > 0n && maxSpendingUSD < effectiveCap) {
+    effectiveCap = maxSpendingUSD;
+  }
+
+  if (newAllowance > effectiveCap) {
+    log(
+      `Capping allowance from ${formatUnits(newAllowance, 18)} to ${formatUnits(effectiveCap, 18)} (absoluteMaxBps=${absoluteMaxBps}, safeValue=${formatUnits(safeValue, 18)})`,
+    );
+    newAllowance = effectiveCap;
+  }
 
   log(
     `Allowance: safeValue=${formatUnits(safeValue, 18)}, mode=${mode}, max=${formatUnits(maxSpending, 18)}, spent=${formatUnits(state.totalSpendingInWindow, 18)}, new=${formatUnits(newAllowance, 18)}`,
