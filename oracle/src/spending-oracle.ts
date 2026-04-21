@@ -2160,6 +2160,43 @@ async function submitBatchUpdate(
   }
 }
 
+function decodeRevertReason(err: unknown): string {
+  // Viem wraps revert data on an error in the `cause` chain; walk it to find the selector+args bytes.
+  let cur: unknown = err;
+  let data: `0x${string}` | undefined;
+  const seen = new Set<unknown>();
+  while (cur && typeof cur === "object" && !seen.has(cur)) {
+    seen.add(cur);
+    const maybe = (cur as { data?: unknown }).data;
+    if (
+      typeof maybe === "string" &&
+      maybe.startsWith("0x") &&
+      maybe.length >= 10
+    ) {
+      data = maybe as `0x${string}`;
+      break;
+    }
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  if (data) {
+    try {
+      const decoded = decodeErrorResult({
+        abi: DeFiInteractorModuleABI,
+        data,
+      });
+      const args =
+        decoded.args && decoded.args.length > 0
+          ? `(${decoded.args.map((a) => String(a)).join(", ")})`
+          : "";
+      return `${decoded.errorName}${args}`;
+    } catch {
+      return `raw=${data.slice(0, 74)}`;
+    }
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.slice(0, 200);
+}
+
 /**
  * Wait for all pending transactions to confirm
  */
@@ -2182,43 +2219,25 @@ async function waitForPendingTransactions(): Promise<void> {
         // waitForTransactionReceipt resolves for any mined tx, including reverts.
         // We must check receipt.status to distinguish success from on-chain revert.
         if (receipt.status !== "success") {
-          // Try to decode the revert reason via eth_call simulation
           let revertReason = "unknown";
           try {
-            // Re-simulate the transaction to get the revert data
+            const original = await rpcManager.executeWithFallback(
+              (client) => client.getTransaction({ hash: tx.hash }),
+              `getTransaction(${tx.hash.slice(0, 10)})`,
+            );
             await rpcManager.executeWithFallback(
               (client) =>
                 client.call({
-                  to: tx.moduleAddress,
-                  data: receipt.logs.length > 0 ? undefined : undefined, // call will use the original tx data
-                  account: account.address,
-                  blockNumber: receipt.blockNumber,
+                  to: original.to ?? tx.moduleAddress,
+                  data: original.input,
+                  account: original.from,
+                  value: original.value,
+                  blockNumber: receipt.blockNumber - 1n,
                 }),
               "simulateRevert",
             );
           } catch (simError: unknown) {
-            // Extract revert reason from the simulation error
-            const errMsg =
-              simError instanceof Error ? simError.message : String(simError);
-            // Try to find a custom error signature in the error
-            const match = errMsg.match(/0x[0-9a-fA-F]+/);
-            if (match) {
-              try {
-                const decoded = decodeErrorResult({
-                  abi: DeFiInteractorModuleABI,
-                  data: match[0] as `0x${string}`,
-                });
-                revertReason = decoded.errorName;
-                if (decoded.args && decoded.args.length > 0) {
-                  revertReason += `(${decoded.args.map((a) => String(a)).join(", ")})`;
-                }
-              } catch {
-                // If decoding fails, use raw error message excerpt
-                revertReason = errMsg.slice(0, 200);
-              }
-            } else {
-              revertReason = errMsg.slice(0, 200);
-            }
+            revertReason = decodeRevertReason(simError);
           }
           log(
             `Transaction ${tx.hash.slice(0, 10)}... REVERTED on-chain in block ${receipt.blockNumber} (${tx.subAccount}) — gasUsed=${receipt.gasUsed}, reason=${revertReason}`,
