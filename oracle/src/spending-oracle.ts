@@ -18,9 +18,8 @@ import {
   type Address,
   type Log,
   formatUnits,
-  keccak256,
-  toHex,
   decodeAbiParameters,
+  decodeErrorResult,
   parseAbiItem,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -437,17 +436,50 @@ async function getSubAccountLimits(
 async function getActiveSubaccounts(
   moduleAddress: Address,
 ): Promise<Address[]> {
-  const subaccounts = await rpcManager.executeWithFallback(
-    (client) =>
-      client.readContract({
-        address: moduleAddress,
-        abi: DeFiInteractorModuleABI,
-        functionName: "getSubaccountsByRole",
-        args: [1], // DEFI_EXECUTE_ROLE
-      }),
-    "getActiveSubaccounts",
-  );
-  return subaccounts as Address[];
+  // Query all three roles to discover every subaccount that needs oracle freshness
+  const [executeAccounts, transferAccounts, repayAccounts] = await Promise.all([
+    rpcManager.executeWithFallback(
+      (client) =>
+        client.readContract({
+          address: moduleAddress,
+          abi: DeFiInteractorModuleABI,
+          functionName: "getSubaccountsByRole",
+          args: [1], // DEFI_EXECUTE_ROLE
+        }),
+      "getSubaccountsByRole(1)",
+    ),
+    rpcManager.executeWithFallback(
+      (client) =>
+        client.readContract({
+          address: moduleAddress,
+          abi: DeFiInteractorModuleABI,
+          functionName: "getSubaccountsByRole",
+          args: [2], // DEFI_TRANSFER_ROLE
+        }),
+      "getSubaccountsByRole(2)",
+    ),
+    rpcManager.executeWithFallback(
+      (client) =>
+        client.readContract({
+          address: moduleAddress,
+          abi: DeFiInteractorModuleABI,
+          functionName: "getSubaccountsByRole",
+          args: [3], // DEFI_REPAY_ROLE
+        }),
+      "getSubaccountsByRole(3)",
+    ),
+  ]);
+
+  // Deduplicate (a subaccount may hold multiple roles)
+  const unique = new Set<Address>();
+  for (const addr of [
+    ...(executeAccounts as Address[]),
+    ...(transferAccounts as Address[]),
+    ...(repayAccounts as Address[]),
+  ]) {
+    unique.add(addr.toLowerCase() as Address);
+  }
+  return Array.from(unique);
 }
 
 async function getOnChainSpendingAllowance(
@@ -1865,12 +1897,30 @@ export function buildSubAccountState(
 
 // ============ Allowance Calculation ============
 
+async function getAbsoluteMaxSpendingBps(
+  moduleAddress: Address,
+): Promise<bigint> {
+  const bps = await rpcManager.executeWithFallback(
+    (client) =>
+      client.readContract({
+        address: moduleAddress,
+        abi: DeFiInteractorModuleABI,
+        functionName: "absoluteMaxSpendingBps",
+      }),
+    "absoluteMaxSpendingBps",
+  );
+  return bps as bigint;
+}
+
 async function calculateSpendingAllowance(
   moduleAddress: Address,
   subAccount: Address,
   state: SubAccountState,
 ): Promise<bigint> {
-  const safeValue = await getSafeValue(moduleAddress);
+  const [safeValue, absoluteMaxBps] = await Promise.all([
+    getSafeValue(moduleAddress),
+    getAbsoluteMaxSpendingBps(moduleAddress),
+  ]);
   const { maxSpendingBps, maxSpendingUSD } = await getSubAccountLimits(
     moduleAddress,
     subAccount,
@@ -1885,10 +1935,27 @@ async function calculateSpendingAllowance(
     maxSpending = (safeValue * maxSpendingBps) / 10000n;
   }
 
-  const newAllowance =
+  let newAllowance =
     maxSpending > state.totalSpendingInWindow
       ? maxSpending - state.totalSpendingInWindow
       : 0n;
+
+  // Cap to the on-chain absolute maximum (mirrors _enforceAllowanceCap in the contract)
+  // Without this, batchUpdate reverts with ExceedsAbsoluteMaxSpending
+  const absoluteMaxAllowance = (safeValue * absoluteMaxBps) / 10000n;
+
+  // In USD mode, also take the per-account cap (same logic as the contract)
+  let effectiveCap = absoluteMaxAllowance;
+  if (maxSpendingUSD > 0n && maxSpendingUSD < effectiveCap) {
+    effectiveCap = maxSpendingUSD;
+  }
+
+  if (newAllowance > effectiveCap) {
+    log(
+      `Capping allowance from ${formatUnits(newAllowance, 18)} to ${formatUnits(effectiveCap, 18)} (absoluteMaxBps=${absoluteMaxBps}, safeValue=${formatUnits(safeValue, 18)})`,
+    );
+    newAllowance = effectiveCap;
+  }
 
   log(
     `Allowance: safeValue=${formatUnits(safeValue, 18)}, mode=${mode}, max=${formatUnits(maxSpending, 18)}, spent=${formatUnits(state.totalSpendingInWindow, 18)}, new=${formatUnits(newAllowance, 18)}`,
@@ -2149,11 +2216,49 @@ async function waitForPendingTransactions(): Promise<void> {
         // waitForTransactionReceipt resolves for any mined tx, including reverts.
         // We must check receipt.status to distinguish success from on-chain revert.
         if (receipt.status !== "success") {
+          // Try to decode the revert reason via eth_call simulation
+          let revertReason = "unknown";
+          try {
+            // Re-simulate the transaction to get the revert data
+            await rpcManager.executeWithFallback(
+              (client) =>
+                client.call({
+                  to: tx.moduleAddress,
+                  data: receipt.logs.length > 0 ? undefined : undefined, // call will use the original tx data
+                  account: account.address,
+                  blockNumber: receipt.blockNumber,
+                }),
+              "simulateRevert",
+            );
+          } catch (simError: unknown) {
+            // Extract revert reason from the simulation error
+            const errMsg =
+              simError instanceof Error ? simError.message : String(simError);
+            // Try to find a custom error signature in the error
+            const match = errMsg.match(/0x[0-9a-fA-F]+/);
+            if (match) {
+              try {
+                const decoded = decodeErrorResult({
+                  abi: DeFiInteractorModuleABI,
+                  data: match[0] as `0x${string}`,
+                });
+                revertReason = decoded.errorName;
+                if (decoded.args && decoded.args.length > 0) {
+                  revertReason += `(${decoded.args.map((a) => String(a)).join(", ")})`;
+                }
+              } catch {
+                // If decoding fails, use raw error message excerpt
+                revertReason = errMsg.slice(0, 200);
+              }
+            } else {
+              revertReason = errMsg.slice(0, 200);
+            }
+          }
           log(
-            `Transaction ${tx.hash.slice(0, 10)}... REVERTED on-chain in block ${receipt.blockNumber} (${tx.subAccount}) — gasUsed=${receipt.gasUsed}`,
+            `Transaction ${tx.hash.slice(0, 10)}... REVERTED on-chain in block ${receipt.blockNumber} (${tx.subAccount}) — gasUsed=${receipt.gasUsed}, reason=${revertReason}`,
           );
           throw new Error(
-            `Transaction reverted on-chain (block ${receipt.blockNumber}, tx ${tx.hash})`,
+            `Transaction reverted on-chain (block ${receipt.blockNumber}, tx ${tx.hash}, reason=${revertReason})`,
           );
         }
         log(
