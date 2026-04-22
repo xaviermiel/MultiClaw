@@ -179,22 +179,6 @@ export const DeFiInteractorModuleABI = [
     outputs: [{ name: "", type: "uint16", internalType: "uint16" }],
     stateMutability: "view",
   },
-  {
-    type: "function",
-    name: "absoluteMaxSpendingBps",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  // ============ Errors ============
-  {
-    type: "error",
-    name: "ExceedsAbsoluteMaxSpending",
-    inputs: [
-      { name: "requested", type: "uint256", internalType: "uint256" },
-      { name: "maximum", type: "uint256", internalType: "uint256" },
-    ],
-  },
   // ============ Events ============
   // Note: Events no longer include timestamp - contract uses block.timestamp internally
   {
