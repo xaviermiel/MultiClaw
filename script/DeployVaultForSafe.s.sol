@@ -13,10 +13,10 @@ import "../src/AgentVaultFactory.sol";
  */
 contract DeployVaultForSafe is Script {
     address constant FACTORY = 0x83CaA00d363aCA3cb68274D991Eb1f6B226F70FF;
-    address constant ORACLE  = 0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E;
+    address constant ORACLE = 0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E;
 
-    address constant SAFE    = 0x6c9410Fcdedda7a0dA572eB613b1ad5372592BB7;
-    address constant AGENT   = 0xf6808f2c2A5BE8410D921a81b4Ef4d3Ff83d4E2b;
+    address constant SAFE = 0x6c9410Fcdedda7a0dA572eB613b1ad5372592BB7;
+    address constant AGENT = 0xf6808f2c2A5BE8410D921a81b4Ef4d3Ff83d4E2b;
 
     uint256 constant PRESET_ID = 0; // DeFi Trader
 
@@ -28,18 +28,16 @@ contract DeployVaultForSafe is Script {
         address predicted = factory.computeModuleAddress(SAFE);
         console.log("Predicted module address:", predicted);
 
-        address[] memory priceFeedTokens   = new address[](0);
+        address[] memory priceFeedTokens = new address[](0);
         address[] memory priceFeedAddresses = new address[](0);
+        // Only consumed when the preset enables recipient whitelisting (e.g. Payment Agent).
+        // For DeFi Trader / Yield Farmer presets, leave empty.
+        address[] memory allowedRecipients = new address[](0);
 
         vm.startBroadcast(deployerPrivateKey);
 
         address module = factory.deployVaultFromPreset(
-            SAFE,
-            ORACLE,
-            AGENT,
-            PRESET_ID,
-            priceFeedTokens,
-            priceFeedAddresses
+            SAFE, ORACLE, AGENT, PRESET_ID, priceFeedTokens, priceFeedAddresses, allowedRecipients
         );
 
         vm.stopBroadcast();

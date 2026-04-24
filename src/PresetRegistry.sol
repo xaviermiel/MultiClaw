@@ -25,6 +25,9 @@ contract PresetRegistry is Ownable {
         address[] parserAddresses;
         bytes4[] selectors;
         uint8[] selectorTypes;
+        // Default recipient-whitelist toggle for TRANSFER-role presets (e.g. Payment Agent).
+        // The list itself is supplied per deployment, since recipients are user-specific.
+        bool recipientWhitelistEnabled;
     }
 
     // ============ State ============
@@ -72,7 +75,8 @@ contract PresetRegistry is Ownable {
         address[] calldata parserProtocols,
         address[] calldata parserAddresses,
         bytes4[] calldata selectors,
-        uint8[] calldata selectorTypes
+        uint8[] calldata selectorTypes,
+        bool recipientWhitelistEnabled
     ) external onlyOwner returns (uint256 presetId) {
         if (parserProtocols.length != parserAddresses.length) {
             revert ArrayLengthMismatch();
@@ -93,6 +97,7 @@ contract PresetRegistry is Ownable {
         p.parserAddresses = parserAddresses;
         p.selectors = selectors;
         p.selectorTypes = selectorTypes;
+        p.recipientWhitelistEnabled = recipientWhitelistEnabled;
 
         emit PresetCreated(presetId, name);
     }
@@ -112,7 +117,8 @@ contract PresetRegistry is Ownable {
         address[] calldata parserProtocols,
         address[] calldata parserAddresses,
         bytes4[] calldata selectors,
-        uint8[] calldata selectorTypes
+        uint8[] calldata selectorTypes,
+        bool recipientWhitelistEnabled
     ) external onlyOwner {
         if (!_presets[presetId].exists) revert PresetNotFound(presetId);
         if (parserProtocols.length != parserAddresses.length) revert ArrayLengthMismatch();
@@ -129,6 +135,7 @@ contract PresetRegistry is Ownable {
         p.parserAddresses = parserAddresses;
         p.selectors = selectors;
         p.selectorTypes = selectorTypes;
+        p.recipientWhitelistEnabled = recipientWhitelistEnabled;
 
         emit PresetUpdated(presetId, name);
     }
@@ -172,7 +179,8 @@ contract PresetRegistry is Ownable {
             address[] memory parserProtocols,
             address[] memory parserAddresses,
             bytes4[] memory selectors,
-            uint8[] memory selectorTypes
+            uint8[] memory selectorTypes,
+            bool recipientWhitelistEnabled
         )
     {
         Preset storage p = _presets[presetId];
@@ -186,7 +194,8 @@ contract PresetRegistry is Ownable {
             p.parserProtocols,
             p.parserAddresses,
             p.selectors,
-            p.selectorTypes
+            p.selectorTypes,
+            p.recipientWhitelistEnabled
         );
     }
 }

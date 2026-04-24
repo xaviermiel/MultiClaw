@@ -52,10 +52,9 @@ contract PresetRegistryTest is Test {
         uint8[] memory selTypes = new uint8[](1);
         selTypes[0] = 1; // SWAP
 
-        return
-            registry.createPreset(
-                "DeFi Trader", 1, 500, 0, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes
-            );
+        return registry.createPreset(
+            "DeFi Trader", 1, 500, 0, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes, false
+        );
     }
 
     /// @dev Creates a Payment Agent preset (transfer-only, no protocols)
@@ -64,7 +63,7 @@ contract PresetRegistryTest is Test {
         bytes4[] memory emptySel = new bytes4[](0);
         uint8[] memory emptyType = new uint8[](0);
 
-        return registry.createPreset("Payment Agent", 2, 100, 0, 1 days, empty, empty, empty, emptySel, emptyType);
+        return registry.createPreset("Payment Agent", 2, 100, 0, 1 days, empty, empty, empty, emptySel, emptyType, true);
     }
 
     /// @dev Shorthand for empty arrays
@@ -134,7 +133,8 @@ contract PresetRegistryTest is Test {
             address[] memory parserProtocols,
             address[] memory parserAddresses,
             bytes4[] memory selectors,
-            uint8[] memory selectorTypes
+            uint8[] memory selectorTypes,
+            bool recipientWhitelistEnabled
         ) = registry.getPresetFull(presetId);
 
         assertEq(roleId, 1);
@@ -151,6 +151,7 @@ contract PresetRegistryTest is Test {
         assertEq(selectors[0], bytes4(0x12345678));
         assertEq(selectorTypes.length, 1);
         assertEq(selectorTypes[0], 1);
+        assertFalse(recipientWhitelistEnabled);
     }
 
     function testCreateMultiplePresetsSequentialIds() public {
@@ -173,7 +174,8 @@ contract PresetRegistryTest is Test {
             address[] memory parserProtocols,
             address[] memory parserAddresses,
             bytes4[] memory selectors,
-            uint8[] memory selectorTypes
+            uint8[] memory selectorTypes,
+            bool recipientWhitelistEnabled
         ) = registry.getPresetFull(presetId);
 
         assertEq(allowedProtocols.length, 0);
@@ -181,6 +183,8 @@ contract PresetRegistryTest is Test {
         assertEq(parserAddresses.length, 0);
         assertEq(selectors.length, 0);
         assertEq(selectorTypes.length, 0);
+        // Payment Agent helper sets the toggle on
+        assertTrue(recipientWhitelistEnabled);
     }
 
     function testCreatePresetWithMultipleParsersAndSelectors() public {
@@ -205,7 +209,7 @@ contract PresetRegistryTest is Test {
         selTypes[2] = 3; // WITHDRAW
 
         uint256 presetId = registry.createPreset(
-            "Yield Farmer", 1, 1000, 0, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes
+            "Yield Farmer", 1, 1000, 0, 1 days, protocols, parserProtos, parserAddrs, sels, selTypes, false
         );
 
         (
@@ -213,7 +217,7 @@ contract PresetRegistryTest is Test {
             address[] memory storedParserProtos,
             address[] memory storedParserAddrs,
             bytes4[] memory storedSels,
-            uint8[] memory storedSelTypes
+            uint8[] memory storedSelTypes,
         ) = registry.getPresetFull(presetId);
 
         assertEq(storedParserProtos.length, 2);
@@ -238,7 +242,8 @@ contract PresetRegistryTest is Test {
             _emptyAddresses(),
             _emptyAddresses(),
             _emptySelectors(),
-            _emptyUint8s()
+            _emptyUint8s(),
+            false
         );
     }
 
@@ -250,7 +255,17 @@ contract PresetRegistryTest is Test {
 
         vm.expectRevert(PresetRegistry.ArrayLengthMismatch.selector);
         registry.createPreset(
-            "bad", 1, 500, 0, 1 days, _emptyAddresses(), oneAddr, _emptyAddresses(), _emptySelectors(), _emptyUint8s()
+            "bad",
+            1,
+            500,
+            0,
+            1 days,
+            _emptyAddresses(),
+            oneAddr,
+            _emptyAddresses(),
+            _emptySelectors(),
+            _emptyUint8s(),
+            false
         );
     }
 
@@ -260,7 +275,17 @@ contract PresetRegistryTest is Test {
 
         vm.expectRevert(PresetRegistry.ArrayLengthMismatch.selector);
         registry.createPreset(
-            "bad", 1, 500, 0, 1 days, _emptyAddresses(), _emptyAddresses(), _emptyAddresses(), oneSel, _emptyUint8s()
+            "bad",
+            1,
+            500,
+            0,
+            1 days,
+            _emptyAddresses(),
+            _emptyAddresses(),
+            _emptyAddresses(),
+            oneSel,
+            _emptyUint8s(),
+            false
         );
     }
 
@@ -272,7 +297,7 @@ contract PresetRegistryTest is Test {
         uint8[] memory emptyType = new uint8[](0);
 
         uint256 presetId = registry.createPreset(
-            "Fixed USD Agent", 1, 0, 25_000 * 10 ** 18, 1 days, empty, empty, empty, emptySel, emptyType
+            "Fixed USD Agent", 1, 0, 25_000 * 10 ** 18, 1 days, empty, empty, empty, emptySel, emptyType, false
         );
 
         (string memory name,, uint256 maxBps, uint256 maxUSD, uint256 window) = registry.getPreset(presetId);
@@ -304,7 +329,8 @@ contract PresetRegistryTest is Test {
             _emptyAddresses(),
             _emptyAddresses(),
             _emptySelectors(),
-            _emptyUint8s()
+            _emptyUint8s(),
+            true // toggle on as part of update
         );
 
         (string memory name, uint16 roleId, uint256 maxBps, uint256 maxUSD, uint256 window) =
@@ -334,7 +360,8 @@ contract PresetRegistryTest is Test {
             _emptyAddresses(),
             _emptyAddresses(),
             _emptySelectors(),
-            _emptyUint8s()
+            _emptyUint8s(),
+            false
         );
     }
 
@@ -356,7 +383,8 @@ contract PresetRegistryTest is Test {
             oneAddr,
             _emptyAddresses(),
             _emptySelectors(),
-            _emptyUint8s()
+            _emptyUint8s(),
+            false
         );
     }
 
@@ -376,7 +404,8 @@ contract PresetRegistryTest is Test {
             _emptyAddresses(),
             _emptyAddresses(),
             _emptySelectors(),
-            _emptyUint8s()
+            _emptyUint8s(),
+            false
         );
     }
 
@@ -439,7 +468,8 @@ contract PresetRegistryTest is Test {
             _emptyAddresses(),
             _emptyAddresses(),
             _emptySelectors(),
-            _emptyUint8s()
+            _emptyUint8s(),
+            false
         );
 
         // Still exists

@@ -21,24 +21,24 @@ import "../src/PresetRegistry.sol";
  */
 contract CreatePresets is Script {
     // ── Protocol addresses (Base Sepolia) ────────────────────────────────────
-    address constant AAVE_V3_POOL        = 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27;
-    address constant AAVE_V3_REWARDS     = 0x71B448405c803A3982aBa448133133D2DEAFBE5F;
-    address constant UNISWAP_V3_ROUTER   = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
-    address constant UNIVERSAL_ROUTER    = 0x492E6456D9528771018DeB9E87ef7750EF184104;
-    address constant MORPHO_BLUE         = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
+    address constant AAVE_V3_POOL = 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27;
+    address constant AAVE_V3_REWARDS = 0x71B448405c803A3982aBa448133133D2DEAFBE5F;
+    address constant UNISWAP_V3_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
+    address constant UNIVERSAL_ROUTER = 0x492E6456D9528771018DeB9E87ef7750EF184104;
+    address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
 
     // ── Role IDs ─────────────────────────────────────────────────────────────
-    uint16 constant DEFI_EXECUTE_ROLE  = 1;
+    uint16 constant DEFI_EXECUTE_ROLE = 1;
     uint16 constant DEFI_TRANSFER_ROLE = 2;
 
     // ── Selector operation types ──────────────────────────────────────────────
     // UNKNOWN=0, SWAP=1, DEPOSIT=2, WITHDRAW=3, CLAIM=4, APPROVE=5, REPAY=6
-    uint8 constant SWAP    = 1;
+    uint8 constant SWAP = 1;
     uint8 constant DEPOSIT = 2;
     uint8 constant WITHDRAW = 3;
-    uint8 constant CLAIM   = 4;
+    uint8 constant CLAIM = 4;
     uint8 constant APPROVE = 5;
-    uint8 constant REPAY   = 6;
+    uint8 constant REPAY = 6;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -73,42 +73,43 @@ contract CreatePresets is Script {
             parserAddresses[3] = universalParser;
 
             bytes4[] memory selectors = new bytes4[](11);
-            selectors[0]  = 0x095ea7b3; // ERC20 approve
-            selectors[1]  = 0x617ba037; // Aave supply      -> DEPOSIT
-            selectors[2]  = 0x69328dec; // Aave withdraw     -> WITHDRAW
-            selectors[3]  = 0xa415bcad; // Aave borrow       -> WITHDRAW
-            selectors[4]  = 0x573ade81; // Aave repay        -> REPAY
-            selectors[5]  = 0x236300dc; // claimRewards      -> CLAIM
-            selectors[6]  = 0xbb492bf5; // claimAllRewards   -> CLAIM
-            selectors[7]  = 0x04e45aaf; // exactInputSingle  -> SWAP
-            selectors[8]  = 0xb858183f; // exactInput        -> SWAP
-            selectors[9]  = 0x5023b4df; // exactOutputSingle -> SWAP
+            selectors[0] = 0x095ea7b3; // ERC20 approve
+            selectors[1] = 0x617ba037; // Aave supply      -> DEPOSIT
+            selectors[2] = 0x69328dec; // Aave withdraw     -> WITHDRAW
+            selectors[3] = 0xa415bcad; // Aave borrow       -> WITHDRAW
+            selectors[4] = 0x573ade81; // Aave repay        -> REPAY
+            selectors[5] = 0x236300dc; // claimRewards      -> CLAIM
+            selectors[6] = 0xbb492bf5; // claimAllRewards   -> CLAIM
+            selectors[7] = 0x04e45aaf; // exactInputSingle  -> SWAP
+            selectors[8] = 0xb858183f; // exactInput        -> SWAP
+            selectors[9] = 0x5023b4df; // exactOutputSingle -> SWAP
             selectors[10] = 0x3593564c; // Universal execute -> SWAP
 
             uint8[] memory selectorTypes = new uint8[](11);
-            selectorTypes[0]  = APPROVE;
-            selectorTypes[1]  = DEPOSIT;
-            selectorTypes[2]  = WITHDRAW;
-            selectorTypes[3]  = WITHDRAW;
-            selectorTypes[4]  = REPAY;
-            selectorTypes[5]  = CLAIM;
-            selectorTypes[6]  = CLAIM;
-            selectorTypes[7]  = SWAP;
-            selectorTypes[8]  = SWAP;
-            selectorTypes[9]  = SWAP;
+            selectorTypes[0] = APPROVE;
+            selectorTypes[1] = DEPOSIT;
+            selectorTypes[2] = WITHDRAW;
+            selectorTypes[3] = WITHDRAW;
+            selectorTypes[4] = REPAY;
+            selectorTypes[5] = CLAIM;
+            selectorTypes[6] = CLAIM;
+            selectorTypes[7] = SWAP;
+            selectorTypes[8] = SWAP;
+            selectorTypes[9] = SWAP;
             selectorTypes[10] = SWAP;
 
             registry.createPreset(
                 "DeFi Trader",
                 DEFI_EXECUTE_ROLE,
-                500,  // 5% maxSpendingBps
-                0,    // no USD cap
+                500, // 5% maxSpendingBps
+                0, // no USD cap
                 1 days,
                 protocols,
                 parserProtocols,
                 parserAddresses,
                 selectors,
-                selectorTypes
+                selectorTypes,
+                false // recipientWhitelistEnabled — N/A for EXECUTE-role preset
             );
             console.log("Preset 0 created: DeFi Trader");
         }
@@ -131,36 +132,36 @@ contract CreatePresets is Script {
             parserAddresses[2] = morphoBlueParser;
 
             bytes4[] memory selectors = new bytes4[](12);
-            selectors[0]  = 0x095ea7b3; // approve
+            selectors[0] = 0x095ea7b3; // approve
             // Aave V3
-            selectors[1]  = 0x617ba037; // Aave supply            -> DEPOSIT
-            selectors[2]  = 0x69328dec; // Aave withdraw           -> WITHDRAW
-            selectors[3]  = 0xa415bcad; // Aave borrow             -> WITHDRAW
-            selectors[4]  = 0x573ade81; // Aave repay              -> REPAY
-            selectors[5]  = 0x236300dc; // claimRewards            -> CLAIM
-            selectors[6]  = 0xbb492bf5; // claimAllRewards         -> CLAIM
+            selectors[1] = 0x617ba037; // Aave supply            -> DEPOSIT
+            selectors[2] = 0x69328dec; // Aave withdraw           -> WITHDRAW
+            selectors[3] = 0xa415bcad; // Aave borrow             -> WITHDRAW
+            selectors[4] = 0x573ade81; // Aave repay              -> REPAY
+            selectors[5] = 0x236300dc; // claimRewards            -> CLAIM
+            selectors[6] = 0xbb492bf5; // claimAllRewards         -> CLAIM
             // Morpho Blue
-            selectors[7]  = 0xa99aad89; // Morpho supply           -> DEPOSIT
-            selectors[8]  = 0x5c2bea49; // Morpho withdraw         -> WITHDRAW
-            selectors[9]  = 0x20b76e81; // Morpho repay            -> REPAY
+            selectors[7] = 0xa99aad89; // Morpho supply           -> DEPOSIT
+            selectors[8] = 0x5c2bea49; // Morpho withdraw         -> WITHDRAW
+            selectors[9] = 0x20b76e81; // Morpho repay            -> REPAY
             selectors[10] = 0x238d6579; // Morpho supplyCollateral  -> DEPOSIT
             selectors[11] = 0x8720316d; // Morpho withdrawCollateral -> WITHDRAW
 
             uint8[] memory selectorTypes = new uint8[](12);
-            selectorTypes[0]  = APPROVE;
+            selectorTypes[0] = APPROVE;
             // Aave V3
-            selectorTypes[1]  = DEPOSIT;
-            selectorTypes[2]  = WITHDRAW;
-            selectorTypes[3]  = WITHDRAW;
-            selectorTypes[4]  = REPAY;
-            selectorTypes[5]  = CLAIM;
-            selectorTypes[6]  = CLAIM;
+            selectorTypes[1] = DEPOSIT;
+            selectorTypes[2] = WITHDRAW;
+            selectorTypes[3] = WITHDRAW;
+            selectorTypes[4] = REPAY;
+            selectorTypes[5] = CLAIM;
+            selectorTypes[6] = CLAIM;
             // Morpho Blue
-            selectorTypes[7]  = DEPOSIT;   // supply
-            selectorTypes[8]  = WITHDRAW;  // withdraw
-            selectorTypes[9]  = REPAY;     // repay
-            selectorTypes[10] = DEPOSIT;   // supplyCollateral
-            selectorTypes[11] = WITHDRAW;  // withdrawCollateral
+            selectorTypes[7] = DEPOSIT; // supply
+            selectorTypes[8] = WITHDRAW; // withdraw
+            selectorTypes[9] = REPAY; // repay
+            selectorTypes[10] = DEPOSIT; // supplyCollateral
+            selectorTypes[11] = WITHDRAW; // withdrawCollateral
 
             registry.createPreset(
                 "Yield Farmer",
@@ -172,7 +173,8 @@ contract CreatePresets is Script {
                 parserProtocols,
                 parserAddresses,
                 selectors,
-                selectorTypes
+                selectorTypes,
+                false // recipientWhitelistEnabled — N/A for EXECUTE-role preset
             );
             console.log("Preset 1 created: Yield Farmer");
         }
@@ -186,14 +188,15 @@ contract CreatePresets is Script {
             registry.createPreset(
                 "Payment Agent",
                 DEFI_TRANSFER_ROLE,
-                100,  // 1% maxSpendingBps
+                100, // 1% maxSpendingBps
                 0,
                 1 days,
                 empty,
                 empty,
                 empty,
                 emptySelectors,
-                emptyTypes
+                emptyTypes,
+                true // recipientWhitelistEnabled — Payment Agent enforces a recipient whitelist by default
             );
             console.log("Preset 2 created: Payment Agent");
         }

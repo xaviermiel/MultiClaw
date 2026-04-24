@@ -101,7 +101,9 @@ contract AgentVaultFactoryTest is Test {
             selectors: selectors,
             selectorTypes: selectorTypes,
             priceFeedTokens: priceFeedTokens,
-            priceFeedAddresses: priceFeedAddresses
+            priceFeedAddresses: priceFeedAddresses,
+            recipientWhitelistEnabled: false,
+            allowedRecipients: new address[](0)
         });
     }
 
@@ -130,7 +132,8 @@ contract AgentVaultFactoryTest is Test {
             parserProtos,
             parserAddrs,
             sels,
-            selTypes
+            selTypes,
+            false // recipientWhitelistEnabled
         );
     }
 
@@ -206,8 +209,9 @@ contract AgentVaultFactoryTest is Test {
         address[] memory empty = new address[](0);
         bytes4[] memory emptySel = new bytes4[](0);
         uint8[] memory emptyType = new uint8[](0);
-        uint256 id1 =
-            presetRegistry.createPreset("Payment Agent", 2, 100, 0, 1 days, empty, empty, empty, emptySel, emptyType);
+        uint256 id1 = presetRegistry.createPreset(
+            "Payment Agent", 2, 100, 0, 1 days, empty, empty, empty, emptySel, emptyType, true
+        );
         assertEq(id1, 1);
         assertEq(presetRegistry.presetCount(), 2);
     }
@@ -232,7 +236,7 @@ contract AgentVaultFactoryTest is Test {
 
         vm.prank(agent);
         vm.expectRevert();
-        presetRegistry.createPreset("test", 1, 500, 0, 1 days, empty, empty, empty, emptySel, emptyType);
+        presetRegistry.createPreset("test", 1, 500, 0, 1 days, empty, empty, empty, emptySel, emptyType, false);
     }
 
     function testCreatePresetRevertsOnArrayMismatch() public {
@@ -244,7 +248,7 @@ contract AgentVaultFactoryTest is Test {
 
         // parserProtocols.length != parserAddresses.length
         vm.expectRevert(PresetRegistry.ArrayLengthMismatch.selector);
-        presetRegistry.createPreset("bad", 1, 500, 0, 1 days, empty, oneAddr, empty, emptySel, emptyType);
+        presetRegistry.createPreset("bad", 1, 500, 0, 1 days, empty, oneAddr, empty, emptySel, emptyType, false);
     }
 
     // ============ Deploy Vault Tests ============
@@ -356,8 +360,10 @@ contract AgentVaultFactoryTest is Test {
         address[] memory priceFeedAddrs = new address[](1);
         priceFeedAddrs[0] = address(priceFeed);
 
-        address module =
-            factory.deployVaultFromPreset(address(safe1), oracle, agent, presetId, priceFeedTokens, priceFeedAddrs);
+        address[] memory noRecipients = new address[](0);
+        address module = factory.deployVaultFromPreset(
+            address(safe1), oracle, agent, presetId, priceFeedTokens, priceFeedAddrs, noRecipients
+        );
         assertTrue(module != address(0));
 
         DeFiInteractorModule m = DeFiInteractorModule(module);
@@ -378,7 +384,7 @@ contract AgentVaultFactoryTest is Test {
         address[] memory empty = new address[](0);
 
         vm.expectRevert(abi.encodeWithSelector(PresetRegistry.PresetNotFound.selector, 999));
-        factory.deployVaultFromPreset(address(safe1), oracle, agent, 999, empty, empty);
+        factory.deployVaultFromPreset(address(safe1), oracle, agent, 999, empty, empty, empty);
     }
 
     function testDeployFromPresetRevertsIfNoPresetRegistry() public {
@@ -389,7 +395,92 @@ contract AgentVaultFactoryTest is Test {
         address[] memory empty = new address[](0);
 
         vm.expectRevert(AgentVaultFactory.PresetRegistryNotSet.selector);
-        factoryNoPr.deployVaultFromPreset(address(safe1), oracle, agent, 0, empty, empty);
+        factoryNoPr.deployVaultFromPreset(address(safe1), oracle, agent, 0, empty, empty, empty);
+    }
+
+    // ============ Recipient Whitelist Wiring Tests ============
+
+    /// @dev Payment-Agent style preset (transfer-only, recipientWhitelistEnabled=true)
+    function _createPaymentAgentPreset() internal returns (uint256) {
+        address[] memory empty = new address[](0);
+        bytes4[] memory emptySel = new bytes4[](0);
+        uint8[] memory emptyType = new uint8[](0);
+        return presetRegistry.createPreset(
+            "Payment Agent",
+            2, // DEFI_TRANSFER_ROLE
+            100, // 1% maxSpendingBps
+            0,
+            1 days,
+            empty,
+            empty,
+            empty,
+            emptySel,
+            emptyType,
+            true // recipientWhitelistEnabled
+        );
+    }
+
+    function testDeployFromPaymentAgentPresetWithRecipients() public {
+        uint256 presetId = _createPaymentAgentPreset();
+
+        address[] memory empty = new address[](0);
+        address payee1 = makeAddr("payee1");
+        address payee2 = makeAddr("payee2");
+        address[] memory recipients = new address[](2);
+        recipients[0] = payee1;
+        recipients[1] = payee2;
+
+        address module =
+            factory.deployVaultFromPreset(address(safe1), oracle, agent, presetId, empty, empty, recipients);
+
+        DeFiInteractorModule m = DeFiInteractorModule(module);
+        assertTrue(m.recipientWhitelistEnabled(agent));
+        assertTrue(m.allowedRecipients(agent, payee1));
+        assertTrue(m.allowedRecipients(agent, payee2));
+    }
+
+    function testDeployFromPaymentAgentPresetEmptyRecipientsBlocksAll() public {
+        // Toggle on, no recipients supplied — Safe must add them later
+        uint256 presetId = _createPaymentAgentPreset();
+        address[] memory empty = new address[](0);
+
+        address module = factory.deployVaultFromPreset(address(safe1), oracle, agent, presetId, empty, empty, empty);
+
+        DeFiInteractorModule m = DeFiInteractorModule(module);
+        assertTrue(m.recipientWhitelistEnabled(agent));
+        assertFalse(m.allowedRecipients(agent, makeAddr("anyone")));
+    }
+
+    function testDeployFromTraderPresetIgnoresRecipients() public {
+        // Preset has recipientWhitelistEnabled=false; recipients param must not be applied.
+        uint256 presetId = _createDefiTraderPreset();
+        address[] memory pft = new address[](1);
+        pft[0] = protocol1;
+        address[] memory pfa = new address[](1);
+        pfa[0] = address(priceFeed);
+
+        address[] memory recipients = new address[](1);
+        recipients[0] = makeAddr("ignored");
+
+        address module = factory.deployVaultFromPreset(address(safe1), oracle, agent, presetId, pft, pfa, recipients);
+
+        DeFiInteractorModule m = DeFiInteractorModule(module);
+        assertFalse(m.recipientWhitelistEnabled(agent));
+        assertFalse(m.allowedRecipients(agent, recipients[0]));
+    }
+
+    function testDeployVaultWithRecipientWhitelist() public {
+        // Custom config flow
+        AgentVaultFactory.VaultConfig memory config = _buildConfig(address(safe1));
+        config.recipientWhitelistEnabled = true;
+        address payee = makeAddr("payee");
+        config.allowedRecipients = new address[](1);
+        config.allowedRecipients[0] = payee;
+
+        address module = factory.deployVault(config);
+        DeFiInteractorModule m = DeFiInteractorModule(module);
+        assertTrue(m.recipientWhitelistEnabled(agent));
+        assertTrue(m.allowedRecipients(agent, payee));
     }
 
     // ============ Validation Tests ============
@@ -530,7 +621,8 @@ contract AgentVaultFactoryTest is Test {
             emptyAddr,
             emptyAddr,
             emptySel,
-            emptyType
+            emptyType,
+            false // recipientWhitelistEnabled
         );
 
         (string memory name,, uint256 maxBps, uint256 maxUSD, uint256 window) = presetRegistry.getPreset(presetId);
@@ -546,6 +638,6 @@ contract AgentVaultFactoryTest is Test {
         uint8[] memory emptyType = new uint8[](0);
 
         vm.expectRevert(abi.encodeWithSelector(PresetRegistry.PresetNotFound.selector, 0));
-        presetRegistry.updatePreset(0, "bad", 1, 500, 0, 1 days, empty, empty, empty, emptySel, emptyType);
+        presetRegistry.updatePreset(0, "bad", 1, 500, 0, 1 days, empty, empty, empty, emptySel, emptyType, false);
     }
 }

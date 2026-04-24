@@ -54,6 +54,10 @@ contract AgentVaultFactory is Ownable {
         uint8[] selectorTypes;
         address[] priceFeedTokens;
         address[] priceFeedAddresses;
+        // Optional: enforce a recipient whitelist on transferToken (TRANSFER role).
+        // When enabled, only addresses in allowedRecipients can receive transfers.
+        bool recipientWhitelistEnabled;
+        address[] allowedRecipients;
     }
 
     // ============ Events ============
@@ -161,6 +165,7 @@ contract AgentVaultFactory is Ownable {
         if (config.priceFeedTokens.length > 0) {
             m.setTokenPriceFeeds(config.priceFeedTokens, config.priceFeedAddresses);
         }
+        _configureRecipientWhitelist(m, config.agentAddress, config.recipientWhitelistEnabled, config.allowedRecipients);
 
         // 3. Transfer ownership to Safe (factory can no longer configure)
         m.transferOwnership(config.safe);
@@ -182,6 +187,8 @@ contract AgentVaultFactory is Ownable {
      * @param presetId The preset template ID (from PresetRegistry)
      * @param priceFeedTokens Token addresses for price feeds (chain-specific)
      * @param priceFeedAddresses Chainlink price feed addresses (chain-specific)
+     * @param allowedRecipients Recipients to whitelist when the preset enables recipient whitelisting
+     *        (e.g. Payment Agent). Ignored when the preset's recipientWhitelistEnabled flag is false.
      * @return module The deployed module address
      */
     function deployVaultFromPreset(
@@ -190,7 +197,8 @@ contract AgentVaultFactory is Ownable {
         address agentAddress,
         uint256 presetId,
         address[] calldata priceFeedTokens,
-        address[] calldata priceFeedAddresses
+        address[] calldata priceFeedAddresses,
+        address[] calldata allowedRecipients
     ) external returns (address module) {
         if (address(presetRegistry) == address(0)) revert PresetRegistryNotSet();
         _validateConfig(safe, oracle, agentAddress);
@@ -209,7 +217,8 @@ contract AgentVaultFactory is Ownable {
             address[] memory parserProtocols,
             address[] memory parserAddresses,
             bytes4[] memory selectors,
-            uint8[] memory selectorTypes
+            uint8[] memory selectorTypes,
+            bool recipientWhitelistEnabled
         ) = presetRegistry.getPresetFull(presetId);
 
         // Oracleless mode requires USD spending limits
@@ -230,6 +239,7 @@ contract AgentVaultFactory is Ownable {
         if (priceFeedTokens.length > 0) {
             m.setTokenPriceFeeds(priceFeedTokens, priceFeedAddresses);
         }
+        _configureRecipientWhitelist(m, agentAddress, recipientWhitelistEnabled, allowedRecipients);
 
         // 3. Transfer ownership to Safe
         m.transferOwnership(safe);
@@ -279,6 +289,23 @@ contract AgentVaultFactory is Ownable {
     {
         for (uint256 i = 0; i < selectors.length; i++) {
             m.registerSelector(selectors[i], DeFiInteractorModule.OperationType(selectorTypes[i]));
+        }
+    }
+
+    /// @notice Toggle and populate the transfer recipient whitelist for a sub-account
+    /// @dev Recipients are only set when the toggle is enabled. When disabled, any pre-existing
+    ///      list on a freshly cloned module is irrelevant since the module rejects the toggle path.
+    function _configureRecipientWhitelist(
+        DeFiInteractorModule m,
+        address agentAddress,
+        bool enabled,
+        address[] memory recipients
+    ) internal {
+        if (enabled) {
+            m.setRecipientWhitelistEnabled(agentAddress, true);
+            if (recipients.length > 0) {
+                m.setAllowedRecipients(agentAddress, recipients, true);
+            }
         }
     }
 
