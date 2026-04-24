@@ -449,6 +449,121 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.transferToken(address(token), recipient, 100 * 10 ** 18);
     }
 
+    // ============ Recipient Whitelist Tests ============
+
+    function testTransferRecipientWhitelistDisabledByDefault() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+
+        // Default: whitelist off → transfer to any recipient succeeds
+        vm.prank(subAccount1);
+        module.transferToken(address(token), recipient, 100 * 10 ** 18);
+        assertEq(token.balanceOf(recipient), 100 * 10 ** 18);
+    }
+
+    function testTransferRecipientWhitelistEnabledEmptyBlocksAll() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        module.setRecipientWhitelistEnabled(subAccount1, true);
+
+        // Whitelist on, empty → every recipient is rejected
+        vm.prank(subAccount1);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.RecipientNotAllowed.selector, recipient));
+        module.transferToken(address(token), recipient, 100 * 10 ** 18);
+    }
+
+    function testTransferRecipientWhitelistEnabledAllowsListed() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        module.setRecipientWhitelistEnabled(subAccount1, true);
+
+        address[] memory recips = new address[](1);
+        recips[0] = recipient;
+        module.setAllowedRecipients(subAccount1, recips, true);
+
+        vm.prank(subAccount1);
+        module.transferToken(address(token), recipient, 100 * 10 ** 18);
+        assertEq(token.balanceOf(recipient), 100 * 10 ** 18);
+    }
+
+    function testTransferRecipientWhitelistRejectsUnlisted() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        module.setRecipientWhitelistEnabled(subAccount1, true);
+
+        address[] memory recips = new address[](1);
+        recips[0] = recipient;
+        module.setAllowedRecipients(subAccount1, recips, true);
+
+        address other = makeAddr("other");
+        vm.prank(subAccount1);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.RecipientNotAllowed.selector, other));
+        module.transferToken(address(token), other, 100 * 10 ** 18);
+    }
+
+    function testTransferRecipientWhitelistToggleOff() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+
+        // Turn on, then back off — listed/unlisted no longer matters
+        module.setRecipientWhitelistEnabled(subAccount1, true);
+        module.setRecipientWhitelistEnabled(subAccount1, false);
+
+        address other = makeAddr("other");
+        vm.prank(subAccount1);
+        module.transferToken(address(token), other, 100 * 10 ** 18);
+        assertEq(token.balanceOf(other), 100 * 10 ** 18);
+    }
+
+    function testTransferRecipientWhitelistRemoval() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        module.setRecipientWhitelistEnabled(subAccount1, true);
+
+        address[] memory recips = new address[](1);
+        recips[0] = recipient;
+        module.setAllowedRecipients(subAccount1, recips, true);
+        module.setAllowedRecipients(subAccount1, recips, false);
+
+        vm.prank(subAccount1);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.RecipientNotAllowed.selector, recipient));
+        module.transferToken(address(token), recipient, 100 * 10 ** 18);
+    }
+
+    function testSetRecipientWhitelistEnabledOnlyOwner() public {
+        vm.prank(subAccount1);
+        vm.expectRevert(Module.Unauthorized.selector);
+        module.setRecipientWhitelistEnabled(subAccount1, true);
+    }
+
+    function testSetAllowedRecipientsOnlyOwner() public {
+        address[] memory recips = new address[](1);
+        recips[0] = recipient;
+        vm.prank(subAccount1);
+        vm.expectRevert(Module.Unauthorized.selector);
+        module.setAllowedRecipients(subAccount1, recips, true);
+    }
+
+    function testSetAllowedRecipientsRejectsCoreAddresses() public {
+        address[] memory recips = new address[](1);
+        recips[0] = address(safe);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.CannotWhitelistCoreAddress.selector, address(safe)));
+        module.setAllowedRecipients(subAccount1, recips, true);
+
+        recips[0] = address(module);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeFiInteractorModule.CannotWhitelistCoreAddress.selector, address(module))
+        );
+        module.setAllowedRecipients(subAccount1, recips, true);
+    }
+
+    function testSetAllowedRecipientsRejectsZero() public {
+        address[] memory recips = new address[](1);
+        recips[0] = address(0);
+        vm.expectRevert(Module.InvalidAddress.selector);
+        module.setAllowedRecipients(subAccount1, recips, true);
+    }
+
     // ============ Emergency Controls Tests ============
 
     function testPause() public {

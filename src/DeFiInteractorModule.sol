@@ -138,6 +138,14 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Per-sub-account allowed addresses: subAccount => target => allowed
     mapping(address => mapping(address => bool)) public allowedAddresses;
 
+    /// @notice Whether recipient whitelisting is enforced for a sub-account's transfers
+    /// @dev When true, transferToken only allows recipients in allowedRecipients (even if empty).
+    ///      When false (default), transferToken accepts any non-zero recipient.
+    mapping(address => bool) public recipientWhitelistEnabled;
+
+    /// @notice Per-sub-account allowed transfer recipients: subAccount => recipient => allowed
+    mapping(address => mapping(address => bool)) public allowedRecipients;
+
     /// @notice Sub-account roles: subAccount => role => has role
     mapping(address => mapping(uint16 => bool)) public subAccountRoles;
 
@@ -162,6 +170,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     );
 
     event AllowedAddressesSet(address indexed subAccount, address[] targets, bool allowed);
+
+    event RecipientWhitelistToggled(address indexed subAccount, bool enabled);
+    event AllowedRecipientsSet(address indexed subAccount, address[] recipients, bool allowed);
 
     /// @notice Emitted on every protocol interaction (for oracle consumption)
     event ProtocolExecution(
@@ -225,6 +236,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error LengthMismatch();
     error ExceedsMaxBps();
     error InvalidRecipient(address recipient, address expected);
+    error RecipientNotAllowed(address recipient);
     error CannotBeSubaccount(address account);
     error CannotBeOracle(address account);
     error CannotWhitelistCoreAddress(address account);
@@ -454,6 +466,30 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             allowedAddresses[subAccount][targets[i]] = allowed;
         }
         emit AllowedAddressesSet(subAccount, targets, allowed);
+    }
+
+    /// @notice Toggle recipient whitelist enforcement for a sub-account's transfers
+    /// @dev When enabled, transferToken will revert unless the recipient is in allowedRecipients —
+    ///      even if the whitelist is empty. When disabled, transferToken accepts any non-zero recipient.
+    function setRecipientWhitelistEnabled(address subAccount, bool enabled) external onlyOwner {
+        if (subAccount == address(0)) revert InvalidAddress();
+        recipientWhitelistEnabled[subAccount] = enabled;
+        emit RecipientWhitelistToggled(subAccount, enabled);
+    }
+
+    /// @notice Add or remove transfer recipients for a sub-account
+    /// @dev Only consulted when recipientWhitelistEnabled[subAccount] is true.
+    function setAllowedRecipients(address subAccount, address[] calldata recipients, bool allowed) external onlyOwner {
+        if (subAccount == address(0)) revert InvalidAddress();
+        for (uint256 i = 0; i < recipients.length; i++) {
+            if (recipients[i] == address(0)) revert InvalidAddress();
+            // Prevent whitelisting Safe or Module as recipients (would be self-dealing / nonsensical)
+            if (recipients[i] == avatar || recipients[i] == address(this)) {
+                revert CannotWhitelistCoreAddress(recipients[i]);
+            }
+            allowedRecipients[subAccount][recipients[i]] = allowed;
+        }
+        emit AllowedRecipientsSet(subAccount, recipients, allowed);
     }
 
     // ============ Main Entry Point ============
@@ -882,6 +918,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     {
         if (!hasRole(msg.sender, DEFI_TRANSFER_ROLE)) revert Unauthorized();
         if (token == address(0) || recipient == address(0)) revert InvalidAddress();
+        if (recipientWhitelistEnabled[msg.sender] && !allowedRecipients[msg.sender][recipient]) {
+            revert RecipientNotAllowed(recipient);
+        }
         _requireFreshOracle(msg.sender);
 
         // Calculate spending cost only for non-acquired tokens
