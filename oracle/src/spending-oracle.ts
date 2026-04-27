@@ -374,6 +374,33 @@ async function getActiveModules(): Promise<Address[]> {
   }
 }
 
+/**
+ * Check if this oracle wallet is authorized to update a given module.
+ * Returns false for oracleless modules (authorizedOracle == address(0)) or
+ * modules with a different authorized oracle.
+ */
+async function isAuthorizedForModule(moduleAddress: Address): Promise<boolean> {
+  try {
+    const authorizedOracle = await rpcManager.executeWithFallback(
+      (client) =>
+        client.readContract({
+          address: moduleAddress,
+          abi: DeFiInteractorModuleABI,
+          functionName: "authorizedOracle",
+        }),
+      "authorizedOracle",
+    );
+    const isAuthorized = (authorizedOracle as string).toLowerCase() === account.address.toLowerCase();
+    if (!isAuthorized) {
+      log(`Skipping module ${moduleAddress} — authorized oracle is ${authorizedOracle}, not us (${account.address})`);
+    }
+    return isAuthorized;
+  } catch (error) {
+    log(`Error checking authorizedOracle for ${moduleAddress}, skipping: ${error}`);
+    return false;
+  }
+}
+
 // ============ Retry Helper ============
 
 /**
@@ -2123,6 +2150,21 @@ async function prepareBatchUpdate(
  * Submit a batch update transaction without waiting for confirmation
  * Uses nonce management for parallel submission
  */
+function isNonceTooLowError(error: unknown): boolean {
+  const msg = String(error).toLowerCase();
+  return msg.includes("nonce too low") || msg.includes("nonce has already been used") || msg.includes("replacement transaction underpriced");
+}
+
+async function refreshNonceFromChain(): Promise<number> {
+  const freshNonce = await rpcManager.executeWithFallback(
+    (client) => client.getTransactionCount({ address: account.address }),
+    "getTransactionCount",
+  );
+  log(`Refreshed nonce from chain: ${freshNonce}`);
+  currentNonce = freshNonce;
+  return freshNonce;
+}
+
 async function submitBatchUpdate(
   moduleAddress: Address,
   subAccount: Address,
@@ -2133,31 +2175,48 @@ async function submitBatchUpdate(
   balances: bigint[],
   nonce: number,
 ): Promise<`0x${string}`> {
-  try {
-    const hash = await walletClient.writeContract({
-      chain: config.chain,
-      account,
-      address: moduleAddress,
-      abi: DeFiInteractorModuleABI,
-      functionName: "batchUpdate",
-      args: [
-        subAccount,
-        expectedAllowanceVersion,
-        newAllowance,
-        tokens,
-        expectedTokenVersions,
-        balances,
-      ],
-      gas: config.gasLimit,
-      nonce,
-    });
+  const MAX_NONCE_RETRIES = 5;
 
-    log(`Transaction submitted: ${hash} (nonce: ${nonce})`);
-    return hash;
-  } catch (error) {
-    log(`Error submitting batch update for ${subAccount}: ${error}`);
-    throw error;
+  for (let attempt = 0; attempt <= MAX_NONCE_RETRIES; attempt++) {
+    try {
+      // Always re-fetch nonce from chain before each attempt to avoid conflicts
+      // with concurrent SafeValue cron transactions sharing the same wallet
+      nonce = await refreshNonceFromChain();
+
+      const hash = await walletClient.writeContract({
+        chain: config.chain,
+        account,
+        address: moduleAddress,
+        abi: DeFiInteractorModuleABI,
+        functionName: "batchUpdate",
+        args: [
+          subAccount,
+          expectedAllowanceVersion,
+          newAllowance,
+          tokens,
+          expectedTokenVersions,
+          balances,
+        ],
+        gas: config.gasLimit,
+        nonce,
+      });
+
+      log(`Transaction submitted: ${hash} (nonce: ${nonce})`);
+      return hash;
+    } catch (error) {
+      if (isNonceTooLowError(error) && attempt < MAX_NONCE_RETRIES) {
+        log(`Nonce too low (attempt ${attempt + 1}/${MAX_NONCE_RETRIES}), waiting before retry...`);
+        // Wait for pending SafeValue txs to land before retrying
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        continue;
+      }
+      log(`Error submitting batch update for ${subAccount}: ${error}`);
+      throw error;
+    }
   }
+
+  // Should not reach here, but satisfy TypeScript
+  throw new Error("Exhausted nonce retries");
 }
 
 function decodeRevertReason(err: unknown): string {
@@ -2388,6 +2447,9 @@ async function pollForNewEvents() {
     for (const moduleAddress of modules) {
       log(`--- Processing module: ${moduleAddress} ---`);
 
+      // Skip modules where we're not the authorized oracle
+      if (!(await isAuthorizedForModule(moduleAddress))) continue;
+
       // Query new events in parallel for this module
       const [protocolEvents, transferEvents] = await Promise.all([
         queryProtocolExecutionEvents(
@@ -2564,6 +2626,9 @@ async function onCronRefresh() {
     // Process each module
     for (const moduleAddress of modules) {
       log(`--- Processing module: ${moduleAddress} ---`);
+
+      // Skip modules where we're not the authorized oracle
+      if (!(await isAuthorizedForModule(moduleAddress))) continue;
 
       // Fetch subaccounts for this module
       const subaccounts = await getActiveSubaccounts(moduleAddress);

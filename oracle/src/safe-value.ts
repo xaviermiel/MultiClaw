@@ -539,6 +539,22 @@ async function onCronTrigger() {
     log(`Processing ${modules.length} module(s)`);
 
     for (const moduleAddress of modules) {
+      // Skip modules where we're not the authorized oracle
+      try {
+        const authorizedOracle = await publicClient.readContract({
+          address: moduleAddress,
+          abi: DeFiInteractorModuleABI,
+          functionName: "authorizedOracle",
+        });
+        if ((authorizedOracle as string).toLowerCase() !== account.address.toLowerCase()) {
+          log(`Skipping module ${moduleAddress} — authorized oracle is ${authorizedOracle}, not us (${account.address})`);
+          continue;
+        }
+      } catch (error) {
+        log(`Error checking authorizedOracle for ${moduleAddress}, skipping: ${error}`);
+        continue;
+      }
+
       await processModuleSafeValue(moduleAddress);
     }
 

@@ -32,10 +32,11 @@ struct Preset {
     address[] parserAddresses;
     bytes4[] selectors;
     uint8[] selectorTypes;
+    bool recipientWhitelistEnabled;
 }
 ```
 
-Presets do **not** store price feed addresses because those are chain-specific. Price feeds are passed per-deployment.
+Presets do **not** store price feed addresses or specific recipient addresses because those are user/chain-specific. Price feeds and recipient lists are passed per-deployment. The `recipientWhitelistEnabled` flag controls whether transfers require whitelisted recipients (used by Payment Agent presets).
 
 ## Functions
 

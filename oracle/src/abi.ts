@@ -101,6 +101,13 @@ export const DeFiInteractorModuleABI = [
   },
   {
     type: "function",
+    name: "authorizedOracle",
+    inputs: [],
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "getTokenBalances",
     inputs: [{ name: "tokens", type: "address[]", internalType: "address[]" }],
     outputs: [

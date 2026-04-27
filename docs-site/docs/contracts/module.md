@@ -70,6 +70,19 @@ function setSubAccountLimits(
 
 Exactly one of `maxSpendingBps` or `maxSpendingUSD` must be non-zero.
 
+### Recipient whitelist
+
+```solidity
+function setRecipientWhitelistEnabled(address subAccount, bool enabled) external onlyOwner
+function setAllowedRecipients(address subAccount, address[] calldata recipients, bool allowed) external onlyOwner
+```
+
+When enabled for a sub-account, `transferToken` will only allow transfers to explicitly whitelisted recipients — even if the whitelist is empty. When disabled (default), any non-zero recipient is accepted.
+
+The Safe and the module itself cannot be whitelisted as recipients.
+
+**Emits:** `RecipientWhitelistToggled(subAccount, enabled)`, `AllowedRecipientsSet(subAccount, recipients, allowed)`
+
 ### Protocol allowlists
 
 ```solidity
@@ -151,6 +164,8 @@ function hasRole(address member, uint16 roleId) external view returns (bool)
 | `windowStart`          | `mapping(address => uint256)`                     | Current window start timestamp                   |
 | `windowSafeValue`      | `mapping(address => uint256)`                     | Safe value snapshot at window start              |
 | `maxOracleAcquiredBps` | `uint256`                                         | Oracle acquired budget cap (default: 2000 = 20%) |
+| `recipientWhitelistEnabled` | `mapping(address => bool)`                   | Whether recipient whitelisting is enforced per sub-account |
+| `allowedRecipients`    | `mapping(address => mapping(address => bool))`    | Whitelisted transfer recipients per sub-account  |
 
 ## Events
 
@@ -163,6 +178,8 @@ event RoleAssigned(address indexed member, uint16 indexed roleId)
 event RoleRevoked(address indexed member, uint16 indexed roleId)
 event SubAccountLimitsSet(address indexed subAccount, uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration)
 event AllowedAddressesSet(address indexed subAccount, address[] targets, bool allowed)
+event RecipientWhitelistToggled(address indexed subAccount, bool enabled)
+event AllowedRecipientsSet(address indexed subAccount, address[] recipients, bool allowed)
 event SafeValueUpdated(uint256 totalValueUSD, uint256 updateCount)
 event CumulativeSpendingReset(address indexed subAccount, uint256 windowSafeValue)
 event EmergencyPaused()
@@ -184,4 +201,6 @@ error ExceedsCumulativeSpendingLimit(uint256 cumulative, uint256 maximum)
 error ExceedsOracleAcquiredBudget(uint256 cumulative, uint256 maximum)
 error NeitherLimitModeSet()
 error AlreadyInitialized()
+error CannotWhitelistCoreAddress(address addr)
+error RecipientNotWhitelisted(address recipient)
 ```
