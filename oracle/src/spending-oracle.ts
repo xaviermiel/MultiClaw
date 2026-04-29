@@ -122,6 +122,10 @@ const ACQUIRED_BALANCE_UPDATED_EVENT = parseAbiItem(
   "event AcquiredBalanceUpdated(address indexed subAccount, address indexed token, uint256 newBalance)",
 );
 
+const SUB_ACCOUNT_LIMITS_SET_EVENT = parseAbiItem(
+  "event SubAccountLimitsSet(address indexed subAccount, uint256 maxSpendingBps, uint256 maxSpendingUSD, uint256 windowDuration)",
+);
+
 // ============ Initialize Clients with RPC Fallback ============
 
 /**
@@ -1935,6 +1939,19 @@ async function calculateSpendingAllowance(
     subAccount,
   );
 
+  // Read maxOracleAcquiredBps — some deployed contract versions enforce this as an
+  // upper bound on oracle-set spending allowances inside _enforceAllowanceCap.
+  // We cap here to avoid batchUpdate reverts on those contracts.
+  const maxOracleAcquiredBps = await rpcManager.executeWithFallback(
+    (client) =>
+      client.readContract({
+        address: moduleAddress,
+        abi: DeFiInteractorModuleABI,
+        functionName: "maxOracleAcquiredBps",
+      }),
+    `maxOracleAcquiredBps(${moduleAddress})`,
+  ) as bigint;
+
   // Mirrors _enforceAllowanceCap: USD mode uses maxSpendingUSD directly,
   // BPS mode uses maxSpendingBps % of Safe value
   let maxSpending: bigint;
@@ -1943,6 +1960,15 @@ async function calculateSpendingAllowance(
     maxSpending = maxSpendingUSD;
   } else {
     maxSpending = (safeValue * maxSpendingBps) / 10000n;
+  }
+
+  // Cap to maxOracleAcquiredBps% of safe value — enforced by some contract versions
+  const oracleBudgetCap = (safeValue * maxOracleAcquiredBps) / 10000n;
+  if (maxSpending > oracleBudgetCap) {
+    log(
+      `Allowance capped by maxOracleAcquiredBps (${maxOracleAcquiredBps}bps): ${formatUnits(maxSpending, 18)} -> ${formatUnits(oracleBudgetCap, 18)}`,
+    );
+    maxSpending = oracleBudgetCap;
   }
 
   const newAllowance =
@@ -2451,7 +2477,7 @@ async function pollForNewEvents() {
       if (!(await isAuthorizedForModule(moduleAddress))) continue;
 
       // Query new events in parallel for this module
-      const [protocolEvents, transferEvents] = await Promise.all([
+      const [protocolEvents, transferEvents, limitsSetLogs] = await Promise.all([
         queryProtocolExecutionEvents(
           moduleAddress,
           lastProcessedBlock + 1n,
@@ -2462,21 +2488,37 @@ async function pollForNewEvents() {
           lastProcessedBlock + 1n,
           currentBlock,
         ),
+        rpcManager.executeWithFallback(
+          (client) =>
+            client.getLogs({
+              address: moduleAddress,
+              event: SUB_ACCOUNT_LIMITS_SET_EVENT,
+              fromBlock: lastProcessedBlock + 1n,
+              toBlock: currentBlock,
+            }),
+          "querySubAccountLimitsSetEvents",
+        ),
       ]);
 
-      if (protocolEvents.length > 0 || transferEvents.length > 0) {
-        log(
-          `Found ${protocolEvents.length} protocol events and ${transferEvents.length} transfer events`,
-        );
+      // Get unique subaccounts from events (spending events + limit changes)
+      const affectedSubaccounts = new Set<Address>();
+      for (const e of protocolEvents) {
+        affectedSubaccounts.add(e.subAccount);
+      }
+      for (const e of transferEvents) {
+        affectedSubaccounts.add(e.subAccount);
+      }
+      for (const log of limitsSetLogs) {
+        const subAccount = log.topics[1]
+          ? (`0x${log.topics[1].slice(-40)}` as Address)
+          : null;
+        if (subAccount) affectedSubaccounts.add(subAccount);
+      }
 
-        // Get unique subaccounts from events
-        const affectedSubaccounts = new Set<Address>();
-        for (const e of protocolEvents) {
-          affectedSubaccounts.add(e.subAccount);
-        }
-        for (const e of transferEvents) {
-          affectedSubaccounts.add(e.subAccount);
-        }
+      if (protocolEvents.length > 0 || transferEvents.length > 0 || limitsSetLogs.length > 0) {
+        log(
+          `Found ${protocolEvents.length} protocol events, ${transferEvents.length} transfer events, ${limitsSetLogs.length} limits-set events`,
+        );
 
         // Process all affected subaccounts - transactions are submitted without waiting
         for (const subAccount of affectedSubaccounts) {

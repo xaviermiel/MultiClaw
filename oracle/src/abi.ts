@@ -108,6 +108,13 @@ export const DeFiInteractorModuleABI = [
   },
   {
     type: "function",
+    name: "maxOracleAcquiredBps",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "getTokenBalances",
     inputs: [{ name: "tokens", type: "address[]", internalType: "address[]" }],
     outputs: [
