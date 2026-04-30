@@ -31,3 +31,6 @@ sdk/**/src/abi/*Bytecode.ts
 .claude
 
 /scripts/package-lock.json
+oracle/oracle.log.3
+oracle/oracle.log.4
+*.log

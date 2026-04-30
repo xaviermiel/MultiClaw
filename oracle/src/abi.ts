@@ -115,6 +115,13 @@ export const DeFiInteractorModuleABI = [
   },
   {
     type: "function",
+    name: "absoluteMaxSpendingBps",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "getTokenBalances",
     inputs: [{ name: "tokens", type: "address[]", internalType: "address[]" }],
     outputs: [

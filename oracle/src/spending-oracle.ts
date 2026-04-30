@@ -1939,19 +1939,6 @@ async function calculateSpendingAllowance(
     subAccount,
   );
 
-  // Read maxOracleAcquiredBps — some deployed contract versions enforce this as an
-  // upper bound on oracle-set spending allowances inside _enforceAllowanceCap.
-  // We cap here to avoid batchUpdate reverts on those contracts.
-  const maxOracleAcquiredBps = await rpcManager.executeWithFallback(
-    (client) =>
-      client.readContract({
-        address: moduleAddress,
-        abi: DeFiInteractorModuleABI,
-        functionName: "maxOracleAcquiredBps",
-      }),
-    `maxOracleAcquiredBps(${moduleAddress})`,
-  ) as bigint;
-
   // Mirrors _enforceAllowanceCap: USD mode uses maxSpendingUSD directly,
   // BPS mode uses maxSpendingBps % of Safe value
   let maxSpending: bigint;
@@ -1962,13 +1949,28 @@ async function calculateSpendingAllowance(
     maxSpending = (safeValue * maxSpendingBps) / 10000n;
   }
 
-  // Cap to maxOracleAcquiredBps% of safe value — enforced by some contract versions
-  const oracleBudgetCap = (safeValue * maxOracleAcquiredBps) / 10000n;
-  if (maxSpending > oracleBudgetCap) {
-    log(
-      `Allowance capped by maxOracleAcquiredBps (${maxOracleAcquiredBps}bps): ${formatUnits(maxSpending, 18)} -> ${formatUnits(oracleBudgetCap, 18)}`,
-    );
-    maxSpending = oracleBudgetCap;
+  // Old deployed implementations (pre-April 20) enforce absoluteMaxSpendingBps in
+  // _enforceAllowanceCap. Cap here to avoid batchUpdate reverts on those contracts.
+  // New implementations removed this field — readContract will throw, so we skip the cap.
+  try {
+    const absoluteMaxSpendingBps = await rpcManager.executeWithFallback(
+      (client) =>
+        client.readContract({
+          address: moduleAddress,
+          abi: DeFiInteractorModuleABI,
+          functionName: "absoluteMaxSpendingBps",
+        }),
+      `absoluteMaxSpendingBps(${moduleAddress})`,
+    ) as bigint;
+    const absoluteCap = (safeValue * absoluteMaxSpendingBps) / 10000n;
+    if (maxSpending > absoluteCap) {
+      log(
+        `Allowance capped by absoluteMaxSpendingBps (${absoluteMaxSpendingBps}bps): ${formatUnits(maxSpending, 18)} -> ${formatUnits(absoluteCap, 18)}`,
+      );
+      maxSpending = absoluteCap;
+    }
+  } catch {
+    // New implementation — no absoluteMaxSpendingBps, no cap needed
   }
 
   const newAllowance =
