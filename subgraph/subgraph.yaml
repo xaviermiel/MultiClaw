@@ -1,0 +1,57 @@
+specVersion: 1.0.0
+indexerHints:
+  prune: auto
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: AgentVaultFactory
+    network: base-sepolia
+    source:
+      address: "0xb98Cc4ABc98BFc3Aa998bd876Be76f85Afeffc1F"
+      abi: AgentVaultFactory
+      startBlock: 40831466
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - AgentVaultCreated
+      abis:
+        - name: AgentVaultFactory
+          file: ./abis/AgentVaultFactory.json
+      eventHandlers:
+        - event: AgentVaultCreated(indexed address,indexed address,address,uint256)
+          handler: handleAgentVaultCreated
+      file: ./src/mappings/factory.ts
+templates:
+  - kind: ethereum
+    name: DeFiInteractorModule
+    network: base-sepolia
+    source:
+      abi: DeFiInteractorModule
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - ProtocolExecution
+        - TransferExecuted
+        - AcquiredBalanceUpdated
+        - AllowedRecipientsSet
+        - RecipientWhitelistToggled
+      abis:
+        - name: DeFiInteractorModule
+          file: ./abis/DeFiInteractorModule.json
+      eventHandlers:
+        - event: ProtocolExecution(indexed address,indexed address,uint8,address[],uint256[],address[],uint256[],uint256)
+          handler: handleProtocolExecution
+        - event: TransferExecuted(indexed address,indexed address,indexed address,uint256,uint256)
+          handler: handleTransferExecuted
+        - event: AcquiredBalanceUpdated(indexed address,indexed address,uint256)
+          handler: handleAcquiredBalanceUpdated
+        - event: AllowedRecipientsSet(indexed address,address[],bool)
+          handler: handleAllowedRecipientsSet
+        - event: RecipientWhitelistToggled(indexed address,bool)
+          handler: handleRecipientWhitelistToggled
+      file: ./src/mappings/module.ts

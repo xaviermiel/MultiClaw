@@ -1,0 +1,29 @@
+[
+  {
+    "type": "event",
+    "name": "AgentVaultCreated",
+    "inputs": [
+      {
+        "name": "safe",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "agentAddress",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "module",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "presetId",
+        "type": "uint256",
+        "indexed": false
+      }
+    ],
+    "anonymous": false
+  }
+]

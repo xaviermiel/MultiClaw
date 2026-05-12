@@ -1,0 +1,142 @@
+[
+  {
+    "type": "event",
+    "name": "ProtocolExecution",
+    "inputs": [
+      {
+        "name": "subAccount",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "opType",
+        "type": "uint8",
+        "indexed": false
+      },
+      {
+        "name": "tokensIn",
+        "type": "address[]",
+        "indexed": false
+      },
+      {
+        "name": "amountsIn",
+        "type": "uint256[]",
+        "indexed": false
+      },
+      {
+        "name": "tokensOut",
+        "type": "address[]",
+        "indexed": false
+      },
+      {
+        "name": "amountsOut",
+        "type": "uint256[]",
+        "indexed": false
+      },
+      {
+        "name": "spendingCost",
+        "type": "uint256",
+        "indexed": false
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TransferExecuted",
+    "inputs": [
+      {
+        "name": "subAccount",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "spendingCost",
+        "type": "uint256",
+        "indexed": false
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AcquiredBalanceUpdated",
+    "inputs": [
+      {
+        "name": "subAccount",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "newBalance",
+        "type": "uint256",
+        "indexed": false
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AllowedRecipientsSet",
+    "inputs": [
+      {
+        "name": "subAccount",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "recipients",
+        "type": "address[]",
+        "indexed": false
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "indexed": false
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RecipientWhitelistToggled",
+    "inputs": [
+      {
+        "name": "subAccount",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "enabled",
+        "type": "bool",
+        "indexed": false
+      }
+    ],
+    "anonymous": false
+  }
+]

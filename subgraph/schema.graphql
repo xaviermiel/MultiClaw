@@ -1,0 +1,66 @@
+type AgentVaultCreated @entity(immutable: true) {
+  id: Bytes!
+  safe: Bytes!
+  agentAddress: Bytes!
+  module: Bytes!
+  presetId: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type ProtocolExecution @entity(immutable: true) {
+  id: Bytes!
+  subAccount: Bytes!
+  target: Bytes!
+  opType: Int!
+  tokensIn: [Bytes!]!
+  amountsIn: [BigInt!]!
+  tokensOut: [Bytes!]!
+  amountsOut: [BigInt!]!
+  spendingCost: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type TransferExecuted @entity(immutable: true) {
+  id: Bytes!
+  subAccount: Bytes!
+  token: Bytes!
+  recipient: Bytes!
+  amount: BigInt!
+  spendingCost: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type AcquiredBalanceUpdated @entity(immutable: true) {
+  id: Bytes!
+  subAccount: Bytes!
+  token: Bytes!
+  newBalance: BigInt!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type AllowedRecipientsSet @entity(immutable: true) {
+  id: Bytes!
+  subAccount: Bytes!
+  recipients: [Bytes!]!
+  allowed: Boolean!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type RecipientWhitelistToggled @entity(immutable: true) {
+  id: Bytes!
+  subAccount: Bytes!
+  enabled: Boolean!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
