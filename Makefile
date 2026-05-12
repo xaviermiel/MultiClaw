@@ -109,6 +109,26 @@ deploy-base-sepolia: deploy-base-sepolia-registry deploy-base-sepolia-factory de
 	@echo "Base Sepolia deployment complete."
 	@echo "Next: deploy a module with make deploy-base-sepolia-module"
 
+# Create the 3 standard presets in the PresetRegistry on Base Sepolia.
+# Requires PRESET_REGISTRY_ADDRESS + the 4 *_PARSER_ADDRESS env vars.
+create-presets-base-sepolia:
+	@echo "Creating presets on Base Sepolia..."
+	forge script script/CreatePresets.s.sol \
+		--rpc-url $(BASE_SEPOLIA_RPC_URL) \
+		--broadcast \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		-vvvv
+
+# Set Chainlink price feeds for a deployed module on Base Sepolia.
+# Requires SAFE_ADDRESS + DEFI_MODULE_ADDRESS.
+set-price-feeds-base-sepolia:
+	@echo "Setting price feeds on Base Sepolia..."
+	forge script script/SetPriceFeeds.s.sol \
+		--rpc-url $(BASE_SEPOLIA_RPC_URL) \
+		--broadcast \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		-vvvv
+
 # ============ Base Mainnet Deployment ============
 
 deploy-base-registry:
@@ -140,6 +160,29 @@ deploy-base-vault-factory:
 
 deploy-base: deploy-base-registry deploy-base-factory deploy-base-vault-factory
 	@echo "Base mainnet deployment complete."
+
+# Create the 3 standard presets in the PresetRegistry on Base mainnet.
+# Requires PRESET_REGISTRY_ADDRESS + the 4 *_PARSER_ADDRESS env vars
+# (pointing at the mainnet parser deployments, not the testnet ones).
+create-presets-base:
+	@echo "Creating presets on Base mainnet..."
+	forge script script/CreatePresets.s.sol \
+		--rpc-url $(BASE_RPC_URL) \
+		--broadcast \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		-vvvv
+
+# Set Chainlink price feeds for a deployed module on Base mainnet.
+# Requires SAFE_ADDRESS + DEFI_MODULE_ADDRESS. The SetPriceFeeds script
+# currently hardcodes Ethereum Sepolia addresses — needs a Base mainnet
+# variant before this target can run end-to-end. Tracked in MAINNET_PREP.md.
+set-price-feeds-base:
+	@echo "Setting price feeds on Base mainnet..."
+	forge script script/SetPriceFeeds.s.sol \
+		--rpc-url $(BASE_RPC_URL) \
+		--broadcast \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		-vvvv
 
 # ============ Configuration ============
 
@@ -199,9 +242,13 @@ help:
 	@echo "  make deploy-base-sepolia-factory  - Deploy ModuleFactory only"
 	@echo "  make deploy-base-sepolia-vault-factory - Deploy AgentVaultFactory only"
 	@echo "  make deploy-base-sepolia-module   - Deploy module for a Safe via Factory"
+	@echo "  make create-presets-base-sepolia  - Populate PresetRegistry on Base Sepolia"
+	@echo "  make set-price-feeds-base-sepolia - Wire Chainlink feeds for a module on Base Sepolia"
 	@echo ""
 	@echo "  Base Mainnet:"
 	@echo "  make deploy-base                  - Deploy full stack (Registry + Factory + VaultFactory)"
+	@echo "  make create-presets-base          - Populate PresetRegistry on Base mainnet"
+	@echo "  make set-price-feeds-base         - Wire Chainlink feeds for a module on Base mainnet"
 	@echo "  make verify-base                  - Verify contracts on Basescan"
 	@echo ""
 	@echo "  make configure-module             - Configure parsers/selectors (set RPC_URL)"

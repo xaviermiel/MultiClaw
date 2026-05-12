@@ -13,19 +13,49 @@ import "../src/PresetRegistry.sol";
  *   1 — Yield Farmer   (Aave V3 supply/withdraw/repay)
  *   2 — Payment Agent  (transfer only, no DeFi)
  *
+ * Protocol addresses are selected automatically from block.chainid:
+ *   - 84532 → Base Sepolia
+ *   - 8453  → Base mainnet
+ *
  * Parser addresses are supplied via environment variables so presets do not
- * silently point at stale parser deployments.
+ * silently point at stale parser deployments. Selectors are chain-agnostic
+ * (Solidity ABI is the same on both networks).
  *
  * Usage:
  *   forge script script/CreatePresets.s.sol --rpc-url $BASE_SEPOLIA_RPC_URL --broadcast
+ *   forge script script/CreatePresets.s.sol --rpc-url $BASE_RPC_URL          --broadcast
  */
 contract CreatePresets is Script {
-    // ── Protocol addresses (Base Sepolia) ────────────────────────────────────
-    address constant AAVE_V3_POOL = 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27;
-    address constant AAVE_V3_REWARDS = 0x71B448405c803A3982aBa448133133D2DEAFBE5F;
-    address constant UNISWAP_V3_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
-    address constant UNIVERSAL_ROUTER = 0x492E6456D9528771018DeB9E87ef7750EF184104;
-    address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
+    // ── Chain IDs ────────────────────────────────────────────────────────────
+    uint256 constant CHAIN_BASE_SEPOLIA = 84532;
+    uint256 constant CHAIN_BASE_MAINNET = 8453;
+
+    // ── Resolved protocol addresses (filled in run() from chainid) ───────────
+    address AAVE_V3_POOL;
+    address AAVE_V3_REWARDS;
+    address UNISWAP_V3_ROUTER;
+    address UNIVERSAL_ROUTER;
+    address MORPHO_BLUE;
+
+    function _loadProtocolAddresses() internal {
+        if (block.chainid == CHAIN_BASE_SEPOLIA) {
+            AAVE_V3_POOL = 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27;
+            AAVE_V3_REWARDS = 0x71B448405c803A3982aBa448133133D2DEAFBE5F;
+            UNISWAP_V3_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
+            UNIVERSAL_ROUTER = 0x492E6456D9528771018DeB9E87ef7750EF184104;
+            MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
+        } else if (block.chainid == CHAIN_BASE_MAINNET) {
+            AAVE_V3_POOL = 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5;
+            AAVE_V3_REWARDS = 0xf9cc4F0D883F1a1eb2c253bdb46c254Ca51E1F44;
+            UNISWAP_V3_ROUTER = 0x2626664c2603336E57B271c5C0b26F421741e481;
+            UNIVERSAL_ROUTER = 0x6fF5693b99212Da76ad316178A184AB56D299b43;
+            MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb; // singleton, same address
+        } else {
+            revert(
+                "CreatePresets: unsupported chain. Add the network's protocol addresses to _loadProtocolAddresses() before running."
+            );
+        }
+    }
 
     // ── Role IDs ─────────────────────────────────────────────────────────────
     uint16 constant DEFI_EXECUTE_ROLE = 1;
@@ -41,12 +71,22 @@ contract CreatePresets is Script {
     uint8 constant REPAY = 6;
 
     function run() external {
+        _loadProtocolAddresses();
+
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address presetRegistryAddress = vm.envAddress("PRESET_REGISTRY_ADDRESS");
         address aaveParser = vm.envAddress("AAVE_PARSER_ADDRESS");
         address uniswapV3Parser = vm.envAddress("UNISWAP_V3_PARSER_ADDRESS");
         address universalParser = vm.envAddress("UNIVERSAL_PARSER_ADDRESS");
         address morphoBlueParser = vm.envAddress("MORPHO_BLUE_PARSER_ADDRESS");
+
+        console.log("=== CreatePresets ===");
+        console.log("Chain ID:", block.chainid);
+        console.log("PresetRegistry:", presetRegistryAddress);
+        console.log("Aave Pool:", AAVE_V3_POOL);
+        console.log("Uniswap V3 Router:", UNISWAP_V3_ROUTER);
+        console.log("Universal Router:", UNIVERSAL_ROUTER);
+        console.log("Morpho Blue:", MORPHO_BLUE);
 
         vm.startBroadcast(deployerPrivateKey);
 
