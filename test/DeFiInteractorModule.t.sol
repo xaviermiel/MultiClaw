@@ -449,6 +449,90 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.transferToken(address(token), recipient, 100 * 10 ** 18);
     }
 
+    // ============ Native ETH Transfer Tests ============
+
+    /// @dev Register the ETH/USD feed under `address(0)`. The plural setter
+    ///      accepts address(0) (DeFiInteractorModule.sol:1136); singular does not.
+    function _seedETHPriceFeed() internal {
+        address[] memory tokens = new address[](1);
+        address[] memory feeds = new address[](1);
+        tokens[0] = address(0);
+        feeds[0] = address(priceFeed); // reuse the mock $1 feed
+        module.setTokenPriceFeeds(tokens, feeds);
+    }
+
+    function testTransferNativeETH() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        _seedETHPriceFeed();
+        vm.deal(address(safe), 10 ether);
+
+        uint256 recipBefore = recipient.balance;
+        vm.prank(subAccount1);
+        module.transferToken(address(0), recipient, 1 ether);
+
+        assertEq(recipient.balance, recipBefore + 1 ether);
+        assertEq(address(safe).balance, 9 ether);
+    }
+
+    function testTransferNativeETHExceedsLimit() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        // Mock feed is $1 with 8 decimals, ETH treated as 18 decimals →
+        // 1 ether costs $1.00; cap of $0.50 must reject.
+        module.updateSpendingAllowance(subAccount1, 0, 0.5 ether);
+        _seedETHPriceFeed();
+        vm.deal(address(safe), 10 ether);
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.ExceedsSpendingLimit.selector);
+        module.transferToken(address(0), recipient, 1 ether);
+    }
+
+    function testTransferNativeETHRejectsZeroRecipient() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        _seedETHPriceFeed();
+        vm.deal(address(safe), 10 ether);
+
+        vm.prank(subAccount1);
+        vm.expectRevert(Module.InvalidAddress.selector);
+        module.transferToken(address(0), address(0), 1 ether);
+    }
+
+    function testTransferNativeETHRespectsWhitelist() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        _seedETHPriceFeed();
+        vm.deal(address(safe), 10 ether);
+
+        // Whitelist on, `recipient` listed, `other` not.
+        module.setRecipientWhitelistEnabled(subAccount1, true);
+        address[] memory recips = new address[](1);
+        recips[0] = recipient;
+        module.setAllowedRecipients(subAccount1, recips, true);
+
+        address other = makeAddr("other-eth");
+        vm.prank(subAccount1);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.RecipientNotAllowed.selector, other));
+        module.transferToken(address(0), other, 1 ether);
+
+        // Listed recipient is allowed
+        vm.prank(subAccount1);
+        module.transferToken(address(0), recipient, 1 ether);
+        assertEq(recipient.balance, 1 ether);
+    }
+
+    function testTransferNativeETHRequiresPriceFeed() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 0, 10000 * 10 ** 18);
+        vm.deal(address(safe), 10 ether);
+
+        // No ETH/USD feed registered → spending-cost estimation reverts.
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.NoPriceFeedSet.selector);
+        module.transferToken(address(0), recipient, 1 ether);
+    }
+
     // ============ Recipient Whitelist Tests ============
 
     function testTransferRecipientWhitelistDisabledByDefault() public {

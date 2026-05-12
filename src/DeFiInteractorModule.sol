@@ -908,7 +908,15 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     // ============ Transfer Function ============
 
     /**
-     * @notice Transfer tokens from Safe - acquired tokens are free, non-acquired cost spending
+     * @notice Transfer tokens or native ETH from the Safe.
+     * @dev Pass `token == address(0)` to transfer native ETH (the avatar's
+     *      own balance, sent to `recipient` with empty calldata). Any other
+     *      `token` is treated as an ERC-20 and dispatched via `IERC20.transfer`.
+     *      Acquired tokens are free; non-acquired tokens cost spending allowance
+     *      and update cumulative spending. The recipient whitelist (when
+     *      enabled) and the price-feed-derived USD valuation apply to both
+     *      branches — `_estimateTokenValueUSD` already supports `address(0)`
+     *      as the ETH/USD feed key (see `setTokenPriceFeeds`).
      */
     function transferToken(address token, address recipient, uint256 amount)
         external
@@ -917,13 +925,15 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         returns (bool)
     {
         if (!hasRole(msg.sender, DEFI_TRANSFER_ROLE)) revert Unauthorized();
-        if (token == address(0) || recipient == address(0)) revert InvalidAddress();
+        if (recipient == address(0)) revert InvalidAddress();
         if (recipientWhitelistEnabled[msg.sender] && !allowedRecipients[msg.sender][recipient]) {
             revert RecipientNotAllowed(recipient);
         }
         _requireFreshOracle(msg.sender);
 
-        // Calculate spending cost only for non-acquired tokens
+        // Calculate spending cost only for non-acquired tokens. The acquired
+        // balance map is keyed on token address; native ETH lives at the
+        // `address(0)` slot, populated by swaps that produce native ETH out.
         uint256 acquired = acquiredBalance[msg.sender][token];
         uint256 usedFromAcquired = amount > acquired ? acquired : amount;
         uint256 fromOriginal = amount - usedFromAcquired;
@@ -947,10 +957,15 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             acquiredBalanceVersion[msg.sender][token]++;
         }
 
-        // Execute transfer
-        bytes memory transferData = abi.encodeWithSelector(IERC20.transfer.selector, recipient, amount);
-
-        bool success = exec(token, 0, transferData, ISafe.Operation.Call);
+        // Execute transfer — branch on token == address(0) for native ETH.
+        bool success;
+        if (token == address(0)) {
+            // Avatar sends `amount` wei to `recipient` with no calldata.
+            success = exec(recipient, amount, "", ISafe.Operation.Call);
+        } else {
+            bytes memory transferData = abi.encodeWithSelector(IERC20.transfer.selector, recipient, amount);
+            success = exec(token, 0, transferData, ISafe.Operation.Call);
+        }
         if (!success) revert TransactionFailed();
 
         emit TransferExecuted(msg.sender, token, recipient, amount, spendingCost);
