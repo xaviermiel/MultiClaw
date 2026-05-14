@@ -2,9 +2,21 @@ export const DeFiInteractorModuleAbi = [
   {
     type: "constructor",
     inputs: [
-      { name: "_avatar", type: "address", internalType: "address" },
-      { name: "_owner", type: "address", internalType: "address" },
-      { name: "_authorizedOracle", type: "address", internalType: "address" },
+      {
+        name: "_avatar",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "_owner",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "_authorizedOracle",
+        type: "address",
+        internalType: "address",
+      },
     ],
     stateMutability: "nonpayable",
   },
@@ -12,132 +24,378 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "DEFAULT_MAX_SPENDING_BPS",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "DEFAULT_WINDOW_DURATION",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "DEFI_EXECUTE_ROLE",
     inputs: [],
-    outputs: [{ name: "", type: "uint16", internalType: "uint16" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint16",
+        internalType: "uint16",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "DEFI_REPAY_ROLE",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "uint16",
+        internalType: "uint16",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "DEFI_TRANSFER_ROLE",
     inputs: [],
-    outputs: [{ name: "", type: "uint16", internalType: "uint16" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "allowanceVersion",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "acquiredBalanceVersion",
-    inputs: [
-      { name: "subAccount", type: "address", internalType: "address" },
-      { name: "token", type: "address", internalType: "address" },
+    outputs: [
+      {
+        name: "",
+        type: "uint16",
+        internalType: "uint16",
+      },
     ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "acquiredBalance",
     inputs: [
-      { name: "", type: "address", internalType: "address" },
-      { name: "", type: "address", internalType: "address" },
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
     ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "acquiredBalanceVersion",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "acquiredGrantWindowStart",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "allowanceVersion",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "allowedAddresses",
     inputs: [
-      { name: "", type: "address", internalType: "address" },
-      { name: "", type: "address", internalType: "address" },
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
     ],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "allowedRecipients",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "authorizedOracle",
     inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "avatar",
     inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "batchUpdate",
     inputs: [
-      { name: "subAccount", type: "address", internalType: "address" },
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
       {
         name: "expectedAllowanceVersion",
         type: "uint256",
         internalType: "uint256",
       },
-      { name: "newAllowance", type: "uint256", internalType: "uint256" },
-      { name: "tokens", type: "address[]", internalType: "address[]" },
+      {
+        name: "newAllowance",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "tokens",
+        type: "address[]",
+        internalType: "address[]",
+      },
       {
         name: "expectedTokenVersions",
         type: "uint256[]",
         internalType: "uint256[]",
       },
-      { name: "balances", type: "uint256[]", internalType: "uint256[]" },
+      {
+        name: "balances",
+        type: "uint256[]",
+        internalType: "uint256[]",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
+    name: "cumulativeOracleGrantedUSD",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "cumulativeSpent",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "executeOnProtocol",
     inputs: [
-      { name: "target", type: "address", internalType: "address" },
-      { name: "data", type: "bytes", internalType: "bytes" },
+      {
+        name: "target",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "data",
+        type: "bytes",
+        internalType: "bytes",
+      },
     ],
-    outputs: [{ name: "", type: "bytes", internalType: "bytes" }],
+    outputs: [
+      {
+        name: "",
+        type: "bytes",
+        internalType: "bytes",
+      },
+    ],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "executeOnProtocolWithValue",
     inputs: [
-      { name: "target", type: "address", internalType: "address" },
-      { name: "data", type: "bytes", internalType: "bytes" },
-      { name: "value", type: "uint256", internalType: "uint256" },
+      {
+        name: "target",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "data",
+        type: "bytes",
+        internalType: "bytes",
+      },
+      {
+        name: "value",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
-    outputs: [{ name: "", type: "bytes", internalType: "bytes" }],
+    outputs: [
+      {
+        name: "",
+        type: "bytes",
+        internalType: "bytes",
+      },
+    ],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "getAcquiredBalance",
     inputs: [
-      { name: "subAccount", type: "address", internalType: "address" },
-      { name: "token", type: "address", internalType: "address" },
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "token",
+        type: "address",
+        internalType: "address",
+      },
     ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
@@ -145,50 +403,126 @@ export const DeFiInteractorModuleAbi = [
     name: "getSafeValue",
     inputs: [],
     outputs: [
-      { name: "totalValueUSD", type: "uint256", internalType: "uint256" },
-      { name: "lastUpdated", type: "uint256", internalType: "uint256" },
-      { name: "updateCount", type: "uint256", internalType: "uint256" },
+      {
+        name: "totalValueUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "lastUpdated",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "updateCount",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getSpendingAllowance",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getSubAccountLimits",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [
-      { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
-      { name: "maxSpendingUSD", type: "uint256", internalType: "uint256" },
-      { name: "windowDuration", type: "uint256", internalType: "uint256" },
+      {
+        name: "maxSpendingBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maxSpendingUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "windowDuration",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getSubaccountCount",
-    inputs: [{ name: "roleId", type: "uint16", internalType: "uint16" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    inputs: [
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getSubaccountsByRole",
-    inputs: [{ name: "roleId", type: "uint16", internalType: "uint16" }],
-    outputs: [{ name: "", type: "address[]", internalType: "address[]" }],
+    inputs: [
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getTokenBalances",
-    inputs: [{ name: "tokens", type: "address[]", internalType: "address[]" }],
+    inputs: [
+      {
+        name: "tokens",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
     outputs: [
-      { name: "balances", type: "uint256[]", internalType: "uint256[]" },
+      {
+        name: "balances",
+        type: "uint256[]",
+        internalType: "uint256[]",
+      },
     ],
     stateMutability: "view",
   },
@@ -196,8 +530,16 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "grantRole",
     inputs: [
-      { name: "member", type: "address", internalType: "address" },
-      { name: "roleId", type: "uint16", internalType: "uint16" },
+      {
+        name: "member",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -206,45 +548,144 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "hasRole",
     inputs: [
-      { name: "member", type: "address", internalType: "address" },
-      { name: "roleId", type: "uint16", internalType: "uint16" },
+      {
+        name: "member",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
     ],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "initialize",
+    inputs: [
+      {
+        name: "_avatar",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "_owner",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "_authorizedOracle",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "isOracleless",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "lastOracleUpdate",
-    inputs: [{ name: "", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "maxOracleAcquiredBps",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "maxOracleAge",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "maxPriceFeedAge",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "maxSafeValueAge",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "owner",
     inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
@@ -258,15 +699,50 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "paused",
     inputs: [],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "protocolParsers",
-    inputs: [{ name: "", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [
-      { name: "", type: "address", internalType: "contract ICalldataParser" },
+      {
+        name: "",
+        type: "address",
+        internalType: "contract ICalldataParser",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "recipientWhitelistEnabled",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
     ],
     stateMutability: "view",
   },
@@ -274,8 +750,16 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "registerParser",
     inputs: [
-      { name: "protocol", type: "address", internalType: "address" },
-      { name: "parser", type: "address", internalType: "address" },
+      {
+        name: "protocol",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "parser",
+        type: "address",
+        internalType: "address",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -284,7 +768,11 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "registerSelector",
     inputs: [
-      { name: "selector", type: "bytes4", internalType: "bytes4" },
+      {
+        name: "selector",
+        type: "bytes4",
+        internalType: "bytes4",
+      },
       {
         name: "opType",
         type: "uint8",
@@ -298,8 +786,16 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "revokeRole",
     inputs: [
-      { name: "member", type: "address", internalType: "address" },
-      { name: "roleId", type: "uint16", internalType: "uint16" },
+      {
+        name: "member",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -309,16 +805,34 @@ export const DeFiInteractorModuleAbi = [
     name: "safeValue",
     inputs: [],
     outputs: [
-      { name: "totalValueUSD", type: "uint256", internalType: "uint256" },
-      { name: "lastUpdated", type: "uint256", internalType: "uint256" },
-      { name: "updateCount", type: "uint256", internalType: "uint256" },
+      {
+        name: "totalValueUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "lastUpdated",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "updateCount",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "selectorType",
-    inputs: [{ name: "", type: "bytes4", internalType: "bytes4" }],
+    inputs: [
+      {
+        name: "",
+        type: "bytes4",
+        internalType: "bytes4",
+      },
+    ],
     outputs: [
       {
         name: "",
@@ -332,9 +846,44 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "setAllowedAddresses",
     inputs: [
-      { name: "subAccount", type: "address", internalType: "address" },
-      { name: "targets", type: "address[]", internalType: "address[]" },
-      { name: "allowed", type: "bool", internalType: "bool" },
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "targets",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "allowed",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setAllowedRecipients",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "recipients",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "allowed",
+        type: "bool",
+        internalType: "bool",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -342,14 +891,96 @@ export const DeFiInteractorModuleAbi = [
   {
     type: "function",
     name: "setAuthorizedOracle",
-    inputs: [{ name: "newOracle", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "newOracle",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "setAvatar",
-    inputs: [{ name: "_avatar", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "_avatar",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setMaxOracleAcquiredBps",
+    inputs: [
+      {
+        name: "newMaxBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setMaxOracleAge",
+    inputs: [
+      {
+        name: "newMaxAge",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setMaxPriceFeedAge",
+    inputs: [
+      {
+        name: "newMaxAge",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setMaxSafeValueAge",
+    inputs: [
+      {
+        name: "newMaxAge",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setRecipientWhitelistEnabled",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "enabled",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -357,10 +988,26 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "setSubAccountLimits",
     inputs: [
-      { name: "subAccount", type: "address", internalType: "address" },
-      { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
-      { name: "maxSpendingUSD", type: "uint256", internalType: "uint256" },
-      { name: "windowDuration", type: "uint256", internalType: "uint256" },
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "maxSpendingBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maxSpendingUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "windowDuration",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -368,7 +1015,13 @@ export const DeFiInteractorModuleAbi = [
   {
     type: "function",
     name: "setTarget",
-    inputs: [{ name: "_target", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "_target",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -376,8 +1029,16 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "setTokenPriceFeed",
     inputs: [
-      { name: "token", type: "address", internalType: "address" },
-      { name: "priceFeed", type: "address", internalType: "address" },
+      {
+        name: "token",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "priceFeed",
+        type: "address",
+        internalType: "address",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -386,8 +1047,16 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "setTokenPriceFeeds",
     inputs: [
-      { name: "tokens", type: "address[]", internalType: "address[]" },
-      { name: "priceFeeds", type: "address[]", internalType: "address[]" },
+      {
+        name: "tokens",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "priceFeeds",
+        type: "address[]",
+        internalType: "address[]",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -395,19 +1064,53 @@ export const DeFiInteractorModuleAbi = [
   {
     type: "function",
     name: "spendingAllowance",
-    inputs: [{ name: "", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "subAccountLimits",
-    inputs: [{ name: "", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [
-      { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
-      { name: "maxSpendingUSD", type: "uint256", internalType: "uint256" },
-      { name: "windowDuration", type: "uint256", internalType: "uint256" },
-      { name: "isConfigured", type: "bool", internalType: "bool" },
+      {
+        name: "maxSpendingBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maxSpendingUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "windowDuration",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "isConfigured",
+        type: "bool",
+        internalType: "bool",
+      },
     ],
     stateMutability: "view",
   },
@@ -415,33 +1118,73 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "subAccountRoles",
     inputs: [
-      { name: "", type: "address", internalType: "address" },
-      { name: "", type: "uint16", internalType: "uint16" },
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "",
+        type: "uint16",
+        internalType: "uint16",
+      },
     ],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "subaccounts",
     inputs: [
-      { name: "", type: "uint16", internalType: "uint16" },
-      { name: "", type: "uint256", internalType: "uint256" },
+      {
+        name: "",
+        type: "uint16",
+        internalType: "uint16",
+      },
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "target",
     inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "tokenPriceFeeds",
-    inputs: [{ name: "", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [
       {
         name: "",
@@ -454,7 +1197,13 @@ export const DeFiInteractorModuleAbi = [
   {
     type: "function",
     name: "transferOwnership",
-    inputs: [{ name: "_newOwner", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "_newOwner",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -462,11 +1211,29 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "transferToken",
     inputs: [
-      { name: "token", type: "address", internalType: "address" },
-      { name: "recipient", type: "address", internalType: "address" },
-      { name: "amount", type: "uint256", internalType: "uint256" },
+      {
+        name: "token",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "recipient",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "amount",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "nonpayable",
   },
   {
@@ -479,7 +1246,13 @@ export const DeFiInteractorModuleAbi = [
   {
     type: "function",
     name: "unregisterSelector",
-    inputs: [{ name: "selector", type: "bytes4", internalType: "bytes4" }],
+    inputs: [
+      {
+        name: "selector",
+        type: "bytes4",
+        internalType: "bytes4",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -487,10 +1260,26 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "updateAcquiredBalance",
     inputs: [
-      { name: "subAccount", type: "address", internalType: "address" },
-      { name: "token", type: "address", internalType: "address" },
-      { name: "expectedVersion", type: "uint256", internalType: "uint256" },
-      { name: "newBalance", type: "uint256", internalType: "uint256" },
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "token",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "expectedVersion",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "newBalance",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -499,7 +1288,11 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "updateSafeValue",
     inputs: [
-      { name: "totalValueUSD", type: "uint256", internalType: "uint256" },
+      {
+        name: "totalValueUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -508,12 +1301,62 @@ export const DeFiInteractorModuleAbi = [
     type: "function",
     name: "updateSpendingAllowance",
     inputs: [
-      { name: "subAccount", type: "address", internalType: "address" },
-      { name: "expectedVersion", type: "uint256", internalType: "uint256" },
-      { name: "newAllowance", type: "uint256", internalType: "uint256" },
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "expectedVersion",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "newAllowance",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "windowSafeValue",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "windowStart",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
   },
   {
     type: "event",
@@ -556,7 +1399,37 @@ export const DeFiInteractorModuleAbi = [
         indexed: false,
         internalType: "address[]",
       },
-      { name: "allowed", type: "bool", indexed: false, internalType: "bool" },
+      {
+        name: "allowed",
+        type: "bool",
+        indexed: false,
+        internalType: "bool",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "AllowedRecipientsSet",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "recipients",
+        type: "address[]",
+        indexed: false,
+        internalType: "address[]",
+      },
+      {
+        name: "allowed",
+        type: "bool",
+        indexed: false,
+        internalType: "bool",
+      },
     ],
     anonymous: false,
   },
@@ -581,9 +1454,33 @@ export const DeFiInteractorModuleAbi = [
   },
   {
     type: "event",
+    name: "CumulativeSpendingReset",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "windowSafeValue",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
     name: "EmergencyPaused",
     inputs: [
-      { name: "by", type: "address", indexed: true, internalType: "address" },
+      {
+        name: "by",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
     ],
     anonymous: false,
   },
@@ -591,7 +1488,44 @@ export const DeFiInteractorModuleAbi = [
     type: "event",
     name: "EmergencyUnpaused",
     inputs: [
-      { name: "by", type: "address", indexed: true, internalType: "address" },
+      {
+        name: "by",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "OracleAcquiredBudgetReset",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "OracleUpdateSkipped",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "reason",
+        type: "string",
+        indexed: false,
+        internalType: "string",
+      },
     ],
     anonymous: false,
   },
@@ -722,6 +1656,25 @@ export const DeFiInteractorModuleAbi = [
   },
   {
     type: "event",
+    name: "RecipientWhitelistToggled",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "enabled",
+        type: "bool",
+        indexed: false,
+        internalType: "bool",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
     name: "RoleAssigned",
     inputs: [
       {
@@ -730,7 +1683,12 @@ export const DeFiInteractorModuleAbi = [
         indexed: true,
         internalType: "address",
       },
-      { name: "roleId", type: "uint16", indexed: true, internalType: "uint16" },
+      {
+        name: "roleId",
+        type: "uint16",
+        indexed: true,
+        internalType: "uint16",
+      },
     ],
     anonymous: false,
   },
@@ -744,7 +1702,12 @@ export const DeFiInteractorModuleAbi = [
         indexed: true,
         internalType: "address",
       },
-      { name: "roleId", type: "uint16", indexed: true, internalType: "uint16" },
+      {
+        name: "roleId",
+        type: "uint16",
+        indexed: true,
+        internalType: "uint16",
+      },
     ],
     anonymous: false,
   },
@@ -918,132 +1881,296 @@ export const DeFiInteractorModuleAbi = [
     ],
     anonymous: false,
   },
-  { type: "error", name: "AddressNotAllowed", inputs: [] },
-  { type: "error", name: "ApprovalExceedsLimit", inputs: [] },
-  { type: "error", name: "ApprovalFailed", inputs: [] },
+  {
+    type: "error",
+    name: "AddressNotAllowed",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "AlreadyInitialized",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "ApprovalExceedsLimit",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "ApprovalFailed",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "BothLimitModesSet",
+    inputs: [],
+  },
   {
     type: "error",
     name: "CannotBeOracle",
-    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
   {
     type: "error",
     name: "CannotBeSubaccount",
-    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
   {
     type: "error",
     name: "CannotRegisterParserForCoreAddress",
-    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
-  { type: "error", name: "CannotRegisterUnknown", inputs: [] },
+  {
+    type: "error",
+    name: "CannotRegisterUnknown",
+    inputs: [],
+  },
   {
     type: "error",
     name: "CannotWhitelistCoreAddress",
-    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
-  { type: "error", name: "EnforcedPause", inputs: [] },
+  {
+    type: "error",
+    name: "EnforcedPause",
+    inputs: [],
+  },
   {
     type: "error",
     name: "ExceedsAllowanceCap",
     inputs: [
-      { name: "requested", type: "uint256", internalType: "uint256" },
-      { name: "maximum", type: "uint256", internalType: "uint256" },
+      {
+        name: "requested",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maximum",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
   },
-  { type: "error", name: "ExceedsMaxBps", inputs: [] },
-  { type: "error", name: "ExceedsSpendingLimit", inputs: [] },
-  { type: "error", name: "ExpectedPause", inputs: [] },
-  { type: "error", name: "InvalidAddress", inputs: [] },
-  { type: "error", name: "InvalidLimitConfiguration", inputs: [] },
-  { type: "error", name: "InvalidOracleAddress", inputs: [] },
-  { type: "error", name: "InvalidPrice", inputs: [] },
-  { type: "error", name: "InvalidPriceFeed", inputs: [] },
+  {
+    type: "error",
+    name: "ExceedsCumulativeSpendingLimit",
+    inputs: [
+      {
+        name: "cumulative",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maximum",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+  },
+  {
+    type: "error",
+    name: "ExceedsMaxBps",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "ExceedsOracleAcquiredBudget",
+    inputs: [
+      {
+        name: "cumulative",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maximum",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+  },
+  {
+    type: "error",
+    name: "ExceedsSpendingLimit",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "ExpectedPause",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "InvalidAddress",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "InvalidLimitConfiguration",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "InvalidOracleAddress",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "InvalidPrice",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "InvalidPriceFeed",
+    inputs: [],
+  },
   {
     type: "error",
     name: "InvalidRecipient",
     inputs: [
-      { name: "recipient", type: "address", internalType: "address" },
-      { name: "expected", type: "address", internalType: "address" },
+      {
+        name: "recipient",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "expected",
+        type: "address",
+        internalType: "address",
+      },
     ],
   },
-  { type: "error", name: "LengthMismatch", inputs: [] },
-  { type: "error", name: "ModuleTransactionFailed", inputs: [] },
+  {
+    type: "error",
+    name: "LengthMismatch",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "ModuleTransactionFailed",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "NeitherLimitModeSet",
+    inputs: [],
+  },
   {
     type: "error",
     name: "NoParserRegistered",
-    inputs: [{ name: "target", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "target",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
-  { type: "error", name: "NoPriceFeedSet", inputs: [] },
-  { type: "error", name: "OnlyAuthorizedOracle", inputs: [] },
-  { type: "error", name: "ReentrancyGuardReentrantCall", inputs: [] },
-  { type: "error", name: "SpenderNotAllowed", inputs: [] },
-  { type: "error", name: "StaleOracleData", inputs: [] },
-  { type: "error", name: "StalePortfolioValue", inputs: [] },
-  { type: "error", name: "StalePriceFeed", inputs: [] },
-  { type: "error", name: "TransactionFailed", inputs: [] },
-  // ============ New Security State ============
   {
-    type: "function",
-    name: "DEFI_REPAY_ROLE",
+    type: "error",
+    name: "NoPriceFeedSet",
     inputs: [],
-    outputs: [{ name: "", type: "uint16", internalType: "uint16" }],
-    stateMutability: "view",
   },
   {
-    type: "function",
-    name: "windowStart",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "windowSafeValue",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "cumulativeSpent",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "acquiredGrantWindowStart",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "cumulativeOracleGrantedUSD",
-    inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "maxOracleAcquiredBps",
+    type: "error",
+    name: "OnlyAuthorizedOracle",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
   },
   {
-    type: "function",
-    name: "setMaxOracleAcquiredBps",
-    inputs: [{ name: "newMaxBps", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
+    type: "error",
+    name: "OraclelessRequiresUSDMode",
+    inputs: [],
   },
-  // ============ Errors ============
-  { type: "error", name: "Unauthorized", inputs: [] },
+  {
+    type: "error",
+    name: "RecipientNotAllowed",
+    inputs: [
+      {
+        name: "recipient",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+  },
+  {
+    type: "error",
+    name: "ReentrancyGuardReentrantCall",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "SpenderNotAllowed",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "StaleOracleData",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "StalePortfolioValue",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "StalePriceFeed",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "SubAccountHasBPSLimits",
+    inputs: [
+      {
+        name: "subAccount",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+  },
+  {
+    type: "error",
+    name: "TransactionFailed",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "Unauthorized",
+    inputs: [],
+  },
   {
     type: "error",
     name: "UnknownSelector",
-    inputs: [{ name: "selector", type: "bytes4", internalType: "bytes4" }],
+    inputs: [
+      {
+        name: "selector",
+        type: "bytes4",
+        internalType: "bytes4",
+      },
+    ],
   },
 ] as const;

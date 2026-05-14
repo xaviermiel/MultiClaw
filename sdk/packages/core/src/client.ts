@@ -193,10 +193,17 @@ export class MultiClawClient {
    * Transfer tokens from the Safe as an agent.
    * Calls `transferToken(token, recipient, amount)` on the module.
    *
+   * Native ETH is supported by passing the zero address as `token`. The Safe
+   * forwards `amount` wei to `recipient` directly.
+   *
+   * If the agent has a recipient whitelist enabled (see
+   * {@link setRecipientWhitelistEnabled}), the call reverts unless `recipient`
+   * is in {@link setAllowedRecipients}.
+   *
    * @param moduleAddress - The DeFiInteractorModule address
-   * @param token - Token address to transfer
+   * @param token - Token address to transfer (use the zero address for native ETH)
    * @param recipient - Recipient address
-   * @param amount - Amount to transfer (in token's smallest unit)
+   * @param amount - Amount to transfer (in token's smallest unit, or wei for native ETH)
    * @param account - The agent's signer account
    */
   async transferAsAgent(
@@ -519,6 +526,136 @@ export class MultiClawClient {
 
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
     return { txHash: hash, receipt };
+  }
+
+  /**
+   * Toggle the transfer recipient whitelist for an agent. When enabled, the
+   * agent can only call `transferToken` to addresses listed in
+   * {@link setAllowedRecipients}. Caller must be the Safe (module owner).
+   *
+   * @param moduleAddress - The DeFiInteractorModule address
+   * @param subAccount - The agent address whose whitelist is being toggled
+   * @param enabled - True to enforce the whitelist, false to disable
+   * @param account - The Safe owner's account
+   */
+  async setRecipientWhitelistEnabled(
+    moduleAddress: Address,
+    subAccount: Address,
+    enabled: boolean,
+    account: Account,
+  ): Promise<{
+    txHash: `0x${string}`;
+    receipt: import("viem").TransactionReceipt;
+  }> {
+    const walletClient = this._walletClient(account);
+
+    const hash = await walletClient.writeContract({
+      address: moduleAddress,
+      abi: DeFiInteractorModuleAbi,
+      functionName: "setRecipientWhitelistEnabled",
+      args: [subAccount, enabled],
+      account,
+      chain: this.chain,
+    });
+
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    return { txHash: hash, receipt };
+  }
+
+  /**
+   * Add or remove recipient addresses on an agent's transfer whitelist.
+   * Has no effect on enforcement until the whitelist is enabled via
+   * {@link setRecipientWhitelistEnabled}. Caller must be the Safe (module owner).
+   *
+   * @param moduleAddress - The DeFiInteractorModule address
+   * @param subAccount - The agent whose whitelist is being modified
+   * @param recipients - Recipient addresses to update
+   * @param allowed - True to add, false to remove
+   * @param account - The Safe owner's account
+   */
+  async setAllowedRecipients(
+    moduleAddress: Address,
+    subAccount: Address,
+    recipients: Address[],
+    allowed: boolean,
+    account: Account,
+  ): Promise<{
+    txHash: `0x${string}`;
+    receipt: import("viem").TransactionReceipt;
+  }> {
+    const walletClient = this._walletClient(account);
+
+    const hash = await walletClient.writeContract({
+      address: moduleAddress,
+      abi: DeFiInteractorModuleAbi,
+      functionName: "setAllowedRecipients",
+      args: [subAccount, recipients, allowed],
+      account,
+      chain: this.chain,
+    });
+
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    return { txHash: hash, receipt };
+  }
+
+  /**
+   * Deploy an agent vault from a PresetRegistry template (e.g. DeFi Trader,
+   * Yield Farmer, Payment Agent). Caller must be the factory owner.
+   *
+   * @param params - Preset deployment parameters
+   * @param account - The factory owner's account (signer)
+   * @returns The deployed module address, Safe address, tx hash, and receipt
+   */
+  async createAgentVaultFromPreset(
+    params: {
+      safe: Address;
+      oracle: Address;
+      agentAddress: Address;
+      presetId: bigint;
+      priceFeedTokens: Address[];
+      priceFeedAddresses: Address[];
+      allowedRecipients: Address[];
+    },
+    account: Account,
+  ): Promise<VaultDeployment> {
+    const walletClient = this._walletClient(account);
+
+    const hash = await walletClient.writeContract({
+      address: this.addresses.agentVaultFactory,
+      abi: AgentVaultFactoryAbi,
+      functionName: "deployVaultFromPreset",
+      args: [
+        params.safe,
+        params.oracle,
+        params.agentAddress,
+        params.presetId,
+        params.priceFeedTokens,
+        params.priceFeedAddresses,
+        params.allowedRecipients,
+      ],
+      account,
+      chain: this.chain,
+    });
+
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+
+    const logs = parseEventLogs({
+      abi: AgentVaultFactoryAbi,
+      logs: receipt.logs,
+      eventName: "AgentVaultCreated",
+    });
+
+    const module = logs[0]?.args?.module as Address;
+    if (!module) {
+      throw new Error("AgentVaultCreated event not found in receipt");
+    }
+
+    return {
+      module,
+      safe: params.safe,
+      txHash: hash,
+      receipt,
+    };
   }
 
   // ============ Internal ============

@@ -15,21 +15,22 @@ export enum OperationType {
 
 export const DEFI_EXECUTE_ROLE = 1 as const;
 export const DEFI_TRANSFER_ROLE = 2 as const;
+export const DEFI_REPAY_ROLE = 3 as const;
 
 // ============ Vault Creation ============
 
 export interface VaultConfig {
   /** The Safe address that will own the vault */
   safe: Address;
-  /** The oracle address authorized to update spending state */
+  /** The oracle address authorized to update spending state. Set to zero address for oracleless mode. */
   oracle: Address;
   /** The AI agent's EOA address */
   agentAddress: Address;
-  /** Role to grant: 1=EXECUTE, 2=TRANSFER */
+  /** Role to grant: 1=EXECUTE, 2=TRANSFER, 3=REPAY */
   roleId: number;
-  /** Spending limit in basis points (e.g., 500 = 5%). 0 if using USD mode */
+  /** Spending limit in basis points (e.g., 500 = 5%). 0 if using USD mode. Requires an oracle. */
   maxSpendingBps: bigint;
-  /** Spending limit in USD, 18 decimals (e.g., 1000e18). 0 if using BPS mode */
+  /** Spending limit in USD, 18 decimals (e.g., 1000e18). 0 if using BPS mode. Required for oracleless mode. */
   maxSpendingUSD: bigint;
   /** Rolling window duration in seconds (e.g., 86400 = 24h) */
   windowDuration: bigint;
@@ -47,6 +48,10 @@ export interface VaultConfig {
   priceFeedTokens: Address[];
   /** Chainlink price feed addresses (parallel to priceFeedTokens) */
   priceFeedAddresses: Address[];
+  /** When true, transferToken (TRANSFER role) is restricted to addresses in `allowedRecipients`. */
+  recipientWhitelistEnabled: boolean;
+  /** Recipients allowed when `recipientWhitelistEnabled` is true. Ignored otherwise. */
+  allowedRecipients: Address[];
 }
 
 export interface VaultDeployment {

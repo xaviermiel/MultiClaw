@@ -2,7 +2,11 @@ export const PresetRegistryAbi = [
   {
     type: "constructor",
     inputs: [
-      { name: "_initialOwner", type: "address", internalType: "address" },
+      {
+        name: "_initialOwner",
+        type: "address",
+        internalType: "address",
+      },
     ],
     stateMutability: "nonpayable",
   },
@@ -10,81 +14,236 @@ export const PresetRegistryAbi = [
     type: "function",
     name: "createPreset",
     inputs: [
-      { name: "name", type: "string", internalType: "string" },
-      { name: "roleId", type: "uint16", internalType: "uint16" },
-      { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
-      { name: "windowDuration", type: "uint256", internalType: "uint256" },
+      {
+        name: "name",
+        type: "string",
+        internalType: "string",
+      },
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
+      {
+        name: "maxSpendingBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maxSpendingUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "windowDuration",
+        type: "uint256",
+        internalType: "uint256",
+      },
       {
         name: "allowedProtocols",
         type: "address[]",
         internalType: "address[]",
       },
-      { name: "parserProtocols", type: "address[]", internalType: "address[]" },
-      { name: "parserAddresses", type: "address[]", internalType: "address[]" },
-      { name: "selectors", type: "bytes4[]", internalType: "bytes4[]" },
-      { name: "selectorTypes", type: "uint8[]", internalType: "uint8[]" },
+      {
+        name: "parserProtocols",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "parserAddresses",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "selectors",
+        type: "bytes4[]",
+        internalType: "bytes4[]",
+      },
+      {
+        name: "selectorTypes",
+        type: "uint8[]",
+        internalType: "uint8[]",
+      },
+      {
+        name: "recipientWhitelistEnabled",
+        type: "bool",
+        internalType: "bool",
+      },
     ],
-    outputs: [{ name: "presetId", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "presetId",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "getPreset",
-    inputs: [{ name: "presetId", type: "uint256", internalType: "uint256" }],
+    inputs: [
+      {
+        name: "presetId",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     outputs: [
-      { name: "name", type: "string", internalType: "string" },
-      { name: "roleId", type: "uint16", internalType: "uint16" },
-      { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
-      { name: "windowDuration", type: "uint256", internalType: "uint256" },
+      {
+        name: "name",
+        type: "string",
+        internalType: "string",
+      },
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
+      {
+        name: "maxSpendingBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maxSpendingUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "windowDuration",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getPresetFull",
-    inputs: [{ name: "presetId", type: "uint256", internalType: "uint256" }],
+    inputs: [
+      {
+        name: "presetId",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     outputs: [
-      { name: "roleId", type: "uint16", internalType: "uint16" },
-      { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
-      { name: "windowDuration", type: "uint256", internalType: "uint256" },
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
+      {
+        name: "maxSpendingBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maxSpendingUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "windowDuration",
+        type: "uint256",
+        internalType: "uint256",
+      },
       {
         name: "allowedProtocols",
         type: "address[]",
         internalType: "address[]",
       },
-      { name: "parserProtocols", type: "address[]", internalType: "address[]" },
-      { name: "parserAddresses", type: "address[]", internalType: "address[]" },
-      { name: "selectors", type: "bytes4[]", internalType: "bytes4[]" },
-      { name: "selectorTypes", type: "uint8[]", internalType: "uint8[]" },
+      {
+        name: "parserProtocols",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "parserAddresses",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "selectors",
+        type: "bytes4[]",
+        internalType: "bytes4[]",
+      },
+      {
+        name: "selectorTypes",
+        type: "uint8[]",
+        internalType: "uint8[]",
+      },
+      {
+        name: "recipientWhitelistEnabled",
+        type: "bool",
+        internalType: "bool",
+      },
     ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getPresetProtocols",
-    inputs: [{ name: "presetId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "address[]", internalType: "address[]" }],
+    inputs: [
+      {
+        name: "presetId",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "owner",
     inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "presetCount",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "presetExists",
-    inputs: [{ name: "presetId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    inputs: [
+      {
+        name: "presetId",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "view",
   },
   {
@@ -97,7 +256,13 @@ export const PresetRegistryAbi = [
   {
     type: "function",
     name: "transferOwnership",
-    inputs: [{ name: "newOwner", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "newOwner",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -105,20 +270,66 @@ export const PresetRegistryAbi = [
     type: "function",
     name: "updatePreset",
     inputs: [
-      { name: "presetId", type: "uint256", internalType: "uint256" },
-      { name: "name", type: "string", internalType: "string" },
-      { name: "roleId", type: "uint16", internalType: "uint16" },
-      { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
-      { name: "windowDuration", type: "uint256", internalType: "uint256" },
+      {
+        name: "presetId",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "name",
+        type: "string",
+        internalType: "string",
+      },
+      {
+        name: "roleId",
+        type: "uint16",
+        internalType: "uint16",
+      },
+      {
+        name: "maxSpendingBps",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "maxSpendingUSD",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "windowDuration",
+        type: "uint256",
+        internalType: "uint256",
+      },
       {
         name: "allowedProtocols",
         type: "address[]",
         internalType: "address[]",
       },
-      { name: "parserProtocols", type: "address[]", internalType: "address[]" },
-      { name: "parserAddresses", type: "address[]", internalType: "address[]" },
-      { name: "selectors", type: "bytes4[]", internalType: "bytes4[]" },
-      { name: "selectorTypes", type: "uint8[]", internalType: "uint8[]" },
+      {
+        name: "parserProtocols",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "parserAddresses",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "selectors",
+        type: "bytes4[]",
+        internalType: "bytes4[]",
+      },
+      {
+        name: "selectorTypes",
+        type: "uint8[]",
+        internalType: "uint8[]",
+      },
+      {
+        name: "recipientWhitelistEnabled",
+        type: "bool",
+        internalType: "bool",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -152,7 +363,12 @@ export const PresetRegistryAbi = [
         indexed: true,
         internalType: "uint256",
       },
-      { name: "name", type: "string", indexed: false, internalType: "string" },
+      {
+        name: "name",
+        type: "string",
+        indexed: false,
+        internalType: "string",
+      },
     ],
     anonymous: false,
   },
@@ -166,24 +382,51 @@ export const PresetRegistryAbi = [
         indexed: true,
         internalType: "uint256",
       },
-      { name: "name", type: "string", indexed: false, internalType: "string" },
+      {
+        name: "name",
+        type: "string",
+        indexed: false,
+        internalType: "string",
+      },
     ],
     anonymous: false,
   },
-  { type: "error", name: "ArrayLengthMismatch", inputs: [] },
+  {
+    type: "error",
+    name: "ArrayLengthMismatch",
+    inputs: [],
+  },
   {
     type: "error",
     name: "OwnableInvalidOwner",
-    inputs: [{ name: "owner", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "owner",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
   {
     type: "error",
     name: "OwnableUnauthorizedAccount",
-    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
   {
     type: "error",
     name: "PresetNotFound",
-    inputs: [{ name: "presetId", type: "uint256", internalType: "uint256" }],
+    inputs: [
+      {
+        name: "presetId",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
   },
 ] as const;

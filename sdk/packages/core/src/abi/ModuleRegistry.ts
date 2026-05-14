@@ -2,35 +2,69 @@ export const ModuleRegistryAbi = [
   {
     type: "constructor",
     inputs: [
-      { name: "_initialOwner", type: "address", internalType: "address" },
+      {
+        name: "_initialOwner",
+        type: "address",
+        internalType: "address",
+      },
     ],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "authorizeFactory",
-    inputs: [{ name: "factory", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "factory",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "authorizedFactories",
-    inputs: [{ name: "", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "deactivateModule",
-    inputs: [{ name: "module", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "deauthorizeFactory",
-    inputs: [{ name: "factory", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "factory",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -38,68 +72,144 @@ export const ModuleRegistryAbi = [
     type: "function",
     name: "getActiveModuleCount",
     inputs: [],
-    outputs: [{ name: "count", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "count",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getActiveModules",
     inputs: [],
-    outputs: [{ name: "", type: "address[]", internalType: "address[]" }],
+    outputs: [
+      {
+        name: "",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getActiveModulesPaginated",
     inputs: [
-      { name: "offset", type: "uint256", internalType: "uint256" },
-      { name: "limit", type: "uint256", internalType: "uint256" },
+      {
+        name: "offset",
+        type: "uint256",
+        internalType: "uint256",
+      },
+      {
+        name: "limit",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     outputs: [
-      { name: "modules", type: "address[]", internalType: "address[]" },
-      { name: "total", type: "uint256", internalType: "uint256" },
+      {
+        name: "modules",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "total",
+        type: "uint256",
+        internalType: "uint256",
+      },
     ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getModuleForSafe",
-    inputs: [{ name: "safe", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "safe",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "getTotalModuleCount",
     inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "isRegistered",
-    inputs: [{ name: "module", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "moduleInfo",
-    inputs: [{ name: "module", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [
       {
         name: "",
         type: "tuple",
         internalType: "struct IModuleRegistry.ModuleInfo",
         components: [
-          { name: "safeAddress", type: "address", internalType: "address" },
+          {
+            name: "safeAddress",
+            type: "address",
+            internalType: "address",
+          },
           {
             name: "authorizedOracle",
             type: "address",
             internalType: "address",
           },
-          { name: "deployedAt", type: "uint256", internalType: "uint256" },
-          { name: "isActive", type: "bool", internalType: "bool" },
+          {
+            name: "deployedAt",
+            type: "uint256",
+            internalType: "uint256",
+          },
+          {
+            name: "isActive",
+            type: "bool",
+            internalType: "bool",
+          },
         ],
       },
     ],
@@ -109,13 +219,25 @@ export const ModuleRegistryAbi = [
     type: "function",
     name: "owner",
     inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "reactivateModule",
-    inputs: [{ name: "module", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -123,9 +245,21 @@ export const ModuleRegistryAbi = [
     type: "function",
     name: "registerModule",
     inputs: [
-      { name: "module", type: "address", internalType: "address" },
-      { name: "safe", type: "address", internalType: "address" },
-      { name: "oracle", type: "address", internalType: "address" },
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "safe",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -134,9 +268,21 @@ export const ModuleRegistryAbi = [
     type: "function",
     name: "registerModuleFromFactory",
     inputs: [
-      { name: "module", type: "address", internalType: "address" },
-      { name: "safe", type: "address", internalType: "address" },
-      { name: "oracle", type: "address", internalType: "address" },
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "safe",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -144,7 +290,13 @@ export const ModuleRegistryAbi = [
   {
     type: "function",
     name: "removeModule",
-    inputs: [{ name: "module", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -158,14 +310,32 @@ export const ModuleRegistryAbi = [
   {
     type: "function",
     name: "safeToModule",
-    inputs: [{ name: "", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     stateMutability: "view",
   },
   {
     type: "function",
     name: "transferOwnership",
-    inputs: [{ name: "newOwner", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "newOwner",
+        type: "address",
+        internalType: "address",
+      },
+    ],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -231,7 +401,12 @@ export const ModuleRegistryAbi = [
         indexed: true,
         internalType: "address",
       },
-      { name: "safe", type: "address", indexed: true, internalType: "address" },
+      {
+        name: "safe",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
       {
         name: "oracle",
         type: "address",
@@ -273,34 +448,74 @@ export const ModuleRegistryAbi = [
     ],
     anonymous: false,
   },
-  { type: "error", name: "InvalidAddress", inputs: [] },
+  {
+    type: "error",
+    name: "InvalidAddress",
+    inputs: [],
+  },
   {
     type: "error",
     name: "ModuleAlreadyRegistered",
-    inputs: [{ name: "module", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
   {
     type: "error",
     name: "ModuleNotRegistered",
-    inputs: [{ name: "module", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
-  { type: "error", name: "OnlyAuthorizedFactory", inputs: [] },
+  {
+    type: "error",
+    name: "OnlyAuthorizedFactory",
+    inputs: [],
+  },
   {
     type: "error",
     name: "OwnableInvalidOwner",
-    inputs: [{ name: "owner", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "owner",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
   {
     type: "error",
     name: "OwnableUnauthorizedAccount",
-    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        internalType: "address",
+      },
+    ],
   },
   {
     type: "error",
     name: "SafeAlreadyHasModule",
     inputs: [
-      { name: "safe", type: "address", internalType: "address" },
-      { name: "existingModule", type: "address", internalType: "address" },
+      {
+        name: "safe",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "existingModule",
+        type: "address",
+        internalType: "address",
+      },
     ],
   },
 ] as const;
