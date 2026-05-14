@@ -42,7 +42,9 @@ Same as `executeOnProtocol` but sends ETH value with the call.
 
 ### `transferToken(address token, address recipient, uint256 amount)`
 
-Transfer ERC-20 tokens from the Safe. Requires `DEFI_TRANSFER_ROLE` (2).
+Transfer tokens from the Safe. Requires `DEFI_TRANSFER_ROLE` (2).
+
+Pass `token = address(0)` to send native ETH directly from the Safe; `amount` is then interpreted as wei. For ERC-20s, pass the token contract address and the amount in the token's smallest unit. Spending cost, acquired balance, and recipient-whitelist checks apply uniformly to both modes.
 
 **Emits:** `TransferExecuted(subAccount, token, recipient, amount, spendingCost)`
 
@@ -156,16 +158,16 @@ function hasRole(address member, uint16 roleId) external view returns (bool)
 
 ## Key storage
 
-| Variable               | Type                                              | Description                                      |
-| ---------------------- | ------------------------------------------------- | ------------------------------------------------ |
-| `spendingAllowance`    | `mapping(address => uint256)`                     | Oracle-managed remaining budget                  |
-| `acquiredBalance`      | `mapping(address => mapping(address => uint256))` | Free-to-use token balances                       |
-| `cumulativeSpent`      | `mapping(address => uint256)`                     | On-chain spending counter (oracle cannot reset)  |
-| `windowStart`          | `mapping(address => uint256)`                     | Current window start timestamp                   |
-| `windowSafeValue`      | `mapping(address => uint256)`                     | Safe value snapshot at window start              |
-| `maxOracleAcquiredBps` | `uint256`                                         | Oracle acquired budget cap (default: 2000 = 20%) |
-| `recipientWhitelistEnabled` | `mapping(address => bool)`                   | Whether recipient whitelisting is enforced per sub-account |
-| `allowedRecipients`    | `mapping(address => mapping(address => bool))`    | Whitelisted transfer recipients per sub-account  |
+| Variable                    | Type                                              | Description                                                |
+| --------------------------- | ------------------------------------------------- | ---------------------------------------------------------- |
+| `spendingAllowance`         | `mapping(address => uint256)`                     | Oracle-managed remaining budget                            |
+| `acquiredBalance`           | `mapping(address => mapping(address => uint256))` | Free-to-use token balances                                 |
+| `cumulativeSpent`           | `mapping(address => uint256)`                     | On-chain spending counter (oracle cannot reset)            |
+| `windowStart`               | `mapping(address => uint256)`                     | Current window start timestamp                             |
+| `windowSafeValue`           | `mapping(address => uint256)`                     | Safe value snapshot at window start                        |
+| `maxOracleAcquiredBps`      | `uint256`                                         | Oracle acquired budget cap (default: 2000 = 20%)           |
+| `recipientWhitelistEnabled` | `mapping(address => bool)`                        | Whether recipient whitelisting is enforced per sub-account |
+| `allowedRecipients`         | `mapping(address => mapping(address => bool))`    | Whitelisted transfer recipients per sub-account            |
 
 ## Events
 

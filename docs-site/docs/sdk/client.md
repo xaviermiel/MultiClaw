@@ -126,6 +126,20 @@ const result = await client.transferAsAgent(
 );
 ```
 
+To send **native ETH**, pass the zero address as `token` and the amount in wei:
+
+```typescript
+import { zeroAddress, parseEther } from "viem";
+
+await client.transferAsAgent(
+  "0xMODULE",
+  zeroAddress, // native ETH
+  "0xRECIPIENT",
+  parseEther("0.5"),
+  agentAccount,
+);
+```
+
 ---
 
 ## Read operations
