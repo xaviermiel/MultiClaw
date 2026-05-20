@@ -1,3 +1,36 @@
+type Vault @entity {
+  id: Bytes!
+  safe: Bytes!
+  agentAddress: Bytes!
+  module: Bytes!
+  presetId: BigInt!
+  createdAt: BigInt!
+  createdAtBlock: BigInt!
+  accounts: [Account!]! @derivedFrom(field: "vault")
+}
+
+type Account @entity {
+  id: Bytes!
+  vault: Vault!
+  module: Bytes!
+  cumulativeSpentIndexed: BigInt!
+  totalTxs: Int!
+  firstActivityAt: BigInt!
+  lastActivityAt: BigInt!
+  recipientWhitelistEnabled: Boolean!
+  balances: [AcquiredBalance!]! @derivedFrom(field: "account")
+}
+
+type AcquiredBalance @entity {
+  id: Bytes!
+  account: Account!
+  subAccount: Bytes!
+  token: Bytes!
+  amount: BigInt!
+  updatedAt: BigInt!
+  updatedAtBlock: BigInt!
+}
+
 type AgentVaultCreated @entity(immutable: true) {
   id: Bytes!
   safe: Bytes!
@@ -51,15 +84,6 @@ type AllowedRecipientsSet @entity(immutable: true) {
   subAccount: Bytes!
   recipients: [Bytes!]!
   allowed: Boolean!
-  blockNumber: BigInt!
-  blockTimestamp: BigInt!
-  transactionHash: Bytes!
-}
-
-type RecipientWhitelistToggled @entity(immutable: true) {
-  id: Bytes!
-  subAccount: Bytes!
-  enabled: Boolean!
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: Bytes!

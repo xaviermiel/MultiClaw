@@ -1,13 +1,21 @@
 import { AgentVaultCreated as AgentVaultCreatedEvent } from "../../generated/AgentVaultFactory/AgentVaultFactory";
-import { AgentVaultCreated } from "../../generated/schema";
+import { AgentVaultCreated, Vault } from "../../generated/schema";
 import { DeFiInteractorModule } from "../../generated/templates";
 
 export function handleAgentVaultCreated(event: AgentVaultCreatedEvent): void {
-  // Spin up a dynamic data source for this module instance
   DeFiInteractorModule.create(event.params.module);
 
+  let vault = new Vault(event.params.module);
+  vault.safe = event.params.safe;
+  vault.agentAddress = event.params.agentAddress;
+  vault.module = event.params.module;
+  vault.presetId = event.params.presetId;
+  vault.createdAt = event.block.timestamp;
+  vault.createdAtBlock = event.block.number;
+  vault.save();
+
   let entity = new AgentVaultCreated(
-    event.transaction.hash.concatI32(event.logIndex.toI32())
+    event.transaction.hash.concatI32(event.logIndex.toI32()),
   );
   entity.safe = event.params.safe;
   entity.agentAddress = event.params.agentAddress;

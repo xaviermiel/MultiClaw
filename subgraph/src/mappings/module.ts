@@ -1,4 +1,4 @@
-import { Bytes } from "@graphprotocol/graph-ts";
+import { Address, Bytes } from "@graphprotocol/graph-ts";
 import {
   ProtocolExecution as ProtocolExecutionEvent,
   TransferExecuted as TransferExecutedEvent,
@@ -11,12 +11,33 @@ import {
   TransferExecuted,
   AcquiredBalanceUpdated,
   AllowedRecipientsSet,
-  RecipientWhitelistToggled,
+  Account,
+  AcquiredBalance,
 } from "../../generated/schema";
+import { BigInt } from "@graphprotocol/graph-ts";
+
+function loadOrCreateAccount(
+  subAccount: Bytes,
+  module: Address,
+  timestamp: BigInt,
+): Account {
+  let account = Account.load(subAccount);
+  if (account == null) {
+    account = new Account(subAccount);
+    account.vault = module;
+    account.module = module;
+    account.cumulativeSpentIndexed = BigInt.zero();
+    account.totalTxs = 0;
+    account.firstActivityAt = timestamp;
+    account.lastActivityAt = timestamp;
+    account.recipientWhitelistEnabled = false;
+  }
+  return account as Account;
+}
 
 export function handleProtocolExecution(event: ProtocolExecutionEvent): void {
   let entity = new ProtocolExecution(
-    event.transaction.hash.concatI32(event.logIndex.toI32())
+    event.transaction.hash.concatI32(event.logIndex.toI32()),
   );
   entity.subAccount = event.params.subAccount;
   entity.target = event.params.target;
@@ -30,11 +51,23 @@ export function handleProtocolExecution(event: ProtocolExecutionEvent): void {
   entity.blockTimestamp = event.block.timestamp;
   entity.transactionHash = event.transaction.hash;
   entity.save();
+
+  let account = loadOrCreateAccount(
+    event.params.subAccount,
+    event.address,
+    event.block.timestamp,
+  );
+  account.cumulativeSpentIndexed = account.cumulativeSpentIndexed.plus(
+    event.params.spendingCost,
+  );
+  account.totalTxs = account.totalTxs + 1;
+  account.lastActivityAt = event.block.timestamp;
+  account.save();
 }
 
 export function handleTransferExecuted(event: TransferExecutedEvent): void {
   let entity = new TransferExecuted(
-    event.transaction.hash.concatI32(event.logIndex.toI32())
+    event.transaction.hash.concatI32(event.logIndex.toI32()),
   );
   entity.subAccount = event.params.subAccount;
   entity.token = event.params.token;
@@ -45,13 +78,25 @@ export function handleTransferExecuted(event: TransferExecutedEvent): void {
   entity.blockTimestamp = event.block.timestamp;
   entity.transactionHash = event.transaction.hash;
   entity.save();
+
+  let account = loadOrCreateAccount(
+    event.params.subAccount,
+    event.address,
+    event.block.timestamp,
+  );
+  account.cumulativeSpentIndexed = account.cumulativeSpentIndexed.plus(
+    event.params.spendingCost,
+  );
+  account.totalTxs = account.totalTxs + 1;
+  account.lastActivityAt = event.block.timestamp;
+  account.save();
 }
 
 export function handleAcquiredBalanceUpdated(
-  event: AcquiredBalanceUpdatedEvent
+  event: AcquiredBalanceUpdatedEvent,
 ): void {
   let entity = new AcquiredBalanceUpdated(
-    event.transaction.hash.concatI32(event.logIndex.toI32())
+    event.transaction.hash.concatI32(event.logIndex.toI32()),
   );
   entity.subAccount = event.params.subAccount;
   entity.token = event.params.token;
@@ -60,13 +105,34 @@ export function handleAcquiredBalanceUpdated(
   entity.blockTimestamp = event.block.timestamp;
   entity.transactionHash = event.transaction.hash;
   entity.save();
+
+  let account = loadOrCreateAccount(
+    event.params.subAccount,
+    event.address,
+    event.block.timestamp,
+  );
+  account.lastActivityAt = event.block.timestamp;
+  account.save();
+
+  let balanceId = event.params.subAccount.concat(event.params.token);
+  let balance = AcquiredBalance.load(balanceId);
+  if (balance == null) {
+    balance = new AcquiredBalance(balanceId);
+    balance.account = event.params.subAccount;
+    balance.subAccount = event.params.subAccount;
+    balance.token = event.params.token;
+  }
+  balance.amount = event.params.newBalance;
+  balance.updatedAt = event.block.timestamp;
+  balance.updatedAtBlock = event.block.number;
+  balance.save();
 }
 
 export function handleAllowedRecipientsSet(
-  event: AllowedRecipientsSetEvent
+  event: AllowedRecipientsSetEvent,
 ): void {
   let entity = new AllowedRecipientsSet(
-    event.transaction.hash.concatI32(event.logIndex.toI32())
+    event.transaction.hash.concatI32(event.logIndex.toI32()),
   );
   entity.subAccount = event.params.subAccount;
   entity.recipients = event.params.recipients.map<Bytes>((a) => a as Bytes);
@@ -78,15 +144,14 @@ export function handleAllowedRecipientsSet(
 }
 
 export function handleRecipientWhitelistToggled(
-  event: RecipientWhitelistToggledEvent
+  event: RecipientWhitelistToggledEvent,
 ): void {
-  let entity = new RecipientWhitelistToggled(
-    event.transaction.hash.concatI32(event.logIndex.toI32())
+  let account = loadOrCreateAccount(
+    event.params.subAccount,
+    event.address,
+    event.block.timestamp,
   );
-  entity.subAccount = event.params.subAccount;
-  entity.enabled = event.params.enabled;
-  entity.blockNumber = event.block.number;
-  entity.blockTimestamp = event.block.timestamp;
-  entity.transactionHash = event.transaction.hash;
-  entity.save();
+  account.recipientWhitelistEnabled = event.params.enabled;
+  account.lastActivityAt = event.block.timestamp;
+  account.save();
 }
