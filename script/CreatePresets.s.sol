@@ -70,10 +70,26 @@ contract CreatePresets is Script {
     uint8 constant APPROVE = 5;
     uint8 constant REPAY = 6;
 
+    // ── Oracleless spending caps (Option B) ───────────────────────────────────
+    // Oracleless vaults require a fixed USD cap (maxSpendingUSD); the percentage
+    // (maxSpendingBps) path needs a Safe valuation that only an oracle supplies,
+    // so the module reverts OraclelessRequiresUSDMode if bps is used without one.
+    // These are conservative per-window defaults; vault creators can override
+    // per-vault at AgentVaultFactory.deployVaultFromPreset time.
+    uint256 constant DEFI_TRADER_USD_CAP = 1_000e18; // $1,000 / window
+    uint256 constant YIELD_FARMER_USD_CAP = 2_500e18; // $2,500 / window
+    uint256 constant PAYMENT_AGENT_USD_CAP = 500e18; // $500 / window
+
+    /// @dev Mainnet broadcasts use a dedicated deployer key; testnet keeps the default.
+    function _deployerKey() internal view returns (uint256) {
+        if (block.chainid == CHAIN_BASE_MAINNET) return vm.envUint("MAINNET_DEPLOYER_PK");
+        return vm.envUint("DEPLOYER_PRIVATE_KEY");
+    }
+
     function run() external {
         _loadProtocolAddresses();
 
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerPrivateKey = _deployerKey();
         address presetRegistryAddress = vm.envAddress("PRESET_REGISTRY_ADDRESS");
         address aaveParser = vm.envAddress("AAVE_PARSER_ADDRESS");
         address uniswapV3Parser = vm.envAddress("UNISWAP_V3_PARSER_ADDRESS");
@@ -141,8 +157,8 @@ contract CreatePresets is Script {
             registry.createPreset(
                 "DeFi Trader",
                 DEFI_EXECUTE_ROLE,
-                500, // 5% maxSpendingBps
-                0, // no USD cap
+                0, // bps mode off (oracleless requires USD)
+                DEFI_TRADER_USD_CAP, // $1,000 / window
                 1 days,
                 protocols,
                 parserProtocols,
@@ -206,8 +222,8 @@ contract CreatePresets is Script {
             registry.createPreset(
                 "Yield Farmer",
                 DEFI_EXECUTE_ROLE,
-                1000, // 10% maxSpendingBps
-                0,
+                0, // bps mode off (oracleless requires USD)
+                YIELD_FARMER_USD_CAP, // $2,500 / window
                 1 days,
                 protocols,
                 parserProtocols,
@@ -228,8 +244,8 @@ contract CreatePresets is Script {
             registry.createPreset(
                 "Payment Agent",
                 DEFI_TRANSFER_ROLE,
-                100, // 1% maxSpendingBps
-                0,
+                0, // bps mode off (oracleless requires USD)
+                PAYMENT_AGENT_USD_CAP, // $500 / window
                 1 days,
                 empty,
                 empty,
