@@ -19,9 +19,9 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     defaultRpcUrl: "https://mainnet.base.org",
     addresses: {
       // TODO: fill after Base mainnet deployment
-      agentVaultFactory: "0x0000000000000000000000000000000000000000",
-      presetRegistry: "0x0000000000000000000000000000000000000000",
-      moduleRegistry: "0x0000000000000000000000000000000000000000",
+      agentVaultFactory: "0x389623997Bc006dA3BdBbE18d7Be04dACF4f09Ff",
+      presetRegistry: "0x49991a970BEBb0FBE7b472636dF2302c83B3bdD6",
+      moduleRegistry: "0x9889390D3ac31f6Ec97833D18Df4C4E689157251",
     },
   },
   baseSepolia: {
