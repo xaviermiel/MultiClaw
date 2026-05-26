@@ -11,6 +11,9 @@ out/
 # Dotenv file
 .env
 
+# Deployment scratch / verification artifacts (regenerable)
+deploy-artifacts/
+
 # Node modules
 node_modules/
 
