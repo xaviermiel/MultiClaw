@@ -136,7 +136,7 @@ deploy-base-registry:
 	forge script script/DeployRegistry.s.sol \
 		--rpc-url $(BASE_RPC_URL) \
 		--broadcast \
-		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		--private-key $(MAINNET_DEPLOYER_PK) \
 		--verify \
 		-vvvv
 
@@ -154,12 +154,25 @@ deploy-base-vault-factory:
 	forge script script/DeployAgentVaultFactory.s.sol \
 		--rpc-url $(BASE_RPC_URL) \
 		--broadcast \
-		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		--private-key $(MAINNET_DEPLOYER_PK) \
 		--verify \
 		-vvvv
 
-deploy-base: deploy-base-registry deploy-base-factory deploy-base-vault-factory
-	@echo "Base mainnet deployment complete."
+deploy-base-parsers:
+	@echo "Deploying parsers to Base mainnet..."
+	forge script script/DeployParsersBase.s.sol \
+		--rpc-url $(BASE_RPC_URL) \
+		--broadcast \
+		--private-key $(MAINNET_DEPLOYER_PK) \
+		--verify \
+		-vvvv
+
+# NOTE: deploy-base-factory (ModuleFactory) is intentionally excluded — ModuleFactory
+# exceeds the EIP-170 24KB runtime limit and is not used by the AgentVaultFactory clone
+# path (Option B). Deploy it separately only after it is slimmed under the limit.
+deploy-base: deploy-base-registry deploy-base-vault-factory
+	@echo "Base mainnet deployment complete (Registry + AgentVaultFactory)."
+	@echo "Next: deploy parsers with 'forge script script/DeployParsersBase.s.sol ... --broadcast --verify'"
 
 # Create the 3 standard presets in the PresetRegistry on Base mainnet.
 # Requires PRESET_REGISTRY_ADDRESS + the 4 *_PARSER_ADDRESS env vars
@@ -169,7 +182,7 @@ create-presets-base:
 	forge script script/CreatePresets.s.sol \
 		--rpc-url $(BASE_RPC_URL) \
 		--broadcast \
-		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		--private-key $(MAINNET_DEPLOYER_PK) \
 		-vvvv
 
 # Set Chainlink price feeds for a deployed module on Base mainnet.

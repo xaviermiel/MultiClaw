@@ -17,8 +17,14 @@ import "../src/ModuleRegistry.sol";
  *   forge script script/DeployRegistry.s.sol --rpc-url $RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
  */
 contract DeployRegistry is Script {
+    /// @dev Mainnet broadcasts use a dedicated deployer key; other chains keep the default.
+    function _deployerKey() internal view returns (uint256) {
+        if (block.chainid == 8453) return vm.envUint("MAINNET_DEPLOYER_PK");
+        return vm.envUint("DEPLOYER_PRIVATE_KEY");
+    }
+
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerPrivateKey = _deployerKey();
         address deployer = vm.addr(deployerPrivateKey);
         address owner = vm.envOr("REGISTRY_OWNER", deployer);
 

@@ -32,8 +32,14 @@ contract DeployAgentVaultFactory is Script {
     bytes32 constant PRESET_REGISTRY_SALT = keccak256("multiclaw.PresetRegistry.v1");
     bytes32 constant FACTORY_SALT = keccak256("multiclaw.AgentVaultFactory.v1");
 
+    /// @dev Mainnet broadcasts use a dedicated deployer key; other chains keep the default.
+    function _deployerKey() internal view returns (uint256) {
+        if (block.chainid == 8453) return vm.envUint("MAINNET_DEPLOYER_PK");
+        return vm.envUint("DEPLOYER_PRIVATE_KEY");
+    }
+
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerPrivateKey = _deployerKey();
         address deployer = vm.addr(deployerPrivateKey);
         address registryAddress = vm.envAddress("REGISTRY_ADDRESS");
         address factoryOwner = vm.envOr("FACTORY_OWNER", deployer);
@@ -51,8 +57,7 @@ contract DeployAgentVaultFactory is Script {
 
         // 1. Deploy implementation with CREATE2 — address is identical on every chain.
         //    address(1) placeholder args are ignored; proxies call initialize() instead.
-        DeFiInteractorModule impl =
-            new DeFiInteractorModule{salt: IMPL_SALT}(address(1), address(1), address(1));
+        DeFiInteractorModule impl = new DeFiInteractorModule{salt: IMPL_SALT}(address(1), address(1), address(1));
         console.log("\n1. DeFiInteractorModule implementation:", address(impl));
 
         // 2. Deploy PresetRegistry with CREATE2
