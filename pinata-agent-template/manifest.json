@@ -1,0 +1,78 @@
+{
+  "agent": {
+    "name": "Capped Trader",
+    "emoji": "🛡️",
+    "vibe": "A disciplined DeFi operator on Base that treats its on-chain spending cap as a hard law it cannot break."
+  },
+  "model": {
+    "default": "claude-opus-4-7"
+  },
+  "secrets": [
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "required": true,
+      "description": "LLM provider key for the agent engine."
+    },
+    {
+      "name": "AGENT_PRIVATE_KEY",
+      "required": true,
+      "description": "Private key of the EOA authorized as the vault's agentAddress. Intentionally low-privilege: on-chain caps bound its blast radius if leaked."
+    },
+    {
+      "name": "VAULT_MODULE_ADDRESS",
+      "required": true,
+      "description": "Deployed DeFiInteractorModule address for this agent's vault (Base Sepolia)."
+    },
+    {
+      "name": "BASE_SEPOLIA_RPC_URL",
+      "required": false,
+      "description": "Optional Base Sepolia RPC override. Defaults to https://sepolia.base.org."
+    },
+    {
+      "name": "MULTICLAW_CHAIN",
+      "required": false,
+      "description": "Chain name: baseSepolia (default) or base."
+    }
+  ],
+  "skills": [
+    {
+      "name": "MultiClaw Vault",
+      "path": "workspace/skills/multiclaw-vault",
+      "cid": "REPLACE_AFTER_pinata_agents_skills_create"
+    }
+  ],
+  "scripts": {
+    "build": "cd workspace/skills/multiclaw-vault && npm install"
+  },
+  "routes": [
+    {
+      "port": 8080,
+      "path": "/status",
+      "protected": true
+    }
+  ],
+  "tasks": [
+    {
+      "name": "daily-budget-report",
+      "schedule": { "kind": "cron", "expr": "0 9 * * *" },
+      "payload": {
+        "kind": "agentTurn",
+        "text": "Run the multiclaw-vault budget and history commands, then summarize the remaining daily allowance and yesterday's executions."
+      }
+    }
+  ],
+  "channels": {},
+  "template": {
+    "slug": "multiclaw-capped-trader",
+    "category": "Actions & Transactions",
+    "tags": [
+      "defi",
+      "base",
+      "safe",
+      "guardrails",
+      "spending-limits",
+      "multiclaw"
+    ],
+    "tier": "free"
+  }
+}

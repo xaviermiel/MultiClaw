@@ -24,7 +24,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "viem": "^2.0.0"
@@ -36,5 +37,18 @@
   "peerDependencies": {
     "viem": "^2.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "multiclaw",
+    "defi",
+    "safe",
+    "zodiac",
+    "agent",
+    "base",
+    "guardrails",
+    "spending-limits"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
