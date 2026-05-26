@@ -6,17 +6,18 @@ schema:
 dataSources:
   - kind: ethereum
     name: AgentVaultFactory
-    network: base-sepolia
+    network: base
     source:
-      address: "0xb98Cc4ABc98BFc3Aa998bd876Be76f85Afeffc1F"
+      address: "0x389623997Bc006dA3BdBbE18d7Be04dACF4f09Ff"
       abi: AgentVaultFactory
-      startBlock: 40831466
+      startBlock: 46515237
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
       language: wasm/assemblyscript
       entities:
         - AgentVaultCreated
+        - Vault
       abis:
         - name: AgentVaultFactory
           file: AgentVaultFactory/AgentVaultFactory.json
@@ -27,7 +28,7 @@ dataSources:
 templates:
   - kind: ethereum
     name: DeFiInteractorModule
-    network: base-sepolia
+    network: base
     source:
       abi: DeFiInteractorModule
     mapping:
@@ -39,7 +40,8 @@ templates:
         - TransferExecuted
         - AcquiredBalanceUpdated
         - AllowedRecipientsSet
-        - RecipientWhitelistToggled
+        - Account
+        - AcquiredBalance
       abis:
         - name: DeFiInteractorModule
           file: DeFiInteractorModule/DeFiInteractorModule.json
