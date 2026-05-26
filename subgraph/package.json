@@ -4,7 +4,7 @@
   "scripts": {
     "codegen": "graph codegen",
     "build": "graph build",
-    "deploy": "graph deploy test-multiclaw"
+    "deploy": "graph deploy multiclaw-base"
   },
   "dependencies": {
     "@graphprotocol/graph-cli": "^0.79.0",

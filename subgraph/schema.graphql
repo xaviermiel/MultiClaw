@@ -1,4 +1,4 @@
-type Vault @entity {
+type Vault @entity(immutable: false) {
   id: Bytes!
   safe: Bytes!
   agentAddress: Bytes!
@@ -9,7 +9,7 @@ type Vault @entity {
   accounts: [Account!]! @derivedFrom(field: "vault")
 }
 
-type Account @entity {
+type Account @entity(immutable: false) {
   id: Bytes!
   vault: Vault!
   module: Bytes!
@@ -21,7 +21,7 @@ type Account @entity {
   balances: [AcquiredBalance!]! @derivedFrom(field: "account")
 }
 
-type AcquiredBalance @entity {
+type AcquiredBalance @entity(immutable: false) {
   id: Bytes!
   account: Account!
   subAccount: Bytes!
