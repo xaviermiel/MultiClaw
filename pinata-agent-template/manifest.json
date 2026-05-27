@@ -29,6 +29,11 @@
       "description": "Optional Base Sepolia RPC override. Defaults to https://sepolia.base.org."
     },
     {
+      "name": "SUBGRAPH_URL",
+      "required": false,
+      "description": "MultiClaw subgraph query URL for this chain. Required for the history command."
+    },
+    {
       "name": "MULTICLAW_CHAIN",
       "required": false,
       "description": "Chain name: baseSepolia (default) or base."

@@ -1,6 +1,10 @@
 import { formatUnits, isAddress, type Address } from "viem";
-import type { ProtocolExecution, TransferExecution } from "@multiclaw/core";
 import { loadContext } from "./client.js";
+import {
+  fetchHistory,
+  type ProtocolExecutionRow,
+  type TransferExecutedRow,
+} from "./subgraph.js";
 
 const USD_DECIMALS = 18;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -23,8 +27,11 @@ async function budget(): Promise<void> {
     module,
     remaining: usd(b.remainingAllowance),
     cap: usd(b.maxAllowance),
+    spentThisWindow: usd(b.cumulativeSpent),
     usedPercentage: b.usedPercentage,
     windowSeconds: Number(b.windowDuration),
+    oraclelessMode: b.oracleless,
+    windowExpired: b.windowExpired,
   });
 }
 
@@ -44,26 +51,29 @@ async function status(): Promise<void> {
 }
 
 async function history(): Promise<void> {
-  const { client, agent, module } = loadContext();
-  const [execs, transfers] = await Promise.all([
-    client.getTransactionHistory(module, agent.address),
-    client.getTransferHistory(module, agent.address),
-  ]);
+  const subgraphUrl = process.env.SUBGRAPH_URL;
+  if (!subgraphUrl) {
+    throw new Error(
+      "Missing required env var: SUBGRAPH_URL (your MultiClaw subgraph query URL)",
+    );
+  }
+  const { agent } = loadContext();
+  const data = await fetchHistory(subgraphUrl, agent.address);
   emit({
-    executions: execs.map((e: ProtocolExecution) => ({
+    executions: data.protocolExecutions.map((e: ProtocolExecutionRow) => ({
       target: e.target,
-      opType: e.opType,
-      spendingCost: usd(e.spendingCost),
+      opType: Number(e.opType),
+      spendingCost: usd(BigInt(e.spendingCost)),
       block: Number(e.blockNumber),
-      txHash: e.txHash,
+      txHash: e.transactionHash,
     })),
-    transfers: transfers.map((t: TransferExecution) => ({
+    transfers: data.transferExecuteds.map((t: TransferExecutedRow) => ({
       token: t.token,
       recipient: t.recipient,
-      amount: t.amount.toString(),
-      spendingCost: usd(t.spendingCost),
+      amount: t.amount,
+      spendingCost: usd(BigInt(t.spendingCost)),
       block: Number(t.blockNumber),
-      txHash: t.txHash,
+      txHash: t.transactionHash,
     })),
   });
 }

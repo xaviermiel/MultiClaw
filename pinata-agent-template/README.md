@@ -91,8 +91,8 @@ submission; marketplace placement is the partnership conversation.
   protocol swaps (Uniswap/Aave) means building target calldata and passing it to
   `executeAsAgent(module, target, calldata, account)` — the SDK sends it; you
   build it. Left as a follow-up.
-- History reads currently use the SDK's `getLogs` path. Swapping to the deployed
-  subgraph (`VITE_SUBGRAPH_URL_*`) is a cheap upgrade for richer history.
+- History reads are **subgraph-backed** (`SUBGRAPH_URL`), not `eth_getLogs` — this
+  avoids the public RPC's 2000-block `eth_getLogs` cap and scales better.
 - Verify exact `manifest.json` field shapes with `pinata agents templates validate`
   before submitting — some fields here are modeled from the docs and may need
   tweaks against the live schema.

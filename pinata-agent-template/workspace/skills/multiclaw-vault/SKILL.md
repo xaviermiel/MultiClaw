@@ -17,7 +17,7 @@ All commands run from this folder via `npm run mc -- <command>`.
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `budget`                                | Remaining spending allowance for the current window, the cap, and % used.                                 |
 | `status`                                | Vault state: paused, Safe, oracle (oracleless?), Safe value, authorized agents.                           |
-| `history`                               | Recent protocol executions and transfers for this agent.                                                  |
+| `history`                               | Recent protocol executions and transfers for this agent (read from the subgraph; needs `SUBGRAPH_URL`).   |
 | `acquired <token>`                      | Acquired (free-to-spend) balance for a token.                                                             |
 | `transfer <token> <recipient> <amount>` | Send `amount` (base units) of `token` to `recipient`. Reverts on cap breach or non-whitelisted recipient. |
 
