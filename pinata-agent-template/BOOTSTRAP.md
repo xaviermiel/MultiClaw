@@ -28,7 +28,7 @@ ensure the SDK and frontend point at the same factory address.
 
 ```ts
 import { MultiClawClient } from "@multiclaw/core";
-const client = new MultiClawClient({ chain: "baseSepolia" });
+const client = new MultiClawClient({ chain: "base" });
 const { module } = await client.createAgentVaultFromPreset(
   {
     safe, // the Safe that owns the vault
@@ -36,7 +36,7 @@ const { module } = await client.createAgentVaultFromPreset(
     agentAddress, // the agent's address from above
     presetId: 0n, // 0=DeFi Trader, 1=Yield Farmer, 2=Payment Agent
     priceFeedTokens,
-    priceFeedAddresses, // from getPriceFeedArrays("baseSepolia")
+    priceFeedAddresses, // from getPriceFeedArrays("base")
     allowedRecipients: [],
   },
   ownerAccount, // the deployer's signer
@@ -47,8 +47,8 @@ console.log(module); // → VAULT_MODULE_ADDRESS
 **C. Reuse an existing vault.** If a vault for this agent already exists, find
 its module address by querying the subgraph (`Vault` entity, filter by
 `agentAddress`) or by reading `AgentVaultCreated` events from the factory on the
-block explorer. The factory is `0xa4D6FdE6f8F6f873BB00d5059541B657468E6179` on
-Base Sepolia (`0x389623997Bc006dA3BdBbE18d7Be04dACF4f09Ff` on Base mainnet).
+block explorer. The factory is `0x389623997Bc006dA3BdBbE18d7Be04dACF4f09Ff` on
+Base mainnet (`0xa4D6FdE6f8F6f873BB00d5059541B657468E6179` on Base Sepolia).
 
 Deploy on the chain matching `MULTICLAW_CHAIN`. Once you have the module address,
 set it as the `VAULT_MODULE_ADDRESS` secret and continue.
@@ -60,7 +60,7 @@ Confirm these secrets are set (Pinata Secrets Vault):
 - `ANTHROPIC_API_KEY` — LLM provider
 - `AGENT_PRIVATE_KEY` — your agent signer
 - `VAULT_MODULE_ADDRESS` — the DeFiInteractorModule you operate
-- `MULTICLAW_CHAIN` — `baseSepolia` (default) or `base`
+- `MULTICLAW_CHAIN` — `base` (default) or `baseSepolia`
 
 ## 2. Sanity-check the vault
 

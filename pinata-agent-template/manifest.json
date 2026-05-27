@@ -5,13 +5,13 @@
     "vibe": "A disciplined DeFi operator on Base that treats its on-chain spending cap as a hard law it cannot break."
   },
   "model": {
-    "default": "claude-opus-4-7"
+    "default": "claude-haiku-4-5-20251001"
   },
   "secrets": [
     {
       "name": "ANTHROPIC_API_KEY",
       "required": true,
-      "description": "LLM provider key for the agent engine."
+      "description": "LLM provider key for the agent engine. Defaults to a fast, low-cost model (Claude Haiku 4.5) — this agent only reads budget/status and executes capped transfers, so it does not need a frontier model. Swap the provider/model in the Pinata Secrets Vault if you prefer."
     },
     {
       "name": "AGENT_PRIVATE_KEY",
@@ -21,22 +21,22 @@
     {
       "name": "VAULT_MODULE_ADDRESS",
       "required": true,
-      "description": "Deployed DeFiInteractorModule address for this agent's vault (Base Sepolia)."
+      "description": "Deployed DeFiInteractorModule address for this agent's vault (Base mainnet)."
     },
     {
-      "name": "BASE_SEPOLIA_RPC_URL",
+      "name": "RPC_URL",
       "required": false,
-      "description": "Optional Base Sepolia RPC override. Defaults to https://sepolia.base.org."
+      "description": "Optional RPC override for the selected chain. Defaults to https://mainnet.base.org."
     },
     {
       "name": "SUBGRAPH_URL",
       "required": false,
-      "description": "MultiClaw subgraph query URL for this chain. Required for the history command."
+      "description": "MultiClaw subgraph query URL for this chain. Required for the history command; point at your own subgraph (see README)."
     },
     {
       "name": "MULTICLAW_CHAIN",
       "required": false,
-      "description": "Chain name: baseSepolia (default) or base."
+      "description": "Chain name: base (default) or baseSepolia."
     }
   ],
   "skills": [

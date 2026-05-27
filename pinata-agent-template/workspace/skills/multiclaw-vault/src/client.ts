@@ -21,10 +21,10 @@ function requireEnv(name: string): string {
  * from environment variables. Throws if a required var is missing.
  */
 export function loadContext(): SkillContext {
-  const chain = (process.env.MULTICLAW_CHAIN ?? "baseSepolia") as
+  const chain = (process.env.MULTICLAW_CHAIN ?? "base") as
     | "base"
     | "baseSepolia";
-  const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL;
+  const rpcUrl = process.env.RPC_URL;
 
   const agent = privateKeyToAccount(requireEnv("AGENT_PRIVATE_KEY") as Hex);
   const moduleAddress = requireEnv("VAULT_MODULE_ADDRESS") as Address;
