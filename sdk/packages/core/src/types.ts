@@ -80,8 +80,22 @@ export interface BudgetInfo {
   safeValueUSD: bigint;
   /** Computed max allowance for current window */
   maxAllowance: bigint;
-  /** Percentage of budget used (0-100) */
+  /** Percentage of budget used (0-100), cumulative spend vs. cap */
   usedPercentage: number;
+  /** Whether the vault runs without an oracle (cumulative USD cap only) */
+  oracleless: boolean;
+  /** Effective cumulative spend this window (0 if the window has lapsed) */
+  cumulativeSpent: bigint;
+  /** Window start timestamp (unix seconds; 0 if no spend has opened a window) */
+  windowStart: bigint;
+  /** Whether the current window has lapsed (next spend will reset it) */
+  windowExpired: boolean;
+  /**
+   * Raw oracle-managed allowance (`getSpendingAllowance`). Authoritative only
+   * for oracle vaults; dead/stale for oracleless vaults — prefer
+   * `remainingAllowance`.
+   */
+  spendingAllowance: bigint;
 }
 
 export interface VaultStatus {

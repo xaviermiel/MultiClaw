@@ -246,28 +246,68 @@ export class MultiClawClient {
   ): Promise<BudgetInfo> {
     const module = this._moduleContract(moduleAddress);
 
-    const [remainingAllowance, limits, safeValue] = await Promise.all([
+    const [
+      spendingAllowance,
+      limits,
+      safeValue,
+      oracleless,
+      storedCumulativeSpent,
+      windowStart,
+      storedWindowSafeValue,
+    ] = await Promise.all([
       module.read.getSpendingAllowance([subAccount]),
       module.read.getSubAccountLimits([subAccount]),
       module.read.getSafeValue(),
+      module.read.isOracleless(),
+      module.read.cumulativeSpent([subAccount]),
+      module.read.windowStart([subAccount]),
+      module.read.windowSafeValue([subAccount]),
     ]);
 
     const [maxSpendingBps, maxSpendingUSD, windowDuration] = limits;
     const [safeValueUSD] = safeValue;
 
-    // Dual-mode: USD mode uses fixed amount, BPS mode calculates from Safe value
+    // Mirror the on-chain lazy window reset in `_trackCumulativeSpending`:
+    // the next spend rolls the window if it is unset or has elapsed, zeroing
+    // `cumulativeSpent` and re-snapshotting `windowSafeValue`. Predict that
+    // here so off-chain reads match what the contract will enforce, instead of
+    // returning stale stored values.
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const windowExpired =
+      windowStart === 0n || now > windowStart + windowDuration;
+
+    const cumulativeSpent = windowExpired ? 0n : storedCumulativeSpent;
+
+    // BPS mode caps against the window's snapshotted Safe value. A fresh window
+    // re-snapshots it: current Safe value for oracle vaults, 0 for oracleless
+    // (which are always USD mode, so this branch is unused there).
+    const effectiveWindowSafeValue = windowExpired
+      ? oracleless
+        ? 0n
+        : safeValueUSD
+      : storedWindowSafeValue;
+
     const maxAllowance =
       maxSpendingUSD > 0n
         ? maxSpendingUSD
-        : safeValueUSD > 0n
-          ? (safeValueUSD * maxSpendingBps) / 10000n
-          : 0n;
+        : (effectiveWindowSafeValue * maxSpendingBps) / 10000n;
+
+    // The cumulative USD cap binds in BOTH modes (`_trackCumulativeSpending`
+    // always runs). Oracle vaults additionally bind on the oracle-managed
+    // `spendingAllowance`; oracleless vaults never replenish it, so it is dead
+    // and must be ignored — the cumulative cap is the only real budget.
+    const cumulativeRemaining =
+      maxAllowance > cumulativeSpent ? maxAllowance - cumulativeSpent : 0n;
+
+    const remainingAllowance = oracleless
+      ? cumulativeRemaining
+      : spendingAllowance < cumulativeRemaining
+        ? spendingAllowance
+        : cumulativeRemaining;
 
     const usedPercentage =
       maxAllowance > 0n
-        ? Number(
-            ((maxAllowance - remainingAllowance) * 10000n) / maxAllowance,
-          ) / 100
+        ? Number((cumulativeSpent * 10000n) / maxAllowance) / 100
         : 0;
 
     return {
@@ -278,6 +318,11 @@ export class MultiClawClient {
       safeValueUSD,
       maxAllowance,
       usedPercentage: Math.min(100, Math.max(0, usedPercentage)),
+      oracleless,
+      cumulativeSpent,
+      windowStart,
+      windowExpired,
+      spendingAllowance,
     };
   }
 
