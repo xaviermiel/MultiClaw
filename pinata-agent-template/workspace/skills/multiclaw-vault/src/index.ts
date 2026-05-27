@@ -2,6 +2,7 @@ import { formatUnits, isAddress, type Address } from "viem";
 import { loadContext } from "./client.js";
 import {
   fetchHistory,
+  fetchAllowedRecipients,
   type ProtocolExecutionRow,
   type TransferExecutedRow,
 } from "./subgraph.js";
@@ -78,6 +79,43 @@ async function history(): Promise<void> {
   });
 }
 
+async function whitelist(args: string[]): Promise<void> {
+  const { client, agent, module } = loadContext();
+
+  // Check the recipients passed as args, or fall back to OWNER_ADDRESS — the
+  // address a guardian must confirm it can (only) withdraw to.
+  const owner = process.env.OWNER_ADDRESS;
+  const toCheck = args.filter((a) => isAddress(a)) as Address[];
+  if (toCheck.length === 0 && owner && isAddress(owner)) {
+    toCheck.push(owner as Address);
+  }
+
+  const wl = await client.getRecipientWhitelist(module, agent.address, toCheck);
+
+  const out: Record<string, unknown> = {
+    agent: agent.address,
+    module,
+    enabled: wl.enabled,
+    checked: wl.allowed,
+  };
+
+  // Enumerate the full current set from the subgraph when available, and
+  // compute the guardian invariant: whitelist on AND owner the sole recipient.
+  const subgraphUrl = process.env.SUBGRAPH_URL;
+  if (subgraphUrl) {
+    const allowed = await fetchAllowedRecipients(subgraphUrl, agent.address);
+    out.allowedRecipients = allowed;
+    if (owner && isAddress(owner)) {
+      out.ownerIsSoleRecipient =
+        wl.enabled &&
+        allowed.length === 1 &&
+        allowed[0] === owner.toLowerCase();
+    }
+  }
+
+  emit(out);
+}
+
 async function acquired(args: string[]): Promise<void> {
   const [token] = args;
   if (!token || !isAddress(token)) {
@@ -129,13 +167,15 @@ async function main(): Promise<void> {
       return status();
     case "history":
       return history();
+    case "whitelist":
+      return whitelist(rest);
     case "acquired":
       return acquired(rest);
     case "transfer":
       return transfer(rest);
     default:
       console.log(
-        "Commands: budget | status | history | acquired <token> | transfer <token> <recipient> <amount>",
+        "Commands: budget | status | history | whitelist [recipient...] | acquired <token> | transfer <token> <recipient> <amount>",
       );
   }
 }

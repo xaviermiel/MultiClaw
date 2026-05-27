@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@multiclaw/core": "^0.1.1",
+    "@multiclaw/core": "^0.1.2",
     "tsx": "^4.7.0",
     "viem": "^2.0.0"
   },

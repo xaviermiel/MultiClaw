@@ -13,13 +13,14 @@ All commands run from this folder via `npm run mc -- <command>`.
 
 ## Commands
 
-| Command                                 | What it does                                                                                              |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `budget`                                | Remaining spending allowance for the current window, the cap, and % used.                                 |
-| `status`                                | Vault state: paused, Safe, oracle (oracleless?), Safe value, authorized agents.                           |
-| `history`                               | Recent protocol executions and transfers for this agent (read from the subgraph; needs `SUBGRAPH_URL`).   |
-| `acquired <token>`                      | Acquired (free-to-spend) balance for a token.                                                             |
-| `transfer <token> <recipient> <amount>` | Send `amount` (base units) of `token` to `recipient`. Reverts on cap breach or non-whitelisted recipient. |
+| Command                                 | What it does                                                                                                                                                                        |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `budget`                                | Remaining spending allowance for the current window, the cap, and % used.                                                                                                           |
+| `status`                                | Vault state: paused, Safe, oracle (oracleless?), Safe value, authorized agents.                                                                                                     |
+| `history`                               | Recent protocol executions and transfers for this agent (read from the subgraph; needs `SUBGRAPH_URL`).                                                                             |
+| `whitelist [recipient...]`              | Recipient whitelist: whether it's enforced, membership for the given recipients (or `OWNER_ADDRESS`), and — with `SUBGRAPH_URL` — the full allowed set plus `ownerIsSoleRecipient`. |
+| `acquired <token>`                      | Acquired (free-to-spend) balance for a token.                                                                                                                                       |
+| `transfer <token> <recipient> <amount>` | Send `amount` (base units) of `token` to `recipient`. Reverts on cap breach or non-whitelisted recipient.                                                                           |
 
 Examples:
 

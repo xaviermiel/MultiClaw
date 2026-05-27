@@ -1,0 +1,89 @@
+{
+  "agent": {
+    "name": "Vault Guardian",
+    "emoji": "🛟",
+    "vibe": "A sentinel for a MultiClaw vault. It watches, and its only power is to pull the owner's funds back to the owner — it can do nothing else, by on-chain rule."
+  },
+  "model": {
+    "default": "claude-haiku-4-5-20251001"
+  },
+  "secrets": [
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "required": true,
+      "description": "LLM provider key for the agent engine. Defaults to a fast, low-cost model (Claude Haiku 4.5) — a guardian mostly observes and rarely acts, so it does not need a frontier model. Swap the provider/model in the Pinata Secrets Vault if you prefer."
+    },
+    {
+      "name": "AGENT_PRIVATE_KEY",
+      "required": true,
+      "description": "Private key of the EOA authorized as the vault's agentAddress. Intentionally low-privilege: with the recipient whitelist locked to the owner, even a leaked key can only return funds to the owner."
+    },
+    {
+      "name": "VAULT_MODULE_ADDRESS",
+      "required": true,
+      "description": "Deployed DeFiInteractorModule address for the vault this guardian protects (Base mainnet)."
+    },
+    {
+      "name": "OWNER_ADDRESS",
+      "required": true,
+      "description": "The owner's address — the ONLY destination this guardian may withdraw to. Must match the vault's whitelisted recipient. The guardian verifies this on startup."
+    },
+    {
+      "name": "RPC_URL",
+      "required": false,
+      "description": "Optional RPC override for the selected chain. Defaults to https://mainnet.base.org."
+    },
+    {
+      "name": "SUBGRAPH_URL",
+      "required": false,
+      "description": "MultiClaw subgraph query URL. Used to enumerate the full recipient whitelist and read history; point at your own subgraph (see README)."
+    },
+    {
+      "name": "MULTICLAW_CHAIN",
+      "required": false,
+      "description": "Chain name: base (default) or baseSepolia."
+    }
+  ],
+  "skills": [
+    {
+      "name": "MultiClaw Vault",
+      "path": "workspace/skills/multiclaw-vault",
+      "cid": "SHARED_WITH_CAPPED_TRADER__paste_the_same_skill_CID"
+    }
+  ],
+  "scripts": {
+    "build": "cd workspace/skills/multiclaw-vault && npm install"
+  },
+  "routes": [
+    {
+      "port": 8080,
+      "path": "/status",
+      "protected": true
+    }
+  ],
+  "tasks": [
+    {
+      "name": "watch-and-protect",
+      "schedule": { "kind": "cron", "expr": "*/30 * * * *" },
+      "payload": {
+        "kind": "agentTurn",
+        "text": "Assess the protocols and positions you monitor for credible signs of an exploit, drain, emergency pause, or abnormal oracle behavior. If the owner's funds are at credible risk, withdraw the at-risk position to OWNER_ADDRESS and alert the owner with what you saw and did. Otherwise, confirm all clear and take no action."
+      }
+    }
+  ],
+  "channels": {},
+  "template": {
+    "slug": "multiclaw-guardian",
+    "category": "Actions & Transactions",
+    "tags": [
+      "defi",
+      "base",
+      "safe",
+      "guardrails",
+      "security",
+      "circuit-breaker",
+      "multiclaw"
+    ],
+    "tier": "free"
+  }
+}
