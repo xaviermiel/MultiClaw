@@ -119,6 +119,27 @@ export interface VaultStatus {
   transferAgents: Address[];
 }
 
+export interface RecipientWhitelistEntry {
+  /** The recipient address that was checked */
+  recipient: Address;
+  /** Whether this recipient is on the agent's allowed list */
+  allowed: boolean;
+}
+
+export interface RecipientWhitelistInfo {
+  /**
+   * Whether the recipient whitelist is enforced for this agent. When false the
+   * agent may transfer to any recipient; when true, only allowed recipients.
+   */
+  enabled: boolean;
+  /**
+   * Per-recipient membership for the addresses queried. The on-chain whitelist
+   * is a mapping and can't be fully enumerated on-chain — to list the entire
+   * allowed set, query the subgraph's `AllowedRecipientsSet` entity.
+   */
+  allowed: RecipientWhitelistEntry[];
+}
+
 // ============ Transaction History ============
 
 export interface ProtocolExecution {

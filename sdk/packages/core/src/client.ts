@@ -23,6 +23,7 @@ import type {
   VaultDeployment,
   BudgetInfo,
   VaultStatus,
+  RecipientWhitelistInfo,
   ProtocolExecution,
   TransferExecution,
   OperationType,
@@ -473,6 +474,42 @@ export class MultiClawClient {
       blockNumber: log.blockNumber ?? 0n,
       txHash: log.transactionHash!,
     }));
+  }
+
+  /**
+   * Read an agent's transfer recipient whitelist.
+   *
+   * The on-chain whitelist is a mapping, so it can't be fully enumerated
+   * on-chain — pass the `recipients` you want to check membership for (e.g. the
+   * owner address a guardian may withdraw to). To list the *entire* allowed set,
+   * query the subgraph's `AllowedRecipientsSet` entity.
+   *
+   * @param moduleAddress - The DeFiInteractorModule address
+   * @param subAccount - The agent address whose whitelist to read
+   * @param recipients - Recipient addresses to check membership for (optional)
+   * @returns Whether the whitelist is enforced, plus per-recipient membership
+   */
+  async getRecipientWhitelist(
+    moduleAddress: Address,
+    subAccount: Address,
+    recipients: Address[] = [],
+  ): Promise<RecipientWhitelistInfo> {
+    const module = this._moduleContract(moduleAddress);
+
+    const [enabled, membership] = await Promise.all([
+      module.read.recipientWhitelistEnabled([subAccount]),
+      Promise.all(
+        recipients.map((r) => module.read.allowedRecipients([subAccount, r])),
+      ),
+    ]);
+
+    return {
+      enabled,
+      allowed: recipients.map((recipient, i) => ({
+        recipient,
+        allowed: membership[i],
+      })),
+    };
   }
 
   // ============ Owner Operations ============
