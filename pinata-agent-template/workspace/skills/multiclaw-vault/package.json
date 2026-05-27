@@ -9,11 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@multiclaw/core": "^0.1.0",
+    "@multiclaw/core": "^0.1.1",
+    "tsx": "^4.7.0",
     "viem": "^2.0.0"
   },
   "devDependencies": {
-    "tsx": "^4.7.0",
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0"
   }
