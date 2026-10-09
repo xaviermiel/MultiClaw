@@ -13,3 +13,6 @@ logs.txt
 
 # Build outputs
 dist/
+
+# Go build output
+bin/
