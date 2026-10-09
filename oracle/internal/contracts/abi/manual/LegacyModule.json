@@ -1,0 +1,3 @@
+[
+  { "type": "function", "name": "absoluteMaxSpendingBps", "stateMutability": "view", "inputs": [], "outputs": [{ "name": "", "type": "uint256" }] }
+]

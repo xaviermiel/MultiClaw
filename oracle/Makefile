@@ -4,7 +4,7 @@
 GO  ?= go
 BIN ?= bin/oracle
 
-.PHONY: build test vet fmt fmt-check check ts-config
+.PHONY: build test vet fmt fmt-check check ts-config abi
 
 build:
 	$(GO) build -o $(BIN) ./cmd/oracle
@@ -28,3 +28,19 @@ check: fmt-check vet test
 # Regenerate the TS config dump that the Go preset test compares against.
 ts-config:
 	npx tsx scripts/dump-ts-config.ts > internal/config/testdata/ts-config.json
+
+# Regenerate the contract ABIs embedded in internal/contracts from the Foundry
+# build (out/ is gitignored, so the extracted ABIs are committed). After a
+# contract change: `make abi` and commit the diff.
+REPO_ROOT := ..
+ABI_OUT   := internal/contracts/abi/generated
+PARSERS   := AaveV3Parser KyberSwapParser MerklParser MorphoBlueParser MorphoParser \
+             OneInchParser ParaswapParser UniswapV3Parser UniswapV4Parser UniversalRouterParser
+
+abi:
+	cd $(REPO_ROOT) && forge build
+	mkdir -p $(ABI_OUT)
+	jq '.abi' $(REPO_ROOT)/out/DeFiInteractorModule.sol/DeFiInteractorModule.json > $(ABI_OUT)/DeFiInteractorModule.json
+	jq '.abi' $(REPO_ROOT)/out/ModuleRegistry.sol/ModuleRegistry.json > $(ABI_OUT)/ModuleRegistry.json
+	jq -s '[.[].abi[] | select(.type == "error")] | unique_by([.name, [.inputs[].type]])' \
+		$(foreach p,$(PARSERS),$(REPO_ROOT)/out/$(p).sol/$(p).json) > $(ABI_OUT)/ParserErrors.json
