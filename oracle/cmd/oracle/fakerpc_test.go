@@ -93,6 +93,27 @@ func (f *fakeRPC) answer(ctx context.Context, req rpcRequest) (any, *rpcErrorBod
 		return hexutil.Uint64(f.block), nil
 	case "eth_getBalance":
 		return (*hexutil.Big)(f.balance), nil
+	case "eth_getLogs":
+		return []any{}, nil // a chain without events
+	case "eth_getBlockByNumber":
+		var tag string
+		if len(req.Params) == 0 || json.Unmarshal(req.Params[0], &tag) != nil {
+			return nil, &rpcErrorBody{Code: -32602, Message: "invalid params"}
+		}
+		n := f.block
+		if tag != "latest" {
+			v, err := hexutil.DecodeUint64(tag)
+			if err != nil {
+				return nil, &rpcErrorBody{Code: -32602, Message: err.Error()}
+			}
+			n = v
+		}
+		return map[string]any{
+			"number":        hexutil.Uint64(n),
+			"hash":          common.BigToHash(new(big.Int).SetUint64(n + 1)),
+			"timestamp":     hexutil.Uint64(1_700_000_000 + n*2),
+			"baseFeePerGas": (*hexutil.Big)(big.NewInt(1_000_000)),
+		}, nil
 	case "eth_call":
 		var arg struct {
 			From  common.Address  `json:"from"`

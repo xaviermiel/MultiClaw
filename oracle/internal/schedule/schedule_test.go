@@ -70,3 +70,13 @@ func TestLoopStopsWhenTheContextEnds(t *testing.T) {
 		t.Fatalf("%d runs, want the immediate one only", runs.Load())
 	}
 }
+
+func TestEveryWaitsForTheFirstActivation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	var runs atomic.Int32
+	Every(ctx, Interval(time.Hour), func(context.Context) { runs.Add(1) })
+	if runs.Load() != 0 {
+		t.Fatalf("%d runs before the first activation", runs.Load())
+	}
+}

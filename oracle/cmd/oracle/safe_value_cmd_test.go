@@ -2,20 +2,10 @@ package main
 
 import (
 	"bytes"
-	"math/big"
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-
 	"github.com/xaviermiel/MultiClaw/oracle/internal/config"
-	"github.com/xaviermiel/MultiClaw/oracle/internal/contracts"
-)
-
-var (
-	testOracle = common.HexToAddress("0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E")
-	testModule = common.HexToAddress("0x4d0D0000000000000000000000000000000000e1")
-	testSafe   = common.HexToAddress("0x5AFE000000000000000000000000000000000000")
 )
 
 // TestSafeValueOnceDryRun runs `oracle safe-value --once --dry-run` against
@@ -28,22 +18,7 @@ func TestSafeValueOnceDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := newFakeRPC(t, chain.ID)
-	node.balance = big.NewInt(1e18)
-	m := &contracts.ModuleABI
-	node.Return(testModule, m, "authorizedOracle", testOracle).
-		Return(testModule, m, "avatar", testSafe).
-		Return(testModule, m, "getSafeValue", big.NewInt(0), big.NewInt(0), big.NewInt(0)).
-		On(testModule, m, "getTokenBalances", func(args []any) ([]any, error) {
-			balances := make([]*big.Int, len(args[0].([]common.Address)))
-			for i := range balances {
-				balances[i] = big.NewInt(0)
-			}
-			return []any{balances}, nil
-		}).
-		Return(testModule, m, "updateSafeValue").
-		Return(chain.ETHPriceFeed, &contracts.ChainlinkABI, "latestRoundData",
-			big.NewInt(1), big.NewInt(2000e8), big.NewInt(0), big.NewInt(0), big.NewInt(1)).
-		Return(chain.ETHPriceFeed, &contracts.ChainlinkABI, "decimals", uint8(8))
+	installSafeValueModule(node, chain)
 
 	envFile := writeEnvFile(t, strings.Join([]string{
 		"CHAIN=base-sepolia",

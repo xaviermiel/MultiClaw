@@ -9,6 +9,8 @@ import (
 	"syscall"
 
 	"github.com/xaviermiel/MultiClaw/oracle/internal/config"
+	"github.com/xaviermiel/MultiClaw/oracle/internal/ethx"
+	"github.com/xaviermiel/MultiClaw/oracle/internal/logx"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/safevalue"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/schedule"
 )
@@ -46,10 +48,15 @@ func runSafeValue(args []string, stdout, stderr io.Writer) int {
 		svc.RunOnce(ctx)
 		return 0
 	}
-	log.Printf("Starting Safe Value Oracle with cron: %s", cfg.SafeValueCron)
-	log.Printf("Module address: %s", addrOrNone(cfg.ModuleAddress))
-	log.Printf("Updater address: %s", sender.Address().Hex())
+	logSafeValueStart(log, cfg, sender)
 	schedule.Loop(ctx, sched, svc.RunOnce)
 	log.Printf("Stopped")
 	return 0
+}
+
+// logSafeValueStart logs the TS startCron banner.
+func logSafeValueStart(log *logx.Logger, cfg *config.Config, sender ethx.Sender) {
+	log.Printf("Starting Safe Value Oracle with cron: %s", cfg.SafeValueCron)
+	log.Printf("Module address: %s", addrOrNone(cfg.ModuleAddress))
+	log.Printf("Updater address: %s", sender.Address().Hex())
 }

@@ -62,22 +62,14 @@ func newLogger(name string, w io.Writer) *logx.Logger {
 	return logx.NewWithWriter(name, w, time.Now)
 }
 
-// connect dials the RPC endpoints, checks that all of them serve the
-// configured chain, and returns the transaction sender: a dry-run one in
-// dry-run mode, otherwise one signing with PRIVATE_KEY.
+// connect dials the RPC endpoints (see dial) and returns the transaction
+// sender (see newSender).
 func connect(ctx context.Context, cfg *config.Config, logf logx.Logf) (*ethx.FallbackClient, ethx.Sender, error) {
-	for _, w := range cfg.Warnings {
-		logf("Warning: %s", w)
-	}
-	client, err := ethx.Dial(ctx, cfg.RPCURLs, ethx.Options{Logf: logf})
+	client, err := dial(ctx, cfg, logf)
 	if err != nil {
 		return nil, nil, err
 	}
-	err = client.CheckChainID(ctx, cfg.Chain.ID)
-	var sender ethx.Sender
-	if err == nil {
-		sender, err = newSender(ctx, cfg, client, logf)
-	}
+	sender, err := newSender(ctx, cfg, client, logf)
 	if err != nil {
 		client.Close()
 		return nil, nil, err
@@ -85,6 +77,25 @@ func connect(ctx context.Context, cfg *config.Config, logf logx.Logf) (*ethx.Fal
 	return client, sender, nil
 }
 
+// dial connects to the RPC endpoints and checks that all of them serve the
+// configured chain.
+func dial(ctx context.Context, cfg *config.Config, logf logx.Logf) (*ethx.FallbackClient, error) {
+	for _, w := range cfg.Warnings {
+		logf("Warning: %s", w)
+	}
+	client, err := ethx.Dial(ctx, cfg.RPCURLs, ethx.Options{Logf: logf})
+	if err != nil {
+		return nil, err
+	}
+	if err := client.CheckChainID(ctx, cfg.Chain.ID); err != nil {
+		client.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
+// newSender returns a dry-run sender in dry-run mode, otherwise one signing
+// with PRIVATE_KEY.
 func newSender(ctx context.Context, cfg *config.Config, client *ethx.FallbackClient, logf logx.Logf) (ethx.Sender, error) {
 	if cfg.DryRun {
 		oracle, err := cfg.OracleIdentity()
