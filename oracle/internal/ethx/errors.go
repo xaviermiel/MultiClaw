@@ -30,36 +30,46 @@ func IsExecutionError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "execution reverted")
 }
 
-// txPoolRejections are deterministic eth_sendRawTransaction failures; the tx
-// sender handles them (e.g. nonce resync), so they must not be retried here.
-var txPoolRejections = []string{
-	"nonce too low",
-	"nonce too high",
-	"nonce has already been used",
-	"already known",
-	"known transaction",
-	"replacement transaction underpriced",
-	"transaction underpriced",
-	"insufficient funds",
-	"intrinsic gas too low",
-	"exceeds block gas limit",
-	"max fee per gas less than block base fee",
-	"fee cap less than block base fee",
-}
+// Deterministic eth_sendRawTransaction failures. The tx sender handles them
+// (nonce resync, duplicate detection), so the client must not retry them.
+var (
+	// alreadyKnown: the node already has this exact transaction.
+	alreadyKnown = []string{"already known", "alreadyknown", "known transaction"}
+	// nonceRejections: the nonce is used up, or ahead of the account's.
+	nonceRejections = []string{
+		"nonce too low",
+		"nonce too high",
+		"nonce has already been used",
+		"replacement transaction underpriced",
+	}
+	otherTxPoolRejections = []string{
+		"transaction underpriced",
+		"insufficient funds",
+		"intrinsic gas too low",
+		"exceeds block gas limit",
+		"max fee per gas less than block base fee",
+		"fee cap less than block base fee",
+	}
+)
 
-// IsTxPoolRejection reports whether err is a deterministic transaction
-// rejection from the node's tx pool.
-func IsTxPoolRejection(err error) bool {
+func errorContains(err error, needles []string) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	for _, s := range txPoolRejections {
+	for _, s := range needles {
 		if strings.Contains(msg, s) {
 			return true
 		}
 	}
 	return false
+}
+
+// IsTxPoolRejection reports whether err is a deterministic transaction
+// rejection from the node's tx pool.
+func IsTxPoolRejection(err error) bool {
+	return errorContains(err, alreadyKnown) || errorContains(err, nonceRejections) ||
+		errorContains(err, otherTxPoolRejections)
 }
 
 // IsRetryable reports whether err may succeed on a retry or another endpoint.

@@ -1,5 +1,6 @@
 // Package ethx is the oracle's Ethereum client layer: a multi-endpoint RPC
-// client with retries and failover, raw block info, and chunked log queries.
+// client with retries and failover, raw block info, chunked log queries, and
+// the transaction sender.
 package ethx
 
 import (
@@ -291,4 +292,38 @@ func (c *FallbackClient) TransactionReceipt(ctx context.Context, hash common.Has
 		return err
 	})
 	return out, err
+}
+
+// TransactionByHash returns the transaction with the given hash and whether
+// it is still pending, or ethereum.NotFound.
+func (c *FallbackClient) TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	err = c.do(ctx, "getTransaction", func(ctx context.Context, ep *endpoint) (err error) {
+		tx, isPending, err = ep.eth.TransactionByHash(ctx, hash)
+		return err
+	})
+	return tx, isPending, err
+}
+
+// CheckChainID verifies that every endpoint serves chain want. Endpoints that
+// don't answer are only logged (they may be down for now), but at least one
+// must answer.
+func (c *FallbackClient) CheckChainID(ctx context.Context, want uint64) error {
+	answered := 0
+	for _, ep := range c.endpoints {
+		actx, cancel := context.WithTimeout(ctx, c.opts.AttemptTimeout)
+		got, err := ep.eth.ChainID(actx)
+		cancel()
+		if err != nil {
+			c.opts.Logf("Could not check the chain ID of RPC endpoint %d: %v", ep.index, err)
+			continue
+		}
+		answered++
+		if !got.IsUint64() || got.Uint64() != want {
+			return fmt.Errorf("RPC endpoint %d serves chain %s, not the configured chain %d", ep.index, got, want)
+		}
+	}
+	if answered == 0 {
+		return errors.New("no RPC endpoint answered eth_chainId")
+	}
+	return nil
 }

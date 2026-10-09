@@ -430,3 +430,47 @@ func signedTestTx(t *testing.T) *types.Transaction {
 	}
 	return signed
 }
+
+// ============ Chain ID and transaction lookup ============
+
+func chainIDNode(t *testing.T, id string) *fakeNode {
+	return newFakeNode(t, func(_ int, method string, _ []json.RawMessage) reply {
+		if method != "eth_chainId" {
+			return reply{err: &rpcError{Code: -32601, Message: "method not found"}}
+		}
+		return reply{result: id}
+	})
+}
+
+func TestCheckChainIDAsksEveryEndpoint(t *testing.T) {
+	ctx := context.Background()
+	baseSepolia, base := chainIDNode(t, "0x14a34"), chainIDNode(t, "0x2105")
+	down := newFakeNode(t, always(reply{status: http.StatusBadGateway}))
+
+	logs := &logRecorder{}
+	if err := dialTest(t, logs, Options{}, down, baseSepolia).CheckChainID(ctx, 84532); err != nil {
+		t.Fatal(err)
+	}
+	if !logs.contains("Could not check the chain ID of RPC endpoint 0") {
+		t.Fatalf("logs %q", logs.lines)
+	}
+
+	// A fallback endpoint on another chain is caught too, not just the
+	// preferred one.
+	err := dialTest(t, nil, Options{}, baseSepolia, base).CheckChainID(ctx, 84532)
+	if err == nil || !strings.Contains(err.Error(), "RPC endpoint 1 serves chain 8453") {
+		t.Fatalf("err = %v", err)
+	}
+
+	if err := dialTest(t, nil, Options{}, down).CheckChainID(ctx, 84532); err == nil {
+		t.Fatal("no endpoint answered, want an error")
+	}
+}
+
+func TestTransactionByHashNotFoundIsNotRetried(t *testing.T) {
+	node := newFakeNode(t, always(reply{result: nil}))
+	_, _, err := dialTest(t, nil, Options{}, node).TransactionByHash(context.Background(), common.Hash{1})
+	if !errors.Is(err, ethereum.NotFound) || node.count() != 1 {
+		t.Fatalf("err = %v after %d requests", err, node.count())
+	}
+}
