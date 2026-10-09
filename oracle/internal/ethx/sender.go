@@ -40,8 +40,10 @@ type SentTx struct {
 	Data  []byte
 	Nonce uint64
 
-	// simulatedAt is the block a dry-run transaction was simulated against.
+	// simulatedAt is the block a dry-run transaction was simulated against,
+	// and revert why that simulation reverted ("" if it did not).
 	simulatedAt uint64
+	revert      string
 }
 
 // TxBackend is what TxSender needs from the RPC client.
@@ -234,8 +236,11 @@ func (s *TxSender) Wait(ctx context.Context, tx *SentTx) (*types.Receipt, error)
 
 // RevertReason explains why a mined transaction reverted by replaying it with
 // eth_call at the block before (as the TS did); "unknown" when the replay
-// succeeds.
+// succeeds. A dry-run transaction's reason is its simulation's.
 func RevertReason(ctx context.Context, c contracts.Caller, tx *SentTx, receipt *types.Receipt) string {
+	if tx.revert != "" {
+		return tx.revert
+	}
 	var block *big.Int
 	if receipt.BlockNumber != nil && receipt.BlockNumber.Sign() > 0 {
 		block = new(big.Int).Sub(receipt.BlockNumber, big.NewInt(1))
@@ -255,7 +260,8 @@ type DryRunBackend interface {
 
 // DryRunSender is the Sender of dry-run mode: it never signs. Send simulates
 // the call from the oracle address and logs what would have been sent; Wait
-// reports success at once, so the services carry on as if it was mined.
+// reports the simulated outcome at once, so the services carry on as if the
+// transaction was mined, successfully or reverted.
 type DryRunSender struct {
 	backend DryRunBackend
 	from    common.Address
@@ -288,11 +294,12 @@ func (d *DryRunSender) Send(ctx context.Context, to common.Address, data []byte)
 	if err != nil {
 		return nil, fmt.Errorf("get block number: %w", err)
 	}
-	outcome := "simulation ok"
+	outcome, revert := "simulation ok", ""
 	msg := ethereum.CallMsg{From: d.from, To: &to, Data: data}
 	if _, err := d.backend.CallContract(ctx, msg, new(big.Int).SetUint64(block)); err != nil {
 		if IsExecutionError(err) {
-			outcome = "would revert: " + contracts.DescribeRevert(err)
+			revert = contracts.DescribeRevert(err)
+			outcome = "would revert: " + revert
 		} else {
 			outcome = "simulation failed: " + err.Error()
 		}
@@ -303,13 +310,20 @@ func (d *DryRunSender) Send(ctx context.Context, to common.Address, data []byte)
 	var counter [8]byte
 	binary.BigEndian.PutUint64(counter[:], n)
 	hash := crypto.Keccak256Hash([]byte("multiclaw-oracle-dry-run"), counter[:], to.Bytes(), data)
-	return &SentTx{Hash: hash, From: d.from, To: to, Data: data, Nonce: n, simulatedAt: block}, nil
+	return &SentTx{Hash: hash, From: d.from, To: to, Data: data, Nonce: n, simulatedAt: block, revert: revert}, nil
 }
 
-// Wait returns a successful receipt in the block the call was simulated at.
+// Wait returns the receipt of the simulated outcome, in the block the call
+// was simulated at: reverted when the simulation reverted (production would
+// have mined a reverting transaction), otherwise successful, also when the
+// simulation could not run.
 func (d *DryRunSender) Wait(_ context.Context, tx *SentTx) (*types.Receipt, error) {
+	status := types.ReceiptStatusSuccessful
+	if tx.revert != "" {
+		status = types.ReceiptStatusFailed
+	}
 	return &types.Receipt{
-		Status:      types.ReceiptStatusSuccessful,
+		Status:      status,
 		TxHash:      tx.Hash,
 		BlockNumber: new(big.Int).SetUint64(tx.simulatedAt),
 	}, nil

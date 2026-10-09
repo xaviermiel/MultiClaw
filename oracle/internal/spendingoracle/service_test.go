@@ -486,6 +486,29 @@ func TestLastUpdateIsRecordedOnlyOnConfirmedSuccess(t *testing.T) {
 	env.wantLogs("Skipping batch update - no changes needed:")
 }
 
+func TestDryRunRecordsOnlyUpdatesThatWouldSucceed(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA}
+	env.svc.sender = ethx.NewDryRunSender(env.chain, oracle, env.logs.logf)
+
+	// batchUpdate has no handler: its simulation reverts, and production
+	// would have mined a reverting transaction.
+	env.svc.Refresh(ctx)
+	env.wantLogs("DRY RUN: not sending batchUpdate", "would revert: ", "REVERTED on-chain", "Transaction results: 0 confirmed, 1 failed")
+	if _, ok := env.svc.lastUpdate[updateKey{module, subA}]; ok {
+		t.Fatal("a batch that would revert recorded the last update")
+	}
+
+	env.chain.Return(module, &contracts.ModuleABI, "batchUpdate")
+	env.logs.reset()
+	env.svc.Refresh(ctx)
+	env.wantLogs("simulation ok", "Transaction results: 1 confirmed, 0 failed")
+	if env.svc.lastUpdate[updateKey{module, subA}] != now {
+		t.Fatalf("last update %d", env.svc.lastUpdate[updateKey{module, subA}])
+	}
+}
+
 func TestRefreshVisitsEverySubaccountOnce(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
@@ -583,5 +606,81 @@ func TestRunRefreshesFirstThenPolls(t *testing.T) {
 	}
 	if ctx.Err() == nil {
 		t.Fatal("Run returned before its context ended")
+	}
+}
+
+// cancelOnQueryFor cancels ctx when sub's own events are first queried.
+func cancelOnQueryFor(env *testEnv, sub common.Address, cancel context.CancelFunc) {
+	env.chain.failLogs = func(q ethereum.FilterQuery) error {
+		if len(q.Topics) > 1 && q.Topics[1][0] == topic(sub) {
+			cancel()
+		}
+		return nil
+	}
+}
+
+func TestShutdownInterruptsRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cancelAt common.Address
+		wantSent []common.Address
+	}{
+		{"during the first subaccount", subA, nil},
+		// The last one: the refresh used to log its completion.
+		{"during the last subaccount", subB, []common.Address{subA}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA, subB}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cancelOnQueryFor(env, tc.cancelAt, cancel)
+
+			env.svc.Refresh(ctx)
+			if got := env.sender.subAccounts(); !slices.Equal(got, tc.wantSent) {
+				t.Fatalf("sent %v, want %v; logs:\n%s", got, tc.wantSent, env.logs)
+			}
+			env.wantLogs("Error in periodic refresh: context canceled")
+			if env.logs.has("=== Periodic Refresh Complete ===") {
+				t.Fatalf("an interrupted refresh logged its completion:\n%s", env.logs)
+			}
+			if tc.cancelAt == subA && env.logs.has("Processing subaccount: "+lower(subB)) {
+				t.Fatalf("processed a subaccount after the shutdown:\n%s", env.logs)
+			}
+		})
+	}
+}
+
+func TestShutdownInterruptsPoll(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cancelAt common.Address
+	}{
+		{"during the first subaccount", subA},
+		{"during the last subaccount", subB},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			env.chain.addLog(transferLog(t, subA, tokenX, e18(1), e18(1), 950))
+			env.chain.addLog(transferLog(t, subB, tokenX, e18(1), e18(1), 960))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cancelOnQueryFor(env, tc.cancelAt, cancel)
+
+			env.svc.Poll(ctx)
+			env.wantLogs("Error polling for events: context canceled")
+			// The blocks were not all processed.
+			if env.svc.lastProcessedBlock != 898 {
+				t.Fatalf("lastProcessedBlock = %d, want 898 (unchanged)", env.svc.lastProcessedBlock)
+			}
+			if tc.cancelAt != subA {
+				return
+			}
+			for _, q := range env.chain.queries {
+				if len(q.Topics) > 1 && q.Topics[1][0] == topic(subB) {
+					t.Fatalf("processed a subaccount after the shutdown:\n%s", env.logs)
+				}
+			}
+		})
 	}
 }

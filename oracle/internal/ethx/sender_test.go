@@ -481,8 +481,40 @@ func TestDryRunSenderSimulatesAndNeverSigns(t *testing.T) {
 		t.Fatalf("calls %+v", calls)
 	}
 
-	receipt, err := s.Wait(ctx, second)
-	if err != nil || receipt.Status != types.ReceiptStatusSuccessful || receipt.TxHash != second.Hash || receipt.BlockNumber.Uint64() != 1234 {
+	// Wait reports what the simulation found: production would have mined
+	// the second transaction and seen it revert.
+	receipt, err := s.Wait(ctx, first)
+	if err != nil || receipt.Status != types.ReceiptStatusSuccessful || receipt.TxHash != first.Hash || receipt.BlockNumber.Uint64() != 1234 {
+		t.Fatalf("receipt %+v (%v)", receipt, err)
+	}
+	receipt, err = s.Wait(ctx, second)
+	if err != nil || receipt.Status != types.ReceiptStatusFailed || receipt.TxHash != second.Hash || receipt.BlockNumber.Uint64() != 1234 {
+		t.Fatalf("receipt %+v (%v)", receipt, err)
+	}
+	// Its reason is the simulation's, without another call.
+	if got := RevertReason(ctx, fake, second, receipt); got != moduleErr.Name || len(fake.Calls()) != 2 {
+		t.Fatalf("reason %q after %d calls", got, len(fake.Calls()))
+	}
+}
+
+// unreachableBackend fails every eth_call like a node that cannot be reached.
+type unreachableBackend struct{ *replayCaller }
+
+func (unreachableBackend) BlockNumber(context.Context) (uint64, error) { return 1234, nil }
+
+func TestDryRunSenderReportsSuccessWhenTheSimulationCannotRun(t *testing.T) {
+	backend := unreachableBackend{&replayCaller{err: errors.New("dial tcp 127.0.0.1:8545: connection refused")}}
+	logs := &logRecorder{}
+	s := NewDryRunSender(backend, common.HexToAddress("0xf00d"), logs.Logf)
+	ctx := context.Background()
+	sent, err := s.Send(ctx, recipient, []byte{1, 2, 3, 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !logs.contains("at block 1234: simulation failed: dial tcp 127.0.0.1:8545: connection refused") {
+		t.Fatalf("logs %q", logs.lines)
+	}
+	if receipt, err := s.Wait(ctx, sent); err != nil || receipt.Status != types.ReceiptStatusSuccessful {
 		t.Fatalf("receipt %+v (%v)", receipt, err)
 	}
 }

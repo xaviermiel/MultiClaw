@@ -180,8 +180,15 @@ func (s *Service) poll(ctx context.Context, pending *[]pendingTx) (uint64, error
 		s.logf("Found %d protocol events, %d transfer events, %d limits-set events",
 			len(events.protocol), len(events.transfers), events.limitsSet)
 		for _, sub := range events.subAccounts() {
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
 			s.process(ctx, module, sub, current, pending, false)
 		}
+	}
+	// Interrupted (shutdown): these blocks were not all processed.
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	return current, nil
 }
@@ -239,10 +246,15 @@ func (s *Service) refresh(ctx context.Context, pending *[]pendingTx) error {
 			continue
 		}
 		for _, sub := range subAccounts {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			s.process(ctx, module, sub, current, pending, true)
 		}
 	}
-	return nil
+	// A refresh interrupted (shutdown) during its last subaccount is not
+	// complete either.
+	return ctx.Err()
 }
 
 // subAccounts lists the module's subaccounts holding any of the execute,

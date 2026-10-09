@@ -207,6 +207,26 @@ func TestDryRunNeverSignsButLogsTheWrite(t *testing.T) {
 	}
 }
 
+func TestDryRunReportsAWriteThatWouldRevert(t *testing.T) {
+	moduleErr := argumentlessError(t)
+	c := serviceChain(e(5, 18), big.NewInt(0), 0)
+	c.Revert(module, &contracts.ModuleABI, "updateSafeValue", moduleErr.ID[:4])
+	l := &logs{}
+	newTestService(c, ethx.NewDryRunSender(c, oracle, l.logf), l).RunOnce(context.Background())
+	for _, want := range []string{
+		"at block 777: would revert: " + moduleErr.Name,
+		"Error writing safe value: transaction ",
+		"reverted on-chain in block 777 (gasUsed=0, reason=" + moduleErr.Name + ")",
+	} {
+		if !l.has(want) {
+			t.Errorf("logs %q lack %q", l.lines, want)
+		}
+	}
+	if l.has("Transaction confirmed") {
+		t.Fatalf("a write that would revert was reported as confirmed: %q", l.lines)
+	}
+}
+
 // argumentlessError returns a module error without inputs (the first by
 // name, so runs are reproducible).
 func argumentlessError(t *testing.T) abi.Error {
