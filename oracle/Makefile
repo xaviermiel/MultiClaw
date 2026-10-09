@@ -4,10 +4,18 @@
 GO  ?= go
 BIN ?= bin/oracle
 
-.PHONY: build test vet fmt fmt-check check ts-config abi golden golden-check fuzz
+.PHONY: build build-linux test vet fmt fmt-check check ts-config abi golden golden-check fuzz fork-diff
 
 build:
 	$(GO) build -o $(BIN) ./cmd/oracle
+
+# Static Linux binary for a server (deploy/multiclaw-oracle.service);
+# GOARCH_LINUX=arm64 for ARM. `go version -m` shows the commit it was built from.
+GOARCH_LINUX ?= amd64
+
+build-linux:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH_LINUX) $(GO) build -trimpath -ldflags='-s -w' \
+		-o bin/oracle-linux-$(GOARCH_LINUX) ./cmd/oracle
 
 test:
 	$(GO) test ./...
@@ -61,3 +69,9 @@ FUZZTIME ?= 2m
 
 fuzz:
 	$(GO) test -run='^$$' -fuzz=FuzzBuildSubAccountState -fuzztime=$(FUZZTIME) ./internal/spending
+
+# TS vs Go on an anvil fork: both oracles run once against the same state and
+# must send the same transactions. Needs FORK_URL and REGISTRY_ADDRESS (or
+# MODULE_ADDRESS); see scripts/fork-diff.sh.
+fork-diff: build
+	scripts/fork-diff.sh $(BIN)

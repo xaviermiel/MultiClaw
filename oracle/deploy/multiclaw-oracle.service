@@ -1,0 +1,63 @@
+# MultiClaw oracle: the Safe value and spending oracles in one process.
+#
+# Install (as root, see oracle/README.md):
+#   install -m 0755 oracle-linux-amd64 /usr/local/bin/multiclaw-oracle
+#   install -d -m 0700 /etc/multiclaw-oracle
+#   install -m 0600 .env.example /etc/multiclaw-oracle/oracle.env    # then edit it
+#   install -m 0644 multiclaw-oracle.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now multiclaw-oracle
+#   journalctl -u multiclaw-oracle -f
+
+[Unit]
+Description=MultiClaw oracle (Safe value and spending)
+Wants=network-online.target
+After=network-online.target
+# Keep restarting: the modules freeze their subaccounts when the oracle stays
+# silent for maxOracleAge.
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+# The configuration (PRIVATE_KEY included) is read by systemd as root, so
+# the file can stay root-only. Its syntax is systemd's: comments on their own
+# lines, quotes around values with spaces.
+EnvironmentFile=/etc/multiclaw-oracle/oracle.env
+ExecStart=/usr/local/bin/multiclaw-oracle run
+Restart=always
+RestartSec=10s
+# SIGTERM stops the oracle within a second; transactions already sent are not
+# waited for (a restart reads the chain again).
+TimeoutStopSec=30s
+
+# A transient unprivileged user, and no access to anything else on the host:
+# the oracle only needs outbound HTTPS to its RPC endpoints.
+DynamicUser=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
