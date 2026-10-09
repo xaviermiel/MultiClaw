@@ -64,6 +64,9 @@ type Service struct {
 	// was prepared. It lives in memory, so the first refresh after a restart
 	// always pushes an update, as in the TS.
 	lastUpdate map[updateKey]int64
+	// history keeps each module/subaccount's AcquiredBalanceUpdated events
+	// (historicalTokens).
+	history map[updateKey]*tokenHistory
 
 	blocks *blockHashes // recorded by event queries; safe for concurrent use
 }
@@ -81,6 +84,7 @@ func New(cfg *config.Config, chain Chain, sender ethx.Sender, logf logx.Logf) *S
 		logf:       logf,
 		Now:        time.Now,
 		lastUpdate: map[updateKey]int64{},
+		history:    map[updateKey]*tokenHistory{},
 		blocks:     newBlockHashes(),
 	}
 }
@@ -141,9 +145,13 @@ func (s *Service) poll(ctx context.Context, pending *[]pendingTx) (uint64, error
 		s.lastProcessedBlock = ethx.SubClamped(current, uint64(s.cfg.BlocksToLookBack))
 		s.started = true
 	}
-	if rewindTo, ok := s.checkReorg(ctx); ok && rewindTo < s.lastProcessedBlock {
-		s.logf("Reorg detected! Rewinding from block %d to %d", s.lastProcessedBlock, rewindTo)
-		s.lastProcessedBlock = rewindTo
+	if rewindTo, ok := s.checkReorg(ctx); ok {
+		// The acquired-token histories may hold events of replaced blocks.
+		clear(s.history)
+		if rewindTo < s.lastProcessedBlock {
+			s.logf("Reorg detected! Rewinding from block %d to %d", s.lastProcessedBlock, rewindTo)
+			s.lastProcessedBlock = rewindTo
+		}
 	}
 	if current <= s.lastProcessedBlock {
 		return s.lastProcessedBlock, nil // no new blocks

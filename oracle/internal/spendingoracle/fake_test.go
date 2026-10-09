@@ -1,6 +1,7 @@
 package spendingoracle
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -56,6 +57,7 @@ type fakeChain struct {
 	head       uint64
 	hashSalt   map[uint64]string // changes a block's hash (a reorg)
 	logs       []types.Log
+	nextIndex  uint
 	queries    []ethereum.FilterQuery
 	failLogs   func(q ethereum.FilterQuery) error
 	blockReads int
@@ -110,14 +112,26 @@ func (c *fakeChain) FilterLogs(_ context.Context, q ethereum.FilterQuery) ([]typ
 			out = append(out, l)
 		}
 	}
+	// In chain order, as nodes return them.
+	slices.SortStableFunc(out, func(a, b types.Log) int {
+		return cmp.Or(cmp.Compare(a.BlockNumber, b.BlockNumber), cmp.Compare(a.Index, b.Index))
+	})
 	return out, nil
 }
 
 func (c *fakeChain) addLog(l types.Log) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	l.Index = uint(len(c.logs))
+	c.nextIndex++
+	l.Index = c.nextIndex // unique, increasing within each block
 	c.logs = append(c.logs, l)
+}
+
+// removeLogs drops the logs drop matches (blocks replaced by a reorg).
+func (c *fakeChain) removeLogs(drop func(types.Log) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.logs = slices.DeleteFunc(c.logs, drop)
 }
 
 func (c *fakeChain) setHead(n uint64) {

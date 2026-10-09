@@ -1,17 +1,21 @@
 package spendingoracle
 
 import (
+	"cmp"
 	"context"
 	"math/big"
+	"math/rand/v2"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/xaviermiel/MultiClaw/oracle/internal/config"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/contracts"
+	"github.com/xaviermiel/MultiClaw/oracle/internal/ethx"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/schedule"
 )
 
@@ -47,7 +51,7 @@ func TestHistoricalTokensScan(t *testing.T) {
 		env.wantLogs("Querying historical tokens from block 898 to 1000 (102 blocks, max 50 per query)")
 	})
 
-	t.Run("failed chunks are retried in halves, failed halves skipped", func(t *testing.T) {
+	t.Run("failed chunks are retried in halves, failed halves next time", func(t *testing.T) {
 		env := newTestEnv(t)
 		env.svc.cfg.MaxBlocksPerQuery = 400
 		env.svc.cfg.MaxHistoricalBlocks = 1000
@@ -67,9 +71,22 @@ func TestHistoricalTokensScan(t *testing.T) {
 		}
 		env.wantLogs(
 			"Query chunk failed (blocks 401-801), trying smaller range: rpc: rate limited",
-			"Sub-chunk query failed (blocks 401-601), skipping",
+			"Sub-chunk query failed (blocks 401-601), will retry next time",
 			"Historical token query complete: 2 unique tokens found in 3 events (2 queries)",
 		)
+
+		env.chain.failLogs = nil
+		before := len(historyRanges(env.chain))
+		got, err = env.svc.historicalTokens(ctx, module, subA)
+		// In chain order of their first event: X is now first.
+		if err != nil || !slices.Equal(got, []common.Address{tokenX, tokenY, tokenZ}) {
+			t.Fatalf("tokens %v (%v)", got, err)
+		}
+		// The failed half, then the blocks unconfirmed at the last scan.
+		want := [][2]uint64{{401, 601}, {999, 1000}}
+		if got := historyRanges(env.chain)[before:]; !slices.Equal(got, want) {
+			t.Fatalf("ranges %v, want %v", got, want)
+		}
 	})
 
 	t.Run("chunks under 200 blocks are not split", func(t *testing.T) {
@@ -80,8 +97,235 @@ func TestHistoricalTokensScan(t *testing.T) {
 		if got, err := env.svc.historicalTokens(ctx, module, subA); err != nil || len(got) != 0 {
 			t.Fatalf("tokens %v (%v)", got, err)
 		}
-		env.wantLogs("Chunk too small to retry, skipping blocks 850-1000")
+		env.wantLogs("Chunk too small to retry, will retry blocks 850-1000 next time")
+
+		env.chain.failLogs = nil
+		before := len(historyRanges(env.chain))
+		if _, err := env.svc.historicalTokens(ctx, module, subA); err != nil {
+			t.Fatal(err)
+		}
+		// The failed chunk and the unconfirmed blocks, in one query.
+		if got := historyRanges(env.chain)[before:]; !slices.Equal(got, [][2]uint64{{850, 1000}}) {
+			t.Fatalf("ranges %v", got)
+		}
 	})
+}
+
+func TestHistoricalTokensOnlyQueryNewAndUnconfirmedBlocks(t *testing.T) {
+	env := newTestEnv(t) // 2 confirmations, 50-block chunks, 500 blocks of history
+	ctx := context.Background()
+	env.chain.addLog(acquiredLog(t, subA, tokenX, e18(1), 600))
+	env.chain.addLog(acquiredLog(t, subA, tokenY, e18(1), 1000)) // unconfirmed
+	if got, err := env.svc.historicalTokens(ctx, module, subA); err != nil || !slices.Equal(got, []common.Address{tokenX, tokenY}) {
+		t.Fatalf("tokens %v (%v)", got, err)
+	}
+
+	// Block 1000 is replaced: its event moves to block 1005.
+	env.chain.removeLogs(func(l types.Log) bool { return l.BlockNumber == 1000 })
+	env.chain.addLog(acquiredLog(t, subA, tokenZ, e18(1), 999))
+	env.chain.addLog(acquiredLog(t, subA, tokenY, e18(1), 1005))
+	env.chain.setHead(1010)
+	before := len(historyRanges(env.chain))
+	got, err := env.svc.historicalTokens(ctx, module, subA)
+	if err != nil || !slices.Equal(got, []common.Address{tokenX, tokenZ, tokenY}) {
+		t.Fatalf("tokens %v (%v)", got, err)
+	}
+	if got := historyRanges(env.chain)[before:]; !slices.Equal(got, [][2]uint64{{999, 1010}}) {
+		t.Fatalf("ranges %v", got)
+	}
+	env.wantLogs("Historical token query complete: 3 unique tokens found in 3 events (1 queries)")
+
+	// Block 600 leaves the range.
+	env.chain.setHead(1101)
+	if got, _ := env.svc.historicalTokens(ctx, module, subA); !slices.Equal(got, []common.Address{tokenZ, tokenY}) {
+		t.Fatalf("tokens %v", got)
+	}
+
+	// Every subaccount has its own history.
+	before = len(historyRanges(env.chain))
+	if got, _ := env.svc.historicalTokens(ctx, module, subB); len(got) != 0 {
+		t.Fatalf("tokens %v", got)
+	}
+	if got := historyRanges(env.chain)[before]; got != [2]uint64{601, 651} {
+		t.Fatalf("first range %v, want a full scan", got)
+	}
+
+	// An interrupted scan starts over.
+	env.chain.setHead(1200)
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := env.svc.historicalTokens(cancelled, module, subA); err == nil {
+		t.Fatal("no error")
+	}
+	if _, ok := env.svc.history[updateKey{module, subA}]; ok {
+		t.Fatal("kept a partly updated history")
+	}
+
+	// An hour later, the history is read again from scratch.
+	env.svc.historicalTokens(ctx, module, subB)
+	env.svc.Now = func() time.Time { return time.Unix(now, 0).Add(time.Hour) }
+	before = len(historyRanges(env.chain))
+	env.svc.historicalTokens(ctx, module, subB)
+	if got := historyRanges(env.chain)[before]; got != [2]uint64{700, 750} {
+		t.Fatalf("first range %v, want a full scan", got)
+	}
+}
+
+func TestHistoricalTokensOnAChainYoungerThanTheConfirmationDepth(t *testing.T) {
+	env := newTestEnv(t) // 2 confirmations
+	ctx := context.Background()
+	env.chain.setHead(1)
+	if _, err := env.svc.historicalTokens(ctx, module, subA); err != nil {
+		t.Fatal(err)
+	}
+	// Block 0 was not confirmed yet: it is read again.
+	env.chain.addLog(acquiredLog(t, subA, tokenX, e18(1), 0))
+	env.chain.setHead(5)
+	before := len(historyRanges(env.chain))
+	if got, _ := env.svc.historicalTokens(ctx, module, subA); !slices.Equal(got, []common.Address{tokenX}) {
+		t.Fatalf("tokens %v", got)
+	}
+	if got := historyRanges(env.chain)[before:]; !slices.Equal(got, [][2]uint64{{0, 5}}) {
+		t.Fatalf("ranges %v", got)
+	}
+}
+
+// fullScanTokens is what a full scan of [from, to] finds: sub's tokens in
+// chain order of their first AcquiredBalanceUpdated event.
+func fullScanTokens(c *fakeChain, sub common.Address, from, to uint64) []common.Address {
+	logs, _ := c.FilterLogs(context.Background(), ethereum.FilterQuery{
+		FromBlock: new(big.Int).SetUint64(from),
+		ToBlock:   new(big.Int).SetUint64(to),
+		Topics:    [][]common.Hash{{contracts.AcquiredBalanceUpdatedTopic}, {topic(sub)}},
+	})
+	var tokens []common.Address
+	for _, l := range logs {
+		if token := common.BytesToAddress(l.Topics[2].Bytes()); !slices.Contains(tokens, token) {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
+}
+
+// checkHistory checks h's invariants after a scan.
+func checkHistory(t *testing.T, h *tokenHistory) {
+	t.Helper()
+	if h.from > h.next {
+		t.Fatalf("from %d > next %d", h.from, h.next)
+	}
+	for i, e := range h.events {
+		if e.block < h.from {
+			t.Fatalf("event at block %d before the start %d", e.block, h.from)
+		}
+		if i > 0 && cmp.Or(cmp.Compare(h.events[i-1].block, e.block), cmp.Compare(h.events[i-1].index, e.index)) >= 0 {
+			t.Fatalf("events out of order or duplicated: %v", h.events)
+		}
+	}
+	for i, g := range h.gaps {
+		if g.from > g.to || g.from < h.from || g.to >= h.next || (i > 0 && h.gaps[i-1].to+1 >= g.from) {
+			t.Fatalf("gaps %v in [%d, %d)", h.gaps, h.from, h.next)
+		}
+	}
+}
+
+// TestHistoricalTokensMatchAFullScan checks the incremental scans against a
+// new oracle's full scan, on random histories: heads moving forward, a
+// little back or past the whole range, unconfirmed blocks replaced between
+// scans, and failing queries.
+func TestHistoricalTokensMatchAFullScan(t *testing.T) {
+	ctx := context.Background()
+	tokens := []common.Address{tokenX, tokenY, tokenZ, common.HexToAddress("0x4444"), common.HexToAddress("0x5555")}
+	subs := []common.Address{subA, subB}
+	for seed := range 50 {
+		rng := rand.New(rand.NewPCG(uint64(seed), 1))
+		env := newTestEnv(t)
+		cfg := env.svc.cfg
+		cfg.MaxBlocksPerQuery = []int64{7, 50, 250}[rng.IntN(3)]
+		cfg.ConfirmationBlocks = rng.Int64N(4)
+		cfg.MaxHistoricalBlocks = []int64{0, 40, 300, 1000}[rng.IntN(4)]
+		chunk, conf := uint64(cfg.MaxBlocksPerQuery), uint64(cfg.ConfirmationBlocks)
+		addEvents := func(lo, hi uint64, n int) {
+			for range n {
+				sub := subs[rng.IntN(len(subs))]
+				env.chain.addLog(acquiredLog(t, sub, tokens[rng.IntN(len(tokens))], e18(1), lo+rng.Uint64N(hi-lo+1)))
+			}
+		}
+		head := rng.Uint64N(1500)
+		if rng.IntN(3) == 0 {
+			head = rng.Uint64N(4) // younger than the confirmation depth
+		}
+		addEvents(0, head, rng.IntN(60))
+		// Blocks before unconfirmed were confirmed at a scan: they never
+		// change.
+		unconfirmed := uint64(0)
+		failed := map[common.Address]bool{}
+		for step := range 60 {
+			prev := head
+			switch r := rng.IntN(10); {
+			case r == 0:
+				head = ethx.SubClamped(head, rng.Uint64N(conf+3))
+			case r == 1:
+				head += uint64(cfg.MaxHistoricalBlocks) + 1 + rng.Uint64N(100)
+			default:
+				head += rng.Uint64N(2*chunk + 5)
+			}
+			env.chain.setHead(head)
+			// Replace some unconfirmed blocks.
+			if rng.IntN(2) == 0 {
+				env.chain.removeLogs(func(l types.Log) bool { return l.BlockNumber >= unconfirmed && rng.IntN(2) == 0 })
+			}
+			if unconfirmed <= head {
+				addEvents(unconfirmed, head, rng.IntN(6))
+			}
+			failing := rng.IntN(4) == 0
+			for _, sub := range subs {
+				if failing {
+					env.chain.failLogs = func(ethereum.FilterQuery) error {
+						if rng.IntN(3) == 0 {
+							return errRPC
+						}
+						return nil
+					}
+				}
+				before := len(historyRanges(env.chain))
+				got, err := env.svc.historicalTokens(ctx, module, sub)
+				if err != nil {
+					t.Fatal(err)
+				}
+				queries := len(historyRanges(env.chain)) - before
+				env.chain.failLogs = nil
+
+				fresh := New(cfg, env.chain, env.sender, nil)
+				fresh.Now = env.svc.Now
+				want, err := fresh.historicalTokens(ctx, module, sub)
+				if err != nil {
+					t.Fatal(err)
+				}
+				earliest := ethx.SubClamped(head, uint64(cfg.MaxHistoricalBlocks))
+				if spec := fullScanTokens(env.chain, sub, earliest, head); !slices.Equal(want, spec) {
+					t.Fatalf("seed %d step %d: full scan %v, want %v", seed, step, want, spec)
+				}
+				switch {
+				case !failing && !slices.Equal(got, want):
+					t.Fatalf("seed %d step %d (head %d, conf %d, chunk %d): tokens %v, want %v",
+						seed, step, head, conf, chunk, got, want)
+				case failing && slices.ContainsFunc(got, func(a common.Address) bool { return !slices.Contains(want, a) }):
+					t.Fatalf("seed %d step %d: tokens %v not in %v", seed, step, got, want)
+				}
+				// Without failures, only the new and the unconfirmed blocks
+				// are queried.
+				if step > 0 && !failing && !failed[sub] && head >= prev {
+					if limit := (head - prev + conf + chunk) / (chunk + 1); uint64(queries) > limit {
+						t.Fatalf("seed %d step %d: %d queries from head %d to %d, want at most %d",
+							seed, step, queries, prev, head, limit)
+					}
+				}
+				failed[sub] = failing
+				checkHistory(t, env.svc.history[updateKey{module, sub}])
+			}
+			unconfirmed = max(unconfirmed, ethx.SubClamped(head+1, conf))
+		}
+	}
 }
 
 func TestPollProcessesAffectedSubaccountsOnce(t *testing.T) {
@@ -171,6 +415,7 @@ func TestReorgRewindsToTheOldestChangedBlock(t *testing.T) {
 
 	env.chain.reorg(950, 960)
 	env.logs.reset()
+	before := len(historyRanges(env.chain))
 	env.svc.Poll(ctx)
 	env.wantLogs(
 		"Reorg detected at block 960",
@@ -182,6 +427,10 @@ func TestReorgRewindsToTheOldestChangedBlock(t *testing.T) {
 	)
 	if env.svc.lastProcessedBlock != 998 {
 		t.Fatalf("lastProcessedBlock = %d", env.svc.lastProcessedBlock)
+	}
+	// The acquired-token histories were read again from scratch.
+	if got := historyRanges(env.chain)[before]; got != [2]uint64{500, 550} {
+		t.Fatalf("first history range %v, want a full scan", got)
 	}
 
 	// The new hashes are recorded: no reorg on the next poll.
