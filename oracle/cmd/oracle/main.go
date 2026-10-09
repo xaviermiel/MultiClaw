@@ -10,6 +10,7 @@
 //	safe-value  run the Safe value oracle
 //	spending    run the spending oracle
 //	config      print the resolved configuration and check it
+//	analyze-tx  explain why a transaction failed
 package main
 
 import (
@@ -28,6 +29,7 @@ type command struct {
 }
 
 var commands = map[string]command{
+	"analyze-tx": {summary: "explain why a transaction failed", run: runAnalyzeTx},
 	"config":     {summary: "print the resolved configuration and check it", run: runConfig},
 	"run":        {summary: "run both oracles (Safe value and spending)", run: runAll},
 	"safe-value": {summary: "run the Safe value oracle", run: runSafeValue},

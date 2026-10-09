@@ -474,3 +474,26 @@ func TestTransactionByHashNotFoundIsNotRetried(t *testing.T) {
 		t.Fatalf("err = %v after %d requests", err, node.count())
 	}
 }
+
+func TestCallRPCFailsOverAndDecodes(t *testing.T) {
+	down := newFakeNode(t, always(reply{status: http.StatusBadGateway}))
+	up := newFakeNode(t, func(_ int, method string, params []json.RawMessage) reply {
+		if method != "debug_traceTransaction" || len(params) != 2 || string(params[1]) != `{"tracer":"callTracer"}` {
+			return reply{err: &rpcError{Code: -32602, Message: "unexpected " + method}}
+		}
+		return reply{result: map[string]any{"type": "CALL", "error": "execution reverted"}}
+	})
+	c := dialTest(t, nil, Options{}, down, up)
+	var frame struct{ Type, Error string }
+	err := c.CallRPC(context.Background(), &frame, "debug_traceTransaction", common.Hash{1}, map[string]string{"tracer": "callTracer"})
+	if err != nil || frame.Type != "CALL" || frame.Error != "execution reverted" {
+		t.Fatalf("frame %+v (%v)", frame, err)
+	}
+
+	// A null result leaves a nil pointer.
+	null := newFakeNode(t, always(reply{result: nil}))
+	tx := &struct{ Hash common.Hash }{}
+	if err := dialTest(t, nil, Options{}, null).CallRPC(context.Background(), &tx, "eth_getTransactionByHash", common.Hash{2}); err != nil || tx != nil {
+		t.Fatalf("tx %+v (%v)", tx, err)
+	}
+}

@@ -304,6 +304,15 @@ func (c *FallbackClient) TransactionByHash(ctx context.Context, hash common.Hash
 	return tx, isPending, err
 }
 
+// CallRPC calls a JSON-RPC method that has no typed wrapper (e.g.
+// debug_traceTransaction), with the client's fallbacks and retries, and
+// decodes its result into result (a null result sets a pointer to nil).
+func (c *FallbackClient) CallRPC(ctx context.Context, result any, method string, args ...any) error {
+	return c.do(ctx, method, func(ctx context.Context, ep *endpoint) error {
+		return ep.rpc.CallContext(ctx, result, method, args...)
+	})
+}
+
 // CheckChainID verifies that every endpoint serves chain want. Endpoints that
 // don't answer are only logged (they may be down for now), but at least one
 // must answer.

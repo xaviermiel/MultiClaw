@@ -82,6 +82,7 @@ bin/oracle run          # both oracles (what `npm start` runs)
 bin/oracle safe-value   # the Safe value oracle only
 bin/oracle spending     # the spending oracle only
 bin/oracle config       # print and check the configuration
+bin/oracle analyze-tx   # explain why a transaction failed (below)
 ```
 
 | Flag              | Effect                                                                               |
@@ -101,6 +102,21 @@ With `--dry-run` or `DRY_RUN=true`, the oracle runs as usual but never signs: ev
 ```
 
 A dry run needs no key: set `ORACLE_ADDRESS` to the oracle's address instead of `PRIVATE_KEY`.
+
+### Analyze a failed transaction
+
+```bash
+bin/oracle analyze-tx 0x<tx hash>                 # reads CHAIN and RPC_URL from .env
+bin/oracle analyze-tx --no-tenderly 0x<tx hash>
+```
+
+It explains any failed transaction, and module calls in detail (subaccount operations and oracle updates):
+
+- **The call**: the module function with its arguments, and the protocol call it makes the Safe execute (ERC20, Aave V3, Uniswap V3 swaps), with token symbols and amounts.
+- **The error**: replayed with `debug_traceTransaction`, else `eth_call` at the block before (which misses the effect of the transactions before it in its block), else Tenderly's public trace API (which receives the transaction hash; `--no-tenderly` turns it off). Module, parser and token errors are decoded by name, with what they mean and what to do. For `TransactionFailed`, it also finds the protocol's own error.
+- **The module state behind it**, at the block before the transaction (or now, when the node keeps no history): allowance, last oracle update, roles, whitelists, acquired balances, prices, window totals.
+
+It only needs `CHAIN` and an RPC endpoint; a node with the `debug` API gives the most precise answers.
 
 ### Deploy with systemd
 
@@ -152,6 +168,7 @@ make fork-diff   # TS vs Go on an anvil fork (below)
 | `internal/ethx`                   | RPC client with fallbacks, chunked log queries, transaction sender, dry-run sender |
 | `internal/pricing`                | Chainlink prices                                                                   |
 | `internal/discovery`              | module discovery and the `authorizedOracle` check                                  |
+| `internal/analyze`                | the `analyze-tx` command: call decoding, replays, error help, module state         |
 | `internal/bn`, `logx`, `schedule` | big-number helpers, logging, cron loops                                            |
 | `scripts/`                        | golden vector generator, TS config dump, fork-diff and shadow-run tools            |
 | `deploy/`                         | systemd unit                                                                       |
@@ -209,6 +226,7 @@ The values the Go oracle writes on-chain are the TS oracle's, except where the T
 - **Revert reasons** are decoded by name (module and parser errors).
 - **Startup checks**: malformed variables are errors (the TS read them as NaN), the RPC endpoints must serve `CHAIN`, and a registry that lists no module without `MODULE_ADDRESS` means no modules.
 - **Process**: clean shutdown on SIGINT/SIGTERM; cron runs never overlap; the first refresh runs before polling starts; a failure or panic in one subaccount or module doesn't stop the others; transactions already sent are awaited even when a run fails.
+- **`analyze-tx`** replaces `src/analyze-failed-tx.ts`: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`.
 - **Dry-run mode** and `ORACLE_ADDRESS` are new. `WINDOW_DURATION_SECONDS` is ignored, with a warning, as the TS ignored it: the window comes from each subaccount's on-chain limits.
 - **The RPC URL** is redacted in the startup banner (the TS printed it with its API key).
 

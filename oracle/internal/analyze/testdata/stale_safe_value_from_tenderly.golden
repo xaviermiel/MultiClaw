@@ -1,0 +1,39 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  32400 of 500000
+
+2. CALL
+  Function:                    batchUpdate(address,uint256,uint256,address[],uint256[],uint256[])
+    subAccount:                0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+    expectedAllowanceVersion:  55
+    newAllowance:              29000000000000000000 (29 USD)
+    tokens:                    []
+    expectedTokenVersions:     []
+    balances:                  []
+
+3. REPLAY
+  debug_traceTransaction:      unavailable: the method debug_traceTransaction does not exist/is not available
+  eth_call at block 47910261:  unavailable: missing trie node 6c0c5a2e (path ) state is not available
+  Tenderly:                    reverted: StalePortfolioValue
+
+4. ERROR
+  Error:     StalePortfolioValue
+  Meaning:   The Safe value stored in the module is older than maxSafeValueAge, or was never set.
+  Solution:  The Safe value oracle must call updateSafeValue: check that it is running and is this module's authorized oracle.
+
+5. MODULE STATE NOW (the node has no state for the block before the transaction)
+  Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Authorized oracle:   0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E (the sender)
+  Safe value:          584 USD
+  Safe value updated:  2025-10-09T23:34:35Z (1m30s before the block)
+  Max Safe value age:  0s: values are stale from the block after their update
+
+══════════════════════════════════════════════════════════════════════

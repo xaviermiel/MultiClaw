@@ -4,8 +4,10 @@
 //
 // abi/generated/ is extracted from the Foundry build with `make abi` (module,
 // registry and parser errors). abi/manual/ holds minimal hand-written ABIs for
-// external contracts (ERC20, Chainlink, ERC4626, Uniswap V2 pairs) and for the
-// legacy absoluteMaxSpendingBps() getter that only old module deployments have.
+// external contracts (ERC20, Chainlink, ERC4626, Uniswap V2 pairs), for the
+// protocol calls and token errors the transaction analyzer decodes, and for
+// the legacy absoluteMaxSpendingBps() getter that only old module deployments
+// have.
 package contracts
 
 import (
@@ -31,6 +33,12 @@ var (
 	ERC4626ABI       = mustLoad("abi/manual/ERC4626Vault.json")
 	UniswapV2PairABI = mustLoad("abi/manual/UniswapV2Pair.json")
 	LegacyModuleABI  = mustLoad("abi/manual/LegacyModule.json")
+
+	// ProtocolCallsABI has the ERC20, Aave V3 Pool and Uniswap V3 router
+	// (SwapRouter and SwapRouter02) calls a subaccount sends through
+	// executeOnProtocol; CommonErrorsABI the OpenZeppelin v5 token errors.
+	ProtocolCallsABI = mustLoad("abi/manual/ProtocolCalls.json")
+	CommonErrorsABI  = mustLoad("abi/manual/CommonErrors.json")
 )
 
 // Event topics (topic0) of the module events the oracle reads.

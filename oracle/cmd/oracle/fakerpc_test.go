@@ -27,6 +27,8 @@ type fakeRPC struct {
 	chainID uint64
 	block   uint64
 	balance *big.Int
+	// canned answers the methods it has (with null for a nil value).
+	canned map[string]any
 
 	mu      sync.Mutex
 	methods []string
@@ -86,6 +88,9 @@ func (f *fakeRPC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeRPC) answer(ctx context.Context, req rpcRequest) (any, *rpcErrorBody) {
+	if v, ok := f.canned[req.Method]; ok {
+		return v, nil
+	}
 	switch req.Method {
 	case "eth_chainId":
 		return hexutil.Uint64(f.chainID), nil
@@ -128,7 +133,16 @@ func (f *fakeRPC) answer(ctx context.Context, req rpcRequest) (any, *rpcErrorBod
 		if len(data) == 0 {
 			data = arg.Data
 		}
-		out, err := f.CallContract(ctx, ethereum.CallMsg{From: arg.From, To: arg.To, Data: data}, nil)
+		var block *big.Int // latest
+		var tag string
+		if len(req.Params) > 1 && json.Unmarshal(req.Params[1], &tag) == nil && tag != "latest" {
+			n, err := hexutil.DecodeUint64(tag)
+			if err != nil {
+				return nil, &rpcErrorBody{Code: -32602, Message: err.Error()}
+			}
+			block = new(big.Int).SetUint64(n)
+		}
+		out, err := f.CallContract(ctx, ethereum.CallMsg{From: arg.From, To: arg.To, Data: data}, block)
 		if err != nil {
 			var de rpc.DataError
 			if errors.As(err, &de) {

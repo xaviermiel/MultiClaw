@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -110,6 +111,50 @@ func TestPinnedSelectors(t *testing.T) {
 	for name, want := range pins {
 		if got := hexutil.Encode(ModuleABI.Methods[name].ID); got != want {
 			t.Errorf("%s selector = %s, want %s", name, got, want)
+		}
+	}
+}
+
+// TestProtocolCallSelectors pins the analyzer's protocol calls to the
+// selectors the module's parsers recognize (AaveV3Parser, UniswapV3Parser),
+// plus ERC20 and Aave borrow, and the token errors to OpenZeppelin v5's.
+func TestProtocolCallSelectors(t *testing.T) {
+	want := map[string]string{
+		"approve(address,uint256)":                                                            "0x095ea7b3",
+		"transfer(address,uint256)":                                                           "0xa9059cbb",
+		"transferFrom(address,address,uint256)":                                               "0x23b872dd",
+		"supply(address,uint256,address,uint16)":                                              "0x617ba037",
+		"withdraw(address,uint256,address)":                                                   "0x69328dec",
+		"repay(address,uint256,uint256,address)":                                              "0x573ade81",
+		"borrow(address,uint256,uint256,uint16,address)":                                      "0xa415bcad",
+		"exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))":  "0x414bf389",
+		"exactInput((bytes,address,uint256,uint256,uint256))":                                 "0xc04b8d59",
+		"exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))": "0xdb3e2198",
+		"exactOutput((bytes,address,uint256,uint256,uint256))":                                "0xf28c0498",
+		"exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))":          "0x04e45aaf",
+		"exactInput((bytes,address,uint256,uint256))":                                         "0xb858183f",
+		"exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))":         "0x5023b4df",
+		"exactOutput((bytes,address,uint256,uint256))":                                        "0x09b81346",
+	}
+	got := map[string]string{}
+	for _, m := range ProtocolCallsABI.Methods {
+		got[m.Sig] = hexutil.Encode(m.ID)
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("protocol call selectors %v, want %v", got, want)
+	}
+
+	errs := map[string]string{
+		"ERC20InsufficientBalance":   "0xe450d38c",
+		"ERC20InsufficientAllowance": "0xfb8f41b2",
+		"SafeERC20FailedOperation":   "0x5274afe7",
+	}
+	if len(CommonErrorsABI.Errors) != len(errs) {
+		t.Errorf("%d common errors, want %d", len(CommonErrorsABI.Errors), len(errs))
+	}
+	for name, sel := range errs {
+		if e, ok := CommonErrorsABI.Errors[name]; !ok || hexutil.Encode(e.ID[:4]) != sel {
+			t.Errorf("%s selector = %x, want %s", name, e.ID[:4], sel)
 		}
 	}
 }

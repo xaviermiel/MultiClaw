@@ -1,0 +1,30 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  34120 of 500000
+
+2. CALL
+  Target:    USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+  Function:  transfer(address,uint256)
+    to:      0x1111111111111111111111111111111111111111
+    amount:  80 USDC
+
+3. REPLAY
+  debug_traceTransaction:  reverted: ERC20InsufficientBalance
+
+4. ERROR
+  Error:      ERC20InsufficientBalance
+    sender:   0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+    balance:  1 USDC
+    needed:   80 USDC
+  Meaning:    The sender holds fewer tokens than the transfer needs.
+  Solution:   Check the sender's balance of the token (the Safe's, for a call the module makes).
+
+══════════════════════════════════════════════════════════════════════
