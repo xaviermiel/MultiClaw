@@ -159,3 +159,20 @@ func TestPriceUSDAndTokenDecimalsDefaults(t *testing.T) {
 		t.Fatalf("price = %s", p)
 	}
 }
+
+func TestPriceReturnsTheRawAnswer(t *testing.T) {
+	f := contractstest.New()
+	feed(f, addr(0xf1), big.NewInt(-12345), 20)
+	l := &logs{}
+	r := NewReader(f, config.Chain{}, l.logf)
+	ctx := context.Background()
+	if answer, decimals := r.Price(ctx, addr(0xf1)); answer.Int64() != -12345 || decimals != 20 {
+		t.Fatalf("Price = %s, %d", answer, decimals)
+	}
+	if answer, decimals := r.Price(ctx, addr(0xf2)); answer.Sign() != 0 || decimals != UnreadableFeedDecimals {
+		t.Fatalf("Price of an unreadable feed = %s, %d", answer, decimals)
+	}
+	if !l.has("Error getting price from " + addr(0xf2).Hex()) {
+		t.Fatalf("logs %q", l.lines)
+	}
+}

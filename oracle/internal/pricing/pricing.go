@@ -1,6 +1,7 @@
 // Package pricing reads Chainlink USD prices and token decimals. It ports the
-// TS price helpers of the spending oracle (getPriceFeedForToken,
-// getTokenDecimals, getChainlinkPriceUSD, buildTokenPriceCache).
+// TS price helpers of both services (getPriceFeedForToken, getTokenDecimals,
+// getChainlinkPriceUSD, buildTokenPriceCache, and safe-value's
+// getChainlinkPrice).
 package pricing
 
 import (
@@ -21,6 +22,10 @@ import (
 
 // DefaultDecimals is assumed for tokens whose decimals() can't be read.
 const DefaultDecimals = 18
+
+// UnreadableFeedDecimals goes with the zero answer Price returns for a feed
+// it can't read (the TS safe-value default).
+const UnreadableFeedDecimals = 8
 
 // maxParallelTokens bounds the concurrent reads of BuildPriceCache.
 const maxParallelTokens = 8
@@ -66,16 +71,37 @@ func (r *Reader) TokenDecimals(ctx context.Context, token common.Address) uint8 
 // decide). Unlike the TS, which threw on feeds with more than 18 decimals,
 // those are scaled down.
 func (r *Reader) PriceUSD(ctx context.Context, feed common.Address) *big.Int {
+	answer, decimals, err := r.readFeed(ctx, feed)
+	if err != nil {
+		r.logf("Error getting price from %s: %v", feed.Hex(), err)
+		return bn.Zero()
+	}
+	return ScaleTo18(answer, decimals)
+}
+
+// Price returns feed's latest answer and decimals as they are, or
+// (0, UnreadableFeedDecimals) when they can't be read. Like PriceUSD, it
+// doesn't check the answer's sign or staleness.
+func (r *Reader) Price(ctx context.Context, feed common.Address) (answer *big.Int, decimals uint8) {
+	answer, decimals, err := r.readFeed(ctx, feed)
+	if err != nil {
+		r.logf("Error getting price from %s: %v", feed.Hex(), err)
+		return bn.Zero(), UnreadableFeedDecimals
+	}
+	return answer, decimals
+}
+
+func (r *Reader) readFeed(ctx context.Context, feed common.Address) (*big.Int, uint8, error) {
 	f := contracts.NewPriceFeed(feed, r.caller)
 	round, err := f.LatestRoundData(ctx)
-	if err == nil {
-		var decimals uint8
-		if decimals, err = f.Decimals(ctx); err == nil {
-			return ScaleTo18(round.Answer, decimals)
-		}
+	if err != nil {
+		return nil, 0, err
 	}
-	r.logf("Error getting price from %s: %v", feed.Hex(), err)
-	return bn.Zero()
+	decimals, err := f.Decimals(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return round.Answer, decimals, nil
 }
 
 // ScaleTo18 rescales a fixed-point value with the given decimals to 18

@@ -6,7 +6,8 @@
 //
 // Commands:
 //
-//	config    print the resolved configuration and check it
+//	config      print the resolved configuration and check it
+//	safe-value  run the Safe value oracle
 package main
 
 import (
@@ -25,7 +26,8 @@ type command struct {
 }
 
 var commands = map[string]command{
-	"config": {summary: "print the resolved configuration and check it", run: runConfig},
+	"config":     {summary: "print the resolved configuration and check it", run: runConfig},
+	"safe-value": {summary: "run the Safe value oracle", run: runSafeValue},
 }
 
 func main() {
