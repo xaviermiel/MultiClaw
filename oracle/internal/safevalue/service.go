@@ -94,6 +94,10 @@ func (s *Service) processModule(ctx context.Context, module common.Address) (err
 		return err
 	}
 	onChain, lastUpdated := s.onChainValue(ctx, module)
+	// Interrupted (shutdown): the reads that failed counted as 0.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	sinceUpdate := s.Now().Unix() - lastUpdated
 
 	s.logf("Total USD Value: $%s (on-chain: $%s)", bn.FormatUnits(total, 18), bn.FormatUnits(onChain, 18))

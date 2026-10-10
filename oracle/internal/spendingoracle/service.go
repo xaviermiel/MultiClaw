@@ -118,7 +118,10 @@ func (s *Service) Poll(ctx context.Context) {
 	defer s.mu.Unlock()
 
 	var pending []pendingTx
-	current, err := s.poll(ctx, &pending)
+	current, err := func() (_ uint64, err error) {
+		defer recoverAsError(&err)
+		return s.poll(ctx, &pending)
+	}()
 	// Unlike the TS, transactions already sent are awaited even when the
 	// poll failed, so their confirmation is still recorded.
 	s.waitPending(ctx, pending)
@@ -204,7 +207,10 @@ func (s *Service) Refresh(ctx context.Context) {
 	s.logf("=== Spending Oracle: Periodic Refresh ===")
 
 	var pending []pendingTx
-	err := s.refresh(ctx, &pending)
+	err := func() (err error) {
+		defer recoverAsError(&err)
+		return s.refresh(ctx, &pending)
+	}()
 	s.waitPending(ctx, pending)
 	if err != nil {
 		s.logf("Error in periodic refresh: %v", err)
@@ -290,16 +296,30 @@ func (s *Service) process(ctx context.Context, module, sub common.Address, block
 		s.logf("Processing subaccount: %s", lower(sub))
 	}
 	err := func() (err error) {
-		defer func() {
-			if p := recover(); p != nil {
-				err = fmt.Errorf("panic: %v", p)
-			}
-		}()
+		defer recoverAsError(&err)
 		return s.processSubaccount(ctx, module, sub, block, pending)
 	}()
 	if err != nil {
 		s.logf("Error processing %s: %v", lower(sub), err)
 	}
+}
+
+// recoverAsError, deferred, turns a panic into *err, so a panic fails one
+// subaccount, poll or refresh, as an exception did in the TS, instead of
+// ending the process.
+func recoverAsError(err *error) {
+	if p := recover(); p != nil {
+		*err = fmt.Errorf("panic: %v", p)
+	}
+}
+
+// goSafe runs f in g with recoverAsError: errgroup doesn't recover panics,
+// and a goroutine's panic would end the process.
+func goSafe(g *errgroup.Group, f func() error) {
+	g.Go(func() (err error) {
+		defer recoverAsError(&err)
+		return f()
+	})
 }
 
 // processSubaccount rebuilds sub's state from its events of the last
@@ -316,15 +336,15 @@ func (s *Service) processSubaccount(ctx context.Context, module, sub common.Addr
 		transfers []spending.TransferExecutedEvent
 	)
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() (err error) {
+	goSafe(g, func() (err error) {
 		limits, err = contracts.NewModule(module, s.chain).GetSubAccountLimits(gctx, sub)
 		return err
 	})
-	g.Go(func() (err error) {
+	goSafe(g, func() (err error) {
 		protocol, err = s.protocolEvents(gctx, module, from, block, &sub)
 		return err
 	})
-	g.Go(func() (err error) {
+	goSafe(g, func() (err error) {
 		transfers, err = s.transferEvents(gctx, module, from, block, &sub)
 		return err
 	})

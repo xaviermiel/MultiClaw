@@ -29,17 +29,24 @@ var (
 	recipient = common.HexToAddress("0x1111111111111111111111111111111111111111")
 )
 
-// fakeChain is an in-memory TxBackend whose tx pool, like a node's, accepts
-// a transaction only at the account's next nonce.
+// fakeChain is an in-memory TxBackend whose tx pool accepts a transaction
+// only at the account's next nonce, or, with queueGaps, also above it (geth
+// queues such a transaction until the gap is filled).
 type fakeChain struct {
-	mu         sync.Mutex
-	chainID    int64
-	tip        *big.Int
-	baseFee    *big.Int
-	next       uint64 // the account's next nonce
-	nonceReads int
-	sent       []*types.Transaction
-	known      map[common.Hash]bool
+	mu          sync.Mutex
+	chainID     int64
+	tip         *big.Int
+	tipErr      error // eth_maxPriorityFeePerGas's answer instead of tip
+	gasPrice    *big.Int
+	baseFee     *big.Int
+	next        uint64 // the account's next nonce
+	nonceReads  int
+	latest      uint64 // the latest block's nonce
+	latestReads int
+	queueGaps   bool
+	queued      []*types.Transaction
+	sent        []*types.Transaction
+	known       map[common.Hash]bool
 	// hooks replace the default handling of the next SendTransaction calls,
 	// one each (they run with mu held and may call accept).
 	hooks []func(tx *types.Transaction) error
@@ -69,7 +76,29 @@ func (f *fakeChain) PendingNonceAt(context.Context, common.Address) (uint64, err
 	return f.next, nil
 }
 
-func (f *fakeChain) SuggestGasTipCap(context.Context) (*big.Int, error) { return f.tip, nil }
+func (f *fakeChain) NonceAt(_ context.Context, _ common.Address, block *big.Int) (uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if block != nil {
+		return 0, errors.New("only the latest block's nonce is faked")
+	}
+	f.latestReads++
+	return f.latest, nil
+}
+
+func (f *fakeChain) SuggestGasTipCap(context.Context) (*big.Int, error) {
+	if f.tipErr != nil {
+		return nil, f.tipErr
+	}
+	return f.tip, nil
+}
+
+func (f *fakeChain) SuggestGasPrice(context.Context) (*big.Int, error) {
+	if f.gasPrice == nil {
+		return nil, errors.New("no gas price")
+	}
+	return f.gasPrice, nil
+}
 
 func (f *fakeChain) LatestBlockInfo(context.Context) (BlockInfo, error) {
 	return BlockInfo{Number: 100, BaseFee: f.baseFee}, nil
@@ -86,6 +115,10 @@ func (f *fakeChain) SendTransaction(_ context.Context, tx *types.Transaction) er
 	switch {
 	case tx.Nonce() < f.next:
 		return errors.New("nonce too low: next nonce 9, tx nonce 6")
+	case tx.Nonce() > f.next && f.queueGaps:
+		f.queued = append(f.queued, tx)
+		f.known[tx.Hash()] = true
+		return nil
 	case tx.Nonce() > f.next:
 		return errors.New("nonce too high")
 	}
@@ -97,6 +130,15 @@ func (f *fakeChain) accept(tx *types.Transaction) {
 	f.next++
 	f.sent = append(f.sent, tx)
 	f.known[tx.Hash()] = true
+	// Queued transactions join the pool once the gap before them is filled.
+	for i := 0; i < len(f.queued); i++ {
+		if q := f.queued[i]; q.Nonce() == f.next {
+			f.queued = slices.Delete(f.queued, i, i+1)
+			f.next++
+			f.sent = append(f.sent, q)
+			i = -1
+		}
+	}
 }
 
 func (f *fakeChain) TransactionByHash(_ context.Context, hash common.Hash) (*types.Transaction, bool, error) {
@@ -320,6 +362,88 @@ func TestTxSenderResyncsAfterATransportFailure(t *testing.T) {
 	}
 }
 
+func TestTxSenderReusesTheNonceOfALostTransaction(t *testing.T) {
+	chain := newFakeChain(4)
+	chain.latest, chain.queueGaps = 4, true
+	logs := &logRecorder{}
+	s, _ := newTestSender(t, chain, logs)
+	ctx := context.Background()
+
+	// The node takes the transaction, then drops it before it is mined.
+	chain.hooks = append(chain.hooks, func(*types.Transaction) error { return nil })
+	lost, err := s.Send(ctx, recipient, []byte{1})
+	if err != nil || lost.Nonce != 4 {
+		t.Fatalf("lost transaction %+v (%v)", lost, err)
+	}
+	// The next ones are queued behind the gap, without an error.
+	var queued []*SentTx
+	for i := range 2 {
+		tx, err := s.Send(ctx, recipient, []byte{byte(2 + i)})
+		if err != nil || tx.Nonce != uint64(5+i) {
+			t.Fatalf("queued transaction %+v (%v)", tx, err)
+		}
+		queued = append(queued, tx)
+	}
+	if _, err := s.Wait(ctx, lost); err == nil || !strings.Contains(err.Error(), "not mined") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := s.Wait(ctx, queued[1]); err == nil {
+		t.Fatal("a queued transaction was mined")
+	}
+
+	// The next transaction takes the latest block's nonce and fills the gap;
+	// the queued ones follow it.
+	refill, err := s.Send(ctx, recipient, []byte{9})
+	if err != nil || refill.Nonce != 4 || chain.latestReads != 1 {
+		t.Fatalf("refill %+v (%v), %d latest-nonce reads", refill, err, chain.latestReads)
+	}
+	// A later timeout of a transaction at or above the resynced nonce
+	// doesn't resync again.
+	if _, err := s.Wait(ctx, queued[0]); err == nil {
+		t.Fatal("no receipt is faked")
+	}
+	after, err := s.Send(ctx, recipient, []byte{10})
+	if err != nil || after.Nonce != 7 {
+		t.Fatalf("after %+v (%v)", after, err)
+	}
+	if got := chain.sentNonces(); !slices.Equal(got, []uint64{4, 5, 6, 7}) || chain.latestReads != 1 {
+		t.Fatalf("pool nonces %v, %d latest-nonce reads", got, chain.latestReads)
+	}
+	if n := strings.Count(strings.Join(logs.lines, "\n"), "resyncs its nonce from the latest block"); n != 1 {
+		t.Fatalf("%d resyncs from the latest block logged: %q", n, logs.lines)
+	}
+}
+
+func TestTxSenderTipFallsBackToTheGasPrice(t *testing.T) {
+	for _, tc := range []struct {
+		gasPrice, tip int64 // gwei; the base fee is 10 gwei
+	}{
+		{13, 3},
+		{9, 0}, // below the base fee: no tip
+	} {
+		chain := newFakeChain(0)
+		chain.tipErr = errors.New("the method eth_maxPriorityFeePerGas does not exist/is not available")
+		chain.gasPrice = new(big.Int).Mul(gwei, big.NewInt(tc.gasPrice))
+		s, _ := newTestSender(t, chain, nil)
+		if _, err := s.Send(context.Background(), recipient, nil); err != nil {
+			t.Fatal(err)
+		}
+		tx := chain.sent[0]
+		wantTip := new(big.Int).Mul(gwei, big.NewInt(tc.tip))
+		wantCap := new(big.Int).Add(new(big.Int).Mul(gwei, big.NewInt(20)), wantTip)
+		if tx.GasTipCap().Cmp(wantTip) != 0 || tx.GasFeeCap().Cmp(wantCap) != 0 {
+			t.Fatalf("gas price %d gwei: tip %s cap %s", tc.gasPrice, tx.GasTipCap(), tx.GasFeeCap())
+		}
+	}
+
+	chain := newFakeChain(0)
+	chain.tipErr = errors.New("the method eth_maxPriorityFeePerGas does not exist/is not available")
+	s, _ := newTestSender(t, chain, nil)
+	if _, err := s.Send(context.Background(), recipient, nil); err == nil || !strings.Contains(err.Error(), "eth_maxPriorityFeePerGas") {
+		t.Fatalf("err = %v, want the priority fee error", err)
+	}
+}
+
 func TestTxSenderRequiresABaseFee(t *testing.T) {
 	chain := newFakeChain(0)
 	chain.baseFee = nil
@@ -454,7 +578,7 @@ func TestDryRunSenderSimulatesAndNeverSigns(t *testing.T) {
 		Revert(revertingModule, &contracts.ModuleABI, "updateSafeValue", moduleErr.ID[:4])
 	oracle := common.HexToAddress("0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E")
 	logs := &logRecorder{}
-	var s Sender = NewDryRunSender(dryRunBackend{fake, 1234}, oracle, logs.Logf)
+	var s Sender = NewDryRunSender(dryRunBackend{fake, 1234}, oracle, 500_000, logs.Logf)
 	ctx := context.Background()
 
 	data, err := contracts.PackUpdateSafeValue(big.NewInt(5))
@@ -476,9 +600,15 @@ func TestDryRunSenderSimulatesAndNeverSigns(t *testing.T) {
 	if first.Hash == second.Hash || first.From != oracle || s.Address() != oracle {
 		t.Fatalf("first %+v second %+v", first, second)
 	}
+	// Simulated as the oracle, with the gas real transactions get.
 	calls := fake.Calls()
-	if len(calls) != 2 || calls[0].Block.Uint64() != 1234 {
+	if len(calls) != 2 {
 		t.Fatalf("calls %+v", calls)
+	}
+	for _, c := range calls {
+		if c.Block.Uint64() != 1234 || c.From != oracle || c.Gas != 500_000 {
+			t.Fatalf("simulated %+v", c)
+		}
 	}
 
 	// Wait reports what the simulation found: production would have mined
@@ -505,7 +635,7 @@ func (unreachableBackend) BlockNumber(context.Context) (uint64, error) { return 
 func TestDryRunSenderReportsSuccessWhenTheSimulationCannotRun(t *testing.T) {
 	backend := unreachableBackend{&replayCaller{err: errors.New("dial tcp 127.0.0.1:8545: connection refused")}}
 	logs := &logRecorder{}
-	s := NewDryRunSender(backend, common.HexToAddress("0xf00d"), logs.Logf)
+	s := NewDryRunSender(backend, common.HexToAddress("0xf00d"), 0, logs.Logf)
 	ctx := context.Background()
 	sent, err := s.Send(ctx, recipient, []byte{1, 2, 3, 4})
 	if err != nil {

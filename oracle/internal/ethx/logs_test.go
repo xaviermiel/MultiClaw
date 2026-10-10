@@ -53,15 +53,17 @@ func TestFilterLogsChunkedCoversRangeExactly(t *testing.T) {
 			}
 			continue
 		}
+		// Consecutive chunks of at most chunk blocks, as few as possible, the
+		// last one ending at to: no block is read twice or skipped.
+		if want := (c.to-c.from)/c.chunk + 1; uint64(len(rec.ranges)) != want {
+			t.Fatalf("%+v: %d chunks, want %d", c, len(rec.ranges), want)
+		}
 		next := c.from
 		for _, r := range rec.ranges {
 			if r[0] != next || r[1] < r[0] || r[1]-r[0]+1 > c.chunk {
 				t.Fatalf("%+v: bad chunk %v (expected start %d)", c, r, next)
 			}
 			next = r[1] + 1
-			if r[1] == c.to {
-				break
-			}
 		}
 		if last := rec.ranges[len(rec.ranges)-1]; last[1] != c.to {
 			t.Fatalf("%+v: range not fully covered, last chunk %v", c, last)

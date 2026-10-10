@@ -195,7 +195,7 @@ func TestDryRunNeverSignsButLogsTheWrite(t *testing.T) {
 	c := serviceChain(e(5, 18), big.NewInt(0), 0)
 	c.Return(module, &contracts.ModuleABI, "updateSafeValue")
 	l := &logs{}
-	newTestService(c, ethx.NewDryRunSender(c, oracle, l.logf), l).RunOnce(context.Background())
+	newTestService(c, ethx.NewDryRunSender(c, oracle, 0, l.logf), l).RunOnce(context.Background())
 	for _, want := range []string{
 		"Writing Safe value to chain: 5000000000000000000 ($5 USD) for module " + module.Hex(),
 		"DRY RUN: not sending updateSafeValue to " + module.Hex() + " (36 bytes of calldata); at block 777: simulation ok",
@@ -212,7 +212,7 @@ func TestDryRunReportsAWriteThatWouldRevert(t *testing.T) {
 	c := serviceChain(e(5, 18), big.NewInt(0), 0)
 	c.Revert(module, &contracts.ModuleABI, "updateSafeValue", moduleErr.ID[:4])
 	l := &logs{}
-	newTestService(c, ethx.NewDryRunSender(c, oracle, l.logf), l).RunOnce(context.Background())
+	newTestService(c, ethx.NewDryRunSender(c, oracle, 0, l.logf), l).RunOnce(context.Background())
 	for _, want := range []string{
 		"at block 777: would revert: " + moduleErr.Name,
 		"Error writing safe value: transaction ",
@@ -238,4 +238,33 @@ func argumentlessError(t *testing.T) abi.Error {
 	}
 	t.Fatal("no module error without inputs")
 	return abi.Error{}
+}
+
+// go-ethereum's packer would write a total above 2^256-1 modulo 2^256; viem
+// threw, so the TS wrote nothing.
+func TestATotalAboveUint256IsNotWritten(t *testing.T) {
+	sender := newFakeSender()
+	l := &logs{}
+	newTestService(serviceChain(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(0), 0), sender, l).RunOnce(context.Background())
+	if len(sender.sent) != 0 || !l.has("Error processing module "+module.Hex()+": updateSafeValue: ") || !l.has("out of the uint256 range") {
+		t.Fatalf("sent %d; logs %q", len(sender.sent), l.lines)
+	}
+}
+
+// A shutdown during the valuation makes the reads left count as 0: the
+// partial total must not be compared, logged or written.
+func TestShutdownDuringTheValuationWritesNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := serviceChain(e(5, 18), e(100, 18), now-100)
+	c.On(module, &contracts.ModuleABI, "getSafeValue", func([]any) ([]any, error) {
+		cancel()
+		return []any{e(100, 18), big.NewInt(now - 100), big.NewInt(3)}, nil
+	})
+	sender := newFakeSender() // ignores ctx
+	l := &logs{}
+	newTestService(c, sender, l).RunOnce(ctx)
+	if len(sender.sent) != 0 || l.has("Total USD Value") || l.has("Writing Safe value") {
+		t.Fatalf("sent %d; logs %q", len(sender.sent), l.lines)
+	}
 }

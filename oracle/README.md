@@ -95,7 +95,7 @@ The oracle logs to stdout, in the TS oracle's format (`[SpendingOracle 2026-10-0
 
 ### Dry run
 
-With `--dry-run` or `DRY_RUN=true`, the oracle runs as usual but never signs: every `updateSafeValue` and `batchUpdate` is simulated with `eth_call` from the oracle address and logged, then treated as mined (as a reverted transaction when the simulation reverts):
+With `--dry-run` or `DRY_RUN=true`, the oracle runs as usual but never signs: every `updateSafeValue` and `batchUpdate` is simulated with `eth_call` from the oracle address, with `GAS_LIMIT`, and logged, then treated as mined (as a reverted transaction when the simulation reverts):
 
 ```
 [SpendingOracle ...] DRY RUN: not sending batchUpdate to 0xbB24...2c00 (292 bytes of calldata); at block 47909077: simulation ok
@@ -213,11 +213,11 @@ The go/no-go for removing the TS oracle: the Go oracle runs next to the live TS 
 
 ## Differences from the TS Oracle
 
-The values the Go oracle writes on-chain are the TS oracle's, except where the TS failed to read something (LINK and AAVE on Base). It differs in how it operates:
+The values the Go oracle writes on-chain are the TS oracle's, except where the TS failed to read something (LINK and AAVE on Base) or computed a power of ten inexactly (tokens or feeds with more than 22 decimals; no preset has any). It differs in how it operates:
 
 - **Base mainnet LINK/USD and AAVE/USD feeds.** The TS has both addresses with an invalid checksum, which viem rejects, so it valued LINK and AAVE at $0. The Go oracle prices them.
-- **One transaction sender** for both services: consecutive nonces, resynced only when the node rejects one. The TS services tracked their nonces separately and could collide.
-- **EIP-1559 fees** capped at 2 × base fee + tip (viem: 1.2 × base fee + tip). The gas limit is still `GAS_LIMIT`.
+- **One transaction sender** for both services: consecutive nonces, resynced when the node rejects one, and from the latest block when a transaction isn't mined within 2 minutes, so that a transaction the node dropped doesn't hold back the ones after it. The TS read the nonce before every send, and its services could collide.
+- **EIP-1559 fees** capped at 2 × base fee + tip (viem: 1.2 × base fee + tip). The tip is `eth_maxPriorityFeePerGas`, or as in viem the gas price minus the base fee when the node lacks it. The gas limit is still `GAS_LIMIT`.
 - **RPC fallback** moves to the next endpoint on every failed attempt. Reverts don't count as endpoint failures. The Safe value oracle uses the fallbacks too.
 - **Event queries** are all split by `MAX_BLOCKS_PER_QUERY`, ranges stop at block 0 on young chains, and the head block is never skipped. A failed history chunk is retried at the next refresh instead of being skipped.
 - **Incremental history**: `AcquiredBalanceUpdated` events are read once, not for 30 days on every refresh (see RPC requirements).
@@ -225,10 +225,10 @@ The values the Go oracle writes on-chain are the TS oracle's, except where the T
 - **Decimals**: powers of 10 are exact, and price feeds with more than 18 decimals work.
 - **Revert reasons** are decoded by name (module and parser errors).
 - **Startup checks**: malformed variables are errors (the TS read them as NaN), the RPC endpoints must serve `CHAIN`, and a registry that lists no module without `MODULE_ADDRESS` means no modules.
-- **Process**: clean shutdown on SIGINT/SIGTERM; cron runs never overlap; the first refresh runs before polling starts; a failure or panic in one subaccount or module doesn't stop the others; transactions already sent are awaited even when a run fails.
+- **Process**: clean shutdown on SIGINT/SIGTERM; cron runs never overlap, and a schedule that never fires (e.g. February 30) runs only at startup; the first refresh runs before polling starts; a failure or panic in one subaccount or module doesn't stop the others (a poll that can't read a module's events is retried whole, as in the TS); transactions already sent are awaited even when a run fails, except at shutdown.
 - **`analyze-tx`** replaces `src/analyze-failed-tx.ts`: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`.
 - **Dry-run mode** and `ORACLE_ADDRESS` are new. `WINDOW_DURATION_SECONDS` is ignored, with a warning, as the TS ignored it: the window comes from each subaccount's on-chain limits.
-- **The RPC URL** is redacted in the startup banner (the TS printed it with its API key).
+- **The RPC URL** is redacted in the startup banner and in error messages (the TS printed it with its API key in both).
 
 ## Supported Chains
 

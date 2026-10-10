@@ -282,13 +282,16 @@ type sentBatch struct {
 }
 
 // fakeSender decodes the batchUpdates it is given; receipts succeed unless
-// the hash is in reverts.
+// revert says the batch reverts, or waitErr fails the wait (e.g. a receipt
+// timeout). onWait runs before each wait.
 type fakeSender struct {
 	t       *testing.T
 	mu      sync.Mutex
 	batches []sentBatch
 	waited  int
 	revert  func(sentBatch) bool
+	waitErr error
+	onWait  func()
 }
 
 func (f *fakeSender) Address() common.Address { return oracle }
@@ -310,9 +313,15 @@ func (f *fakeSender) Send(_ context.Context, to common.Address, data []byte) (*e
 }
 
 func (f *fakeSender) Wait(_ context.Context, tx *ethx.SentTx) (*types.Receipt, error) {
+	if f.onWait != nil {
+		f.onWait()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.waited++
+	if f.waitErr != nil {
+		return nil, f.waitErr
+	}
 	b := f.batches[tx.Nonce-1]
 	status := types.ReceiptStatusSuccessful
 	if f.revert != nil && f.revert(b) {
@@ -351,6 +360,13 @@ func (l *logs) has(s string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return slices.ContainsFunc(l.lines, func(line string) bool { return strings.Contains(line, s) })
+}
+
+// index returns the position of the first line containing s, or -1.
+func (l *logs) index(s string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.IndexFunc(l.lines, func(line string) bool { return strings.Contains(line, s) })
 }
 
 func (l *logs) reset() {

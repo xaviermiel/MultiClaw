@@ -23,10 +23,17 @@ func Loop(ctx context.Context, sched cron.Schedule, job func(context.Context)) {
 // Every runs job at the next activation of sched, then at the first
 // activation after each run ends, until ctx ends. Runs never overlap:
 // activations that fall while job is running are skipped (node-cron let
-// them overlap).
+// them overlap). A schedule that never fires again (a date that doesn't
+// exist, such as February 30, for which robfig's Next returns the zero
+// time) waits for ctx, as node-cron never ran it.
 func Every(ctx context.Context, sched cron.Schedule, job func(context.Context)) {
 	for {
-		timer := time.NewTimer(time.Until(sched.Next(time.Now())))
+		next := sched.Next(time.Now())
+		if next.IsZero() {
+			<-ctx.Done()
+			return
+		}
+		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

@@ -80,3 +80,22 @@ func TestEveryWaitsForTheFirstActivation(t *testing.T) {
 		t.Fatalf("%d runs before the first activation", runs.Load())
 	}
 }
+
+// robfig's Next returns the zero time for a date that never comes: node-cron
+// never ran such a schedule, and Every must not run it back to back.
+func TestEveryNeverRunsAScheduleThatNeverFires(t *testing.T) {
+	sched, err := config.CronParser.Parse("0 0 30 2 *") // February 30
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	var runs atomic.Int32
+	Loop(ctx, sched, func(context.Context) { runs.Add(1) })
+	if n := runs.Load(); n != 1 {
+		t.Fatalf("%d runs, want only the immediate one", n)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("Loop returned before its context ended")
+	}
+}

@@ -126,6 +126,12 @@ func (r *Reader) BuildPriceCache(ctx context.Context, tokens []common.Address) s
 			continue
 		}
 		g.Go(func() error {
+			// errgroup doesn't recover panics: one here would end the process.
+			defer func() {
+				if p := recover(); p != nil {
+					r.logf("Error pricing %s: panic: %v", token.Hex(), p)
+				}
+			}()
 			price := r.PriceUSD(ctx, feed)
 			if price.Sign() <= 0 {
 				return nil

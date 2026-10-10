@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,7 +67,54 @@ type endpoint struct {
 	index int
 	rpc   *rpc.Client
 	eth   *ethclient.Client
+	// urls are the spellings of the endpoint URL an error message may quote,
+	// and safeURL what replaces them.
+	urls    []string
+	safeURL string
 }
+
+func newEndpoint(index int, raw string, rc *rpc.Client) *endpoint {
+	ep := &endpoint{index: index, rpc: rc, eth: ethclient.NewClient(rc), urls: []string{raw}, safeURL: "<RPC endpoint>"}
+	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		ep.safeURL = u.Scheme + "://" + u.Host
+		if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+			ep.safeURL += "/***"
+		}
+		ep.urls = append(ep.urls, u.String(), u.Redacted())
+		if _, ok := u.User.Password(); ok { // net/http's own masking
+			ep.urls = append(ep.urls, strings.Replace(u.String(), u.User.String()+"@", u.User.Username()+":***@", 1))
+		}
+	}
+	return ep
+}
+
+// redact hides the endpoint URL, which usually embeds a provider API key, in
+// err's message: go-ethereum's transport errors quote the request URL.
+// errors.Is and errors.As still see err.
+func (ep *endpoint) redact(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	for _, u := range ep.urls {
+		if u != ep.safeURL && strings.Contains(msg, u) {
+			msg = strings.ReplaceAll(msg, u, ep.safeURL)
+		}
+	}
+	if msg == err.Error() {
+		return err
+	}
+	return &redactedError{err: err, msg: msg}
+}
+
+// redactedError is an error whose message hides an endpoint URL.
+type redactedError struct {
+	err error
+	msg string
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
 
 // FallbackClient spreads calls over several RPC endpoints (the Go port of the
 // TS RpcClientManager).
@@ -97,9 +146,9 @@ func Dial(ctx context.Context, urls []string, opts Options) (*FallbackClient, er
 		rc, err := rpc.DialContext(ctx, u)
 		if err != nil {
 			c.Close()
-			return nil, fmt.Errorf("dial RPC endpoint %d: %w", i, err)
+			return nil, fmt.Errorf("dial RPC endpoint %d: %w", i, newEndpoint(i, u, nil).redact(err))
 		}
-		c.endpoints = append(c.endpoints, &endpoint{index: i, rpc: rc, eth: ethclient.NewClient(rc)})
+		c.endpoints = append(c.endpoints, newEndpoint(i, u, rc))
 	}
 	opts.Logf("Initialized RPC client manager with %d endpoint(s)", len(urls))
 	return c, nil
@@ -143,7 +192,7 @@ func (c *FallbackClient) do(ctx context.Context, op string, fn func(ctx context.
 
 		ep := c.endpoints[(start+attempt)%n]
 		actx, cancel := context.WithTimeout(ctx, c.opts.AttemptTimeout)
-		err := fn(actx, ep)
+		err := ep.redact(fn(actx, ep))
 		cancel()
 
 		if err == nil {
@@ -264,11 +313,32 @@ func (c *FallbackClient) PendingNonceAt(ctx context.Context, addr common.Address
 	return out, err
 }
 
+// NonceAt returns the nonce of addr at block (nil = latest): the number of
+// its mined transactions.
+func (c *FallbackClient) NonceAt(ctx context.Context, addr common.Address, block *big.Int) (uint64, error) {
+	var out uint64
+	err := c.do(ctx, "getTransactionCount", func(ctx context.Context, ep *endpoint) (err error) {
+		out, err = ep.eth.NonceAt(ctx, addr, block)
+		return err
+	})
+	return out, err
+}
+
 // SuggestGasTipCap returns eth_maxPriorityFeePerGas.
 func (c *FallbackClient) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
 	var out *big.Int
 	err := c.do(ctx, "maxPriorityFeePerGas", func(ctx context.Context, ep *endpoint) (err error) {
 		out, err = ep.eth.SuggestGasTipCap(ctx)
+		return err
+	})
+	return out, err
+}
+
+// SuggestGasPrice returns eth_gasPrice.
+func (c *FallbackClient) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+	var out *big.Int
+	err := c.do(ctx, "gasPrice", func(ctx context.Context, ep *endpoint) (err error) {
+		out, err = ep.eth.SuggestGasPrice(ctx)
 		return err
 	})
 	return out, err
@@ -322,7 +392,7 @@ func (c *FallbackClient) CheckChainID(ctx context.Context, want uint64) error {
 		actx, cancel := context.WithTimeout(ctx, c.opts.AttemptTimeout)
 		got, err := ep.eth.ChainID(actx)
 		cancel()
-		if err != nil {
+		if err = ep.redact(err); err != nil {
 			c.opts.Logf("Could not check the chain ID of RPC endpoint %d: %v", ep.index, err)
 			continue
 		}

@@ -103,7 +103,7 @@ func newSender(ctx context.Context, cfg *config.Config, client *ethx.FallbackCli
 			return nil, err
 		}
 		logf("DRY RUN: transactions are simulated and logged, never signed (acting as %s)", oracle.Hex())
-		return ethx.NewDryRunSender(client, oracle, logf), nil
+		return ethx.NewDryRunSender(client, oracle, cfg.GasLimit, logf), nil
 	}
 	key, err := crypto.HexToECDSA(cfg.PrivateKey)
 	if err != nil {

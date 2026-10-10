@@ -53,15 +53,15 @@ func (e *polledEvents) subAccounts() []common.Address {
 func (s *Service) newEvents(ctx context.Context, module common.Address, from, to uint64) (*polledEvents, error) {
 	var ev polledEvents
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() (err error) {
+	goSafe(g, func() (err error) {
 		ev.protocol, err = s.protocolEvents(gctx, module, from, to, nil)
 		return err
 	})
-	g.Go(func() (err error) {
+	goSafe(g, func() (err error) {
 		ev.transfers, err = s.transferEvents(gctx, module, from, to, nil)
 		return err
 	})
-	g.Go(func() error {
+	goSafe(g, func() error {
 		logs, err := s.filterLogs(gctx, module, contracts.SubAccountLimitsSetTopic, nil, from, to)
 		if err != nil {
 			return err
@@ -177,7 +177,7 @@ func (s *Service) blockTimes(ctx context.Context, blocks []uint64) (map[uint64]i
 			continue
 		}
 		seen[n] = true
-		g.Go(func() error {
+		goSafe(g, func() error {
 			info, err := s.chain.BlockInfo(gctx, n)
 			if err != nil {
 				return err

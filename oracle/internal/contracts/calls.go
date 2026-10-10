@@ -295,10 +295,31 @@ func (p Pair) GetReserves(ctx context.Context) (Reserves, error) {
 // PackBatchUpdate encodes batchUpdate(...).
 func PackBatchUpdate(subAccount common.Address, expectedAllowanceVersion, newAllowance *big.Int,
 	tokens []common.Address, expectedTokenVersions, balances []*big.Int) ([]byte, error) {
+	values := append([]*big.Int{expectedAllowanceVersion, newAllowance}, expectedTokenVersions...)
+	if err := checkUint256(append(values, balances...)...); err != nil {
+		return nil, fmt.Errorf("batchUpdate: %w", err)
+	}
 	return ModuleABI.Pack("batchUpdate", subAccount, expectedAllowanceVersion, newAllowance, tokens, expectedTokenVersions, balances)
 }
 
 // PackUpdateSafeValue encodes updateSafeValue(totalValueUSD).
 func PackUpdateSafeValue(totalValueUSD *big.Int) ([]byte, error) {
+	if err := checkUint256(totalValueUSD); err != nil {
+		return nil, fmt.Errorf("updateSafeValue: %w", err)
+	}
 	return ModuleABI.Pack("updateSafeValue", totalValueUSD)
+}
+
+var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+
+// checkUint256 rejects values a uint256 cannot hold, which go-ethereum's
+// packer would silently wrap modulo 2^256 (viem's encoder threw, so the TS
+// never sent them).
+func checkUint256(values ...*big.Int) error {
+	for _, v := range values {
+		if v == nil || v.Sign() < 0 || v.Cmp(maxUint256) > 0 {
+			return fmt.Errorf("%v is out of the uint256 range", v)
+		}
+	}
+	return nil
 }

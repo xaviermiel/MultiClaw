@@ -3,6 +3,7 @@ package spendingoracle
 import (
 	"cmp"
 	"context"
+	"errors"
 	"math/big"
 	"math/rand/v2"
 	"slices"
@@ -490,7 +491,7 @@ func TestDryRunRecordsOnlyUpdatesThatWouldSucceed(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 	env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA}
-	env.svc.sender = ethx.NewDryRunSender(env.chain, oracle, env.logs.logf)
+	env.svc.sender = ethx.NewDryRunSender(env.chain, oracle, 0, env.logs.logf)
 
 	// batchUpdate has no handler: its simulation reverts, and production
 	// would have mined a reverting transaction.
@@ -601,7 +602,8 @@ func TestRunRefreshesFirstThenPolls(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	env.svc.Run(ctx, schedule.Interval(time.Hour))
-	if !env.logs.has("=== Periodic Refresh Complete ===") || !env.logs.has("Polling blocks 899 to 998") {
+	refreshed, polled := env.logs.index("=== Periodic Refresh Complete ==="), env.logs.index("Polling blocks 899 to 998")
+	if refreshed < 0 || polled < refreshed {
 		t.Fatalf("logs:\n%s", env.logs)
 	}
 	if ctx.Err() == nil {
@@ -682,5 +684,201 @@ func TestShutdownInterruptsPoll(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestReorgNeverMovesThePollForward(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA}
+	env.svc.Poll(ctx) // up to block 998
+
+	// A refresh records block 1050, above the polled blocks; subB's event
+	// at 1020 is the next poll's to find.
+	env.chain.setHead(1100)
+	env.chain.addLog(transferLog(t, subA, tokenX, e18(1), e18(1), 1050))
+	env.chain.addLog(transferLog(t, subB, tokenX, e18(1), e18(1), 1020))
+	env.svc.Refresh(ctx)
+	env.chain.reorg(1050)
+	env.logs.reset()
+	env.svc.Poll(ctx)
+	// Rewinding to 1049 would skip blocks 999 to 1049.
+	env.wantLogs("Reorg detected at block 1050", "Polling blocks 999 to 1098")
+	if !slices.Contains(env.sender.subAccounts(), subB) {
+		t.Fatalf("subB's event was skipped; logs:\n%s", env.logs)
+	}
+}
+
+func TestReorgThatRemovesAnEventRewindsOnce(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.chain.addLog(transferLog(t, subA, tokenX, e18(1), e18(1), 950))
+	env.svc.Poll(ctx)
+
+	// The reorg drops the event: block 950 is read no more, so its old hash
+	// must be forgotten, or every poll finds the same reorg again.
+	env.chain.reorg(950)
+	env.chain.removeLogs(func(l types.Log) bool { return l.BlockNumber == 950 })
+	env.svc.Poll(ctx)
+	env.wantLogs("Reorg detected at block 950")
+	env.logs.reset()
+	env.svc.Poll(ctx)
+	if env.logs.has("Reorg") {
+		t.Fatalf("the reorg was detected again:\n%s", env.logs)
+	}
+}
+
+func TestReorgCheckCoversTwiceTheConfirmationDepth(t *testing.T) {
+	// CONFIRMATION_BLOCKS is 2: the newest 4 recorded blocks are checked,
+	// as in the TS.
+	for _, tc := range []struct {
+		reorged  uint64
+		detected bool
+	}{{960, true}, {950, false}} {
+		env := newTestEnv(t)
+		ctx := context.Background()
+		for _, b := range []uint64{950, 960, 970, 980, 990} {
+			env.chain.addLog(transferLog(t, subA, tokenX, e18(1), e18(1), b))
+		}
+		env.svc.Poll(ctx)
+		env.chain.reorg(tc.reorged)
+		env.logs.reset()
+		env.svc.Poll(ctx)
+		if got := env.logs.has("Reorg detected at block"); got != tc.detected {
+			t.Fatalf("reorg of block %d detected: %v, want %v; logs:\n%s", tc.reorged, got, tc.detected, env.logs)
+		}
+	}
+}
+
+func TestAWaitFailureDoesNotRecordTheLastUpdate(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA}
+	env.sender.waitErr = errors.New("transaction 0xabc not mined within 2m0s")
+	env.svc.Refresh(ctx)
+	env.wantLogs("failed for "+lower(subA)+": transaction 0xabc not mined within 2m0s", "Transaction results: 0 confirmed, 1 failed")
+	if _, ok := env.svc.lastUpdate[updateKey{module, subA}]; ok {
+		t.Fatal("an unconfirmed batch recorded the last update")
+	}
+}
+
+func TestLastUpdateIsWhenTheBatchWasPrepared(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA}
+	clock := int64(now)
+	env.svc.Now = func() time.Time { return time.Unix(clock, 0) }
+	env.sender.onWait = func() { clock += 100 } // the receipt takes 100s
+	env.svc.Refresh(ctx)
+	if got := env.svc.lastUpdate[updateKey{module, subA}]; got != now {
+		t.Fatalf("last update %d, want %d (when the values were read)", got, now)
+	}
+}
+
+func TestProcessSubaccountReadsTwiceTheLookback(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	// Block 850 is outside one BLOCKS_TO_LOOK_BACK (100) of block 998, but
+	// within two: its acquisition still counts.
+	env.chain.addLog(protocolLog(t, subA, contracts.OpSwap, []common.Address{tokenZ}, []*big.Int{e18(5)},
+		[]common.Address{tokenX}, []*big.Int{e18(5)}, e18(5), 850))
+	var pending []pendingTx
+	if err := env.svc.processSubaccount(ctx, module, subA, 998, &pending); err != nil {
+		t.Fatal(err)
+	}
+	env.svc.waitPending(ctx, pending)
+	sent := env.sender.sent()
+	if len(sent) != 1 || !slices.Equal(sent[0].tokens, []common.Address{tokenX}) || sent[0].balances[0].Cmp(e18(5)) != 0 {
+		t.Fatalf("batches %+v; logs:\n%s", sent, env.logs)
+	}
+	from := uint64(headBlock)
+	for _, q := range env.chain.queries {
+		if q.Topics[0][0] == contracts.ProtocolExecutionTopic {
+			from = min(from, q.FromBlock.Uint64())
+		}
+	}
+	if from != 798 {
+		t.Fatalf("protocol events read from block %d, want 798", from)
+	}
+}
+
+func TestWindowsBeyondInt64CoverEveryEvent(t *testing.T) {
+	// The on-chain window is a uint256 with no upper bound.
+	maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	for _, window := range []*big.Int{new(big.Int).Lsh(big.NewInt(1), 63), new(big.Int).Lsh(big.NewInt(1), 64), maxUint256} {
+		env := newTestEnv(t)
+		ctx := context.Background()
+		env.module.limits[2] = window
+		env.chain.addLog(transferLog(t, subA, tokenX, e18(10), e18(10), 900))
+		var pending []pendingTx
+		if err := env.svc.processSubaccount(ctx, module, subA, 998, &pending); err != nil {
+			t.Fatal(err)
+		}
+		env.svc.waitPending(ctx, pending)
+		// 10% of $10,000, less the $10 spent.
+		if sent := env.sender.sent(); len(sent) != 1 || sent[0].newAllowance.Cmp(e18(990)) != 0 {
+			t.Fatalf("window %s: batches %+v; logs:\n%s", window, sent, env.logs)
+		}
+	}
+}
+
+func TestAPanicFailsOnlyItsSubaccountOrPoll(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA, subB}
+	// A panic in a goroutine reading subA's events.
+	env.chain.failLogs = func(q ethereum.FilterQuery) error {
+		if q.Topics[0][0] == contracts.ProtocolExecutionTopic && len(q.Topics) > 1 && q.Topics[1][0] == topic(subA) {
+			panic("boom")
+		}
+		return nil
+	}
+	env.svc.Refresh(ctx)
+	env.wantLogs("Error processing "+lower(subA)+": panic: boom", "=== Periodic Refresh Complete ===")
+	if got := env.sender.subAccounts(); !slices.Equal(got, []common.Address{subB}) {
+		t.Fatalf("processed %v; logs:\n%s", got, env.logs)
+	}
+
+	// A panic in a goroutine of the poll's event query, then in the poll
+	// itself.
+	env.chain.failLogs = func(q ethereum.FilterQuery) error {
+		if len(q.Topics) == 1 {
+			panic("boom in a query")
+		}
+		return nil
+	}
+	env.svc.Poll(ctx)
+	env.wantLogs("Error polling for events: panic: boom in a query")
+	env.chain.failLogs = nil
+	env.chain.On(module, &contracts.ModuleABI, "authorizedOracle", func([]any) ([]any, error) { panic("boom in the poll") })
+	env.svc.Poll(ctx)
+	env.wantLogs("Error polling for events: panic: boom in the poll")
+	if env.svc.lastProcessedBlock != 898 { // where the first poll started
+		t.Fatalf("lastProcessedBlock = %d after failed polls", env.svc.lastProcessedBlock)
+	}
+	env.chain.Return(module, &contracts.ModuleABI, "authorizedOracle", oracle)
+	env.svc.Poll(ctx)
+	if env.svc.lastProcessedBlock != 998 {
+		t.Fatalf("lastProcessedBlock = %d after a poll that worked", env.svc.lastProcessedBlock)
+	}
+}
+
+func TestHistoricalTokensInterruptedDuringTheLastChunk(t *testing.T) {
+	env := newTestEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The shutdown makes the scan's last chunk fail.
+	env.chain.failLogs = func(q ethereum.FilterQuery) error {
+		if q.ToBlock.Uint64() == headBlock {
+			cancel()
+			return context.Canceled
+		}
+		return nil
+	}
+	if _, err := env.svc.historicalTokens(ctx, module, subA); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation", err)
+	}
+	if _, ok := env.svc.history[updateKey{module, subA}]; ok {
+		t.Fatal("kept an incomplete history")
 	}
 }

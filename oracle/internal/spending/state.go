@@ -168,8 +168,10 @@ func processProtocolEvent(
 
 	if (isSwapOrDeposit || isWithdrawOrClaim) &&
 		(len(event.TokensIn) != len(event.AmountsIn) || len(event.TokensOut) != len(event.AmountsOut)) {
-		// The event decoder rejects these; the TS threw a TypeError deeper in.
-		// Other op types are ignored entirely, as in the TS.
+		// The event decoder rejects these, so they never get here. (The TS
+		// didn't check: depending on the shape, it threw a TypeError or went
+		// on with what it could read.) Other op types are ignored entirely,
+		// as in the TS.
 		panic(fmt.Sprintf("malformed event at block %d log %d: token/amount length mismatch", event.BlockNumber, event.LogIndex))
 	}
 

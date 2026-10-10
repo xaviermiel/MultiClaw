@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -464,6 +465,41 @@ func TestCheckChainIDAsksEveryEndpoint(t *testing.T) {
 
 	if err := dialTest(t, nil, Options{}, down).CheckChainID(ctx, 84532); err == nil {
 		t.Fatal("no endpoint answered, want an error")
+	}
+}
+
+// go-ethereum's transport errors quote the request URL, and provider URLs
+// embed API keys: errors and logs show the endpoint as scheme://host/***.
+func TestErrorsHideTheEndpointURL(t *testing.T) {
+	ctx := context.Background()
+	host := fmt.Sprintf("127.0.0.1:%d", freePort(t)) // nothing listens there
+	for _, raw := range []string{
+		"http://" + host + "/v2/SECRET-KEY?token=SECRET-TOKEN",
+		"http://user:SECRET-PASSWORD@" + host + "/",
+	} {
+		logs := &logRecorder{}
+		c, err := Dial(ctx, []string{raw}, Options{Logf: logs.Logf, Retries: -1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.BlockNumber(ctx)
+		checkErr := c.CheckChainID(ctx, 1)
+		c.Close()
+		if err == nil || checkErr == nil {
+			t.Fatalf("%s answered", raw)
+		}
+		var urlErr *url.Error
+		if !errors.As(err, &urlErr) || !strings.Contains(err.Error(), "http://"+host+"/***") {
+			t.Fatalf("err = %v", err)
+		}
+		for _, line := range append(logs.lines, err.Error()) {
+			if strings.Contains(line, "SECRET") || strings.Contains(line, "user") {
+				t.Fatalf("leaked the URL: %q", line)
+			}
+		}
+		if !logs.contains("Could not check the chain ID of RPC endpoint 0") {
+			t.Fatalf("logs %q", logs.lines)
+		}
 	}
 }
 

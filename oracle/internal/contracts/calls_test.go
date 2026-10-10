@@ -199,3 +199,28 @@ func TestPackOracleWrites(t *testing.T) {
 		t.Fatalf("updateSafeValue arg = %v", args[0])
 	}
 }
+
+// go-ethereum's packer wraps a value above 2^256-1 modulo 2^256 (2^256 + 5
+// would be written as 5); viem threw, so the TS never sent such a value.
+func TestPackOracleWritesRejectsValuesOutsideUint256(t *testing.T) {
+	maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	tooBig := new(big.Int).Add(maxUint256, big.NewInt(5))
+	one := big.NewInt(1)
+	tokens := []common.Address{tokenAddr}
+	for _, v := range []*big.Int{tooBig, big.NewInt(-1)} {
+		if _, err := contracts.PackUpdateSafeValue(v); err == nil {
+			t.Errorf("updateSafeValue(%s) packed", v)
+		}
+		for i, args := range [][4]*big.Int{{v, one, one, one}, {one, v, one, one}, {one, one, v, one}, {one, one, one, v}} {
+			if _, err := contracts.PackBatchUpdate(subAccount, args[0], args[1], tokens, []*big.Int{args[2]}, []*big.Int{args[3]}); err == nil {
+				t.Errorf("batchUpdate with %s as argument %d packed", v, i)
+			}
+		}
+	}
+	if _, err := contracts.PackBatchUpdate(subAccount, one, maxUint256, tokens, []*big.Int{one}, []*big.Int{maxUint256}); err != nil {
+		t.Errorf("batchUpdate with 2^256-1: %v", err)
+	}
+	if _, err := contracts.PackUpdateSafeValue(maxUint256); err != nil {
+		t.Errorf("updateSafeValue(2^256-1): %v", err)
+	}
+}

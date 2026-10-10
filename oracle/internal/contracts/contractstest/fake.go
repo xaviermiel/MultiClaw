@@ -20,7 +20,10 @@ type Handler func(args []any) ([]any, error)
 
 // Call records one eth_call made against the fake.
 type Call struct {
+	From   common.Address
 	To     common.Address
+	Gas    uint64
+	Value  *big.Int
 	Method string
 	Args   []any
 	Block  *big.Int
@@ -98,7 +101,7 @@ func (f *Fake) CallContract(_ context.Context, msg ethereum.CallMsg, block *big.
 	}
 
 	f.mu.Lock()
-	f.calls = append(f.calls, Call{To: *msg.To, Method: e.method.Name, Args: args, Block: block})
+	f.calls = append(f.calls, Call{From: msg.From, To: *msg.To, Gas: msg.Gas, Value: msg.Value, Method: e.method.Name, Args: args, Block: block})
 	f.mu.Unlock()
 
 	outs, err := e.h(args)

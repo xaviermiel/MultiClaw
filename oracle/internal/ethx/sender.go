@@ -50,7 +50,9 @@ type SentTx struct {
 type TxBackend interface {
 	ChainID(ctx context.Context) (*big.Int, error)
 	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
+	NonceAt(ctx context.Context, account common.Address, block *big.Int) (uint64, error)
 	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
+	SuggestGasPrice(ctx context.Context) (*big.Int, error)
 	LatestBlockInfo(ctx context.Context) (BlockInfo, error)
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 	TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error)
@@ -60,7 +62,8 @@ type TxBackend interface {
 // SenderOptions tunes a TxSender. Zero values select the defaults.
 type SenderOptions struct {
 	Logf logx.Logf
-	// ReceiptTimeout bounds Wait (default 2m, the TS receipt timeout).
+	// ReceiptTimeout bounds Wait (default 2m, the TS spending oracle's
+	// receipt timeout; its Safe value oracle used viem's 3m).
 	ReceiptTimeout time.Duration
 	// PollInterval is how often Wait polls for the receipt (default 2s).
 	PollInterval time.Duration
@@ -84,7 +87,8 @@ const maxNonceResyncs = 5
 
 // TxSender signs EIP-1559 transactions with a fixed gas limit and manages the
 // nonce locally: it starts from the pending nonce, counts up per transaction
-// and resyncs only when the node rejects a nonce. (The TS re-read the latest
+// and resyncs when the node rejects a nonce, or from the latest block after a
+// transaction is not mined in time (see Wait). (The TS re-read the latest
 // nonce before every send and slept 2s on nonce errors, so back-to-back
 // transactions waited for each other to be mined.)
 type TxSender struct {
@@ -98,6 +102,9 @@ type TxSender struct {
 
 	mu    sync.Mutex
 	nonce *uint64 // next nonce to use; nil until synced
+	// fromLatest makes the next sync read the latest block's nonce instead
+	// of the pending one.
+	fromLatest bool
 }
 
 // NewTxSender returns a sender for key on chain chainID, which the backend
@@ -138,9 +145,9 @@ func (s *TxSender) Send(ctx context.Context, to common.Address, data []byte) (*S
 	}
 	for resyncs := 0; ; resyncs++ {
 		if s.nonce == nil {
-			n, err := s.backend.PendingNonceAt(ctx, s.from)
+			n, err := s.syncNonce(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("get pending nonce: %w", err)
+				return nil, err
 			}
 			s.nonce = &n
 		}
@@ -176,6 +183,44 @@ func (s *TxSender) Send(ctx context.Context, to common.Address, data []byte) (*S
 	}
 }
 
+// syncNonce reads the account's nonce from the node: the pending one, or the
+// latest block's after a transaction was not mined in time. Called with mu
+// held.
+func (s *TxSender) syncNonce(ctx context.Context) (uint64, error) {
+	if s.fromLatest {
+		n, err := s.backend.NonceAt(ctx, s.from, nil)
+		if err != nil {
+			return 0, fmt.Errorf("get nonce: %w", err)
+		}
+		s.fromLatest = false
+		return n, nil
+	}
+	n, err := s.backend.PendingNonceAt(ctx, s.from)
+	if err != nil {
+		return 0, fmt.Errorf("get pending nonce: %w", err)
+	}
+	return n, nil
+}
+
+// notMined handles a transaction that was not mined within ReceiptTimeout.
+// The node may have dropped it (an eviction, a restart, an endpoint that never
+// forwarded it). Nodes queue a transaction whose nonce leaves a gap without
+// an error, so every later transaction would wait behind the lost one and the
+// oracle would never write again. The next Send therefore takes the latest
+// block's nonce, the lowest one not mined: it fills the gap, or replaces a
+// stuck transaction if its fees are 10% higher, as the TS did by reading the
+// latest nonce before every send. Transactions queued behind the gap are then
+// mined after it, as they would have been.
+func (s *TxSender) notMined(tx *SentTx) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if (s.nonce == nil && s.fromLatest) || (s.nonce != nil && *s.nonce <= tx.Nonce) {
+		return // already resyncing, or resynced below this transaction
+	}
+	s.opts.Logf("Transaction %s (nonce %d) not mined: the next transaction resyncs its nonce from the latest block", tx.Hash.Hex(), tx.Nonce)
+	s.nonce, s.fromLatest = nil, true
+}
+
 // alreadySent reports whether the node already has tx itself, e.g. when a
 // send was retried after a timeout and the first attempt got through.
 func (s *TxSender) alreadySent(ctx context.Context, tx *types.Transaction, err error) bool {
@@ -189,14 +234,11 @@ func (s *TxSender) alreadySent(ctx context.Context, tx *types.Transaction, err e
 	return lookupErr == nil
 }
 
-// fees returns the EIP-1559 tip (eth_maxPriorityFeePerGas) and fee cap
+// fees returns the EIP-1559 tip (eth_maxPriorityFeePerGas, or like viem the
+// gas price minus the base fee when the node lacks that method) and fee cap
 // (2 * base fee + tip, which keeps the transaction includable while the base
 // fee doubles; viem used 1.2 * base fee + tip).
 func (s *TxSender) fees(ctx context.Context) (tip, feeCap *big.Int, err error) {
-	tip, err = s.backend.SuggestGasTipCap(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get priority fee: %w", err)
-	}
 	head, err := s.backend.LatestBlockInfo(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get base fee: %w", err)
@@ -204,11 +246,24 @@ func (s *TxSender) fees(ctx context.Context) (tip, feeCap *big.Int, err error) {
 	if head.BaseFee == nil {
 		return nil, nil, errors.New("latest block has no base fee: the oracle sends EIP-1559 transactions only")
 	}
+	tip, err = s.backend.SuggestGasTipCap(ctx)
+	if err != nil {
+		price, priceErr := s.backend.SuggestGasPrice(ctx)
+		if priceErr != nil {
+			return nil, nil, fmt.Errorf("get priority fee: %w", err)
+		}
+		tip = new(big.Int).Sub(price, head.BaseFee)
+		if tip.Sign() < 0 {
+			tip.SetInt64(0)
+		}
+	}
 	feeCap = new(big.Int).Mul(head.BaseFee, big.NewInt(2))
 	return tip, feeCap.Add(feeCap, tip), nil
 }
 
-// Wait polls for tx's receipt until it is mined or ReceiptTimeout passes.
+// Wait polls for tx's receipt until it is mined or ReceiptTimeout passes. A
+// transaction not mined in time makes the next Send resync its nonce (see
+// notMined).
 func (s *TxSender) Wait(ctx context.Context, tx *SentTx) (*types.Receipt, error) {
 	deadline := time.Now().Add(s.opts.ReceiptTimeout)
 	for {
@@ -219,6 +274,7 @@ func (s *TxSender) Wait(ctx context.Context, tx *SentTx) (*types.Receipt, error)
 		case ctx.Err() != nil:
 			return nil, ctx.Err()
 		case !time.Now().Before(deadline):
+			s.notMined(tx)
 			if errors.Is(err, ethereum.NotFound) {
 				return nil, fmt.Errorf("transaction %s not mined within %s", tx.Hash.Hex(), s.opts.ReceiptTimeout)
 			}
@@ -263,20 +319,22 @@ type DryRunBackend interface {
 // reports the simulated outcome at once, so the services carry on as if the
 // transaction was mined, successfully or reverted.
 type DryRunSender struct {
-	backend DryRunBackend
-	from    common.Address
-	logf    logx.Logf
+	backend  DryRunBackend
+	from     common.Address
+	gasLimit uint64
+	logf     logx.Logf
 
 	mu   sync.Mutex
 	sent uint64
 }
 
-// NewDryRunSender returns a dry-run sender acting as from.
-func NewDryRunSender(backend DryRunBackend, from common.Address, logf logx.Logf) *DryRunSender {
+// NewDryRunSender returns a dry-run sender acting as from, simulating with
+// the gas limit real transactions get (0: the node's eth_call cap).
+func NewDryRunSender(backend DryRunBackend, from common.Address, gasLimit uint64, logf logx.Logf) *DryRunSender {
 	if logf == nil {
 		logf = logx.Discard
 	}
-	return &DryRunSender{backend: backend, from: from, logf: logf}
+	return &DryRunSender{backend: backend, from: from, gasLimit: gasLimit, logf: logf}
 }
 
 // Address returns the oracle address the sender acts as.
@@ -295,7 +353,7 @@ func (d *DryRunSender) Send(ctx context.Context, to common.Address, data []byte)
 		return nil, fmt.Errorf("get block number: %w", err)
 	}
 	outcome, revert := "simulation ok", ""
-	msg := ethereum.CallMsg{From: d.from, To: &to, Data: data}
+	msg := ethereum.CallMsg{From: d.from, To: &to, Gas: d.gasLimit, Data: data}
 	if _, err := d.backend.CallContract(ctx, msg, new(big.Int).SetUint64(block)); err != nil {
 		if IsExecutionError(err) {
 			revert = contracts.DescribeRevert(err)

@@ -166,7 +166,7 @@ func (s *Service) acquiredBalances(ctx context.Context, m contracts.Module, sub 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(maxParallelReads)
 	for i, token := range tokens {
-		g.Go(func() (err error) {
+		goSafe(g, func() (err error) {
 			if balances[i], err = m.GetAcquiredBalance(gctx, sub, token); err != nil {
 				return err
 			}
@@ -220,8 +220,14 @@ func (s *Service) waitPending(ctx context.Context, pending []pendingTx) {
 	s.logf("Transaction results: %d confirmed, %d failed", ok, len(pending)-ok)
 }
 
-func (s *Service) confirm(ctx context.Context, p pendingTx) bool {
+func (s *Service) confirm(ctx context.Context, p pendingTx) (confirmed bool) {
 	short, sub := p.tx.Hash.Hex()[:10], lower(p.batch.subAccount)
+	defer func() {
+		if r := recover(); r != nil {
+			s.logf("Transaction %s... failed for %s: panic: %v", short, sub, r)
+			confirmed = false
+		}
+	}()
 	receipt, err := s.sender.Wait(ctx, p.tx)
 	if err == nil && receipt.Status != types.ReceiptStatusSuccessful {
 		reason := ethx.RevertReason(ctx, s.chain, p.tx, receipt)

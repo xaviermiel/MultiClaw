@@ -95,8 +95,9 @@ func (s *Service) historicalTokens(ctx context.Context, module, sub common.Addre
 			return err
 		}
 		for _, l := range logs {
-			// viem returned undecodable logs without arguments, which the
-			// TS then skipped.
+			// A log that doesn't decode is skipped. (viem kept a log whose
+			// data didn't decode, and the TS used its token topic; the
+			// module never emits such logs.)
 			if d, err := contracts.DecodeAcquiredBalanceUpdated(l); err == nil {
 				h.events = append(h.events, acquiredEvent{block: l.BlockNumber, index: l.Index, token: d.Token})
 			}
@@ -132,6 +133,11 @@ func (s *Service) historicalTokens(ctx context.Context, module, sub common.Addre
 			}
 			from = to + 1
 		}
+	}
+	// A shutdown during the last chunk made it fail: the scan is incomplete.
+	if err := ctx.Err(); err != nil {
+		delete(s.history, key)
+		return nil, err
 	}
 	// The first unconfirmed block; failed ranges from there are read again
 	// anyway.
