@@ -41,12 +41,14 @@
 # runs can also change an allowance: run again to rule that out.
 #
 # Exit status: 0 identical, 1 different, 2 setup error or nothing compared.
-set -euo pipefail
+set -Eeuo pipefail
 
 die() {
 	echo "fork-diff: $*" >&2
 	exit 2
 }
+# Any other failing command is a setup error too, not a difference.
+trap 'die "setup failed at line $LINENO"' ERR
 
 oracle_dir=$(cd "$(dirname "$0")/.." && pwd)
 go_bin=${1:-$oracle_dir/bin/oracle}
@@ -134,8 +136,10 @@ for v in REGISTRY_ADDRESS MODULE_ADDRESS BLOCKS_TO_LOOK_BACK CONFIRMATION_BLOCKS
 	fi
 done
 
-# run NAME COMMAND...: runs an oracle from $out (no .env there) with
-# oracle_env only, logging to $out/NAME.log.
+# run NAME COMMAND...: runs an oracle from $out with oracle_env only (the TS
+# script runs from a new empty directory, the Go oracle reads an empty env
+# file, so no .env reaches either), logging to $out/NAME.log.
+: >"$out/empty.env"
 run() {
 	local name=$1 status=0
 	shift
@@ -180,7 +184,7 @@ sent >"$out/ts.txs"
 [ "$(rpc_call evm_revert "$snapshot")" = true ] || die "evm_revert failed"
 [ "$(cast block-number --rpc-url "$rpc")" = "$base_block" ] || die "evm_revert did not restore block $base_block"
 
-run go "$go_bin" run --once
+run go "$go_bin" run --once --env-file "$out/empty.env"
 sent >"$out/go.txs"
 
 # --- Comparison ----------------------------------------------------------

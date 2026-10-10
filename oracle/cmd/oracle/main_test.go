@@ -114,3 +114,38 @@ func TestConfigCommandEnvFileSemantics(t *testing.T) {
 		t.Fatalf("process env should win over the env file:\n%s", out.String())
 	}
 }
+
+// Go's flag package stops at the first argument that isn't a flag: the
+// flags after it would be ignored, and `--once false --dry-run` would sign
+// live. Such arguments are usage errors.
+func TestServiceCommandsRejectArguments(t *testing.T) {
+	clearOracleEnv(t)
+	envFile := writeEnvFile(t, "CHAIN=base-sepolia\nMODULE_ADDRESS=0x4d0d0000000000000000000000000000000000e1\n")
+	for _, args := range [][]string{
+		{"run", "--env-file", envFile, "--once", "false", "--dry-run"},
+		{"spending", "--env-file", envFile, "--once", "now", "--dry-run"},
+		{"safe-value", "--env-file", envFile, "--", "--dry-run"},
+		{"config", "--env-file", envFile, "extra"},
+	} {
+		var out, errOut bytes.Buffer
+		code := dispatch(args, &out, &errOut)
+		if code != 2 || !strings.Contains(errOut.String(), "unexpected argument") || out.Len() != 0 {
+			t.Fatalf("%q: code %d, stdout %q, stderr %q", args, code, out.String(), errOut.String())
+		}
+	}
+}
+
+// A .env line dotenv skips doesn't stop the oracle, and nothing of the file
+// is printed (godotenv's parse error quoted the rest of it, key included).
+func TestEnvFileLinesDotenvSkipsAreSkipped(t *testing.T) {
+	clearOracleEnv(t)
+	const key = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	envFile := writeEnvFile(t, "CHAIN=base-sepolia\na note without an equals sign\nPRIVATE_KEY=0x"+key+"\nMODULE_ADDRESS=0x4d0d0000000000000000000000000000000000e1\n")
+	var out, errOut bytes.Buffer
+	if code := dispatch([]string{"config", "--env-file", envFile}, &out, &errOut); code != 0 {
+		t.Fatalf("code %d, stderr %q", code, errOut.String())
+	}
+	if strings.Contains(out.String()+errOut.String(), key) || !strings.Contains(out.String(), "base-sepolia") {
+		t.Fatalf("stdout %q, stderr %q", out.String(), errOut.String())
+	}
+}

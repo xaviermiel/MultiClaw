@@ -20,7 +20,7 @@ import (
 func runSafeValue(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("safe-value", stderr)
 	flags := addServiceFlags(fs)
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return 2
 	}
 	cfg, ok := loadServiceConfig(fs, flags, stderr)

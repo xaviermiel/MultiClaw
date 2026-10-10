@@ -18,7 +18,7 @@ var loadEnvFileFn = config.LoadEnvFile
 func runConfig(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("config", stderr)
 	envFile := envFileFlag(fs)
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return 2
 	}
 	if err := loadEnvFile(fs, *envFile); err != nil {

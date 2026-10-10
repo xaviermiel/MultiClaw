@@ -238,6 +238,39 @@ func TestStrictParsing(t *testing.T) {
 	}
 }
 
+// Values that would overflow the block or time arithmetic: a poll interval
+// beyond time.Duration's range (a negative interval, a busy loop), 2^62
+// confirmations (2x it overflows and slices panic).
+func TestUpperBounds(t *testing.T) {
+	for key, value := range map[string]string{
+		"POLL_INTERVAL_MS":      "9223372036855",
+		"CONFIRMATION_BLOCKS":   "4611686018427387904",
+		"BLOCKS_TO_LOOK_BACK":   "4611686018427387904",
+		"MAX_BLOCKS_PER_QUERY":  "18446744073709551",
+		"MAX_HISTORICAL_BLOCKS": "4611686018427387904",
+	} {
+		_, err := Load(envMap(map[string]string{key: value}))
+		if err == nil || !strings.Contains(err.Error(), key+": expected an integer from") {
+			t.Errorf("%s=%s: err = %v", key, value, err)
+		}
+	}
+	cfg, err := Load(envMap(map[string]string{"POLL_INTERVAL_MS": "86400000", "CONFIRMATION_BLOCKS": "100000"}))
+	if err != nil || cfg.PollInterval != 24*time.Hour || cfg.ConfirmationBlocks != 100_000 {
+		t.Fatalf("the maximums: %+v, %v", cfg, err)
+	}
+}
+
+// A key pasted into an address variable must not end up in the error.
+func TestAddressErrorsDontQuoteTheValue(t *testing.T) {
+	const key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	for _, name := range []string{"ORACLE_ADDRESS", "MODULE_ADDRESS", "REGISTRY_ADDRESS"} {
+		_, err := Load(envMap(map[string]string{name: key}))
+		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), key[2:20]) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
 func TestCronAcceptsFiveAndSixFields(t *testing.T) {
 	for _, spec := range []string{"*/5 * * * *", "*/30 * * * * *", "0 */10 * * * *", "@every 1m"} {
 		if _, err := CronParser.Parse(spec); err != nil {

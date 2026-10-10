@@ -90,6 +90,22 @@ func loadEnvFile(fs *flag.FlagSet, path string) error {
 	return loadEnvFileFn(path, explicit)
 }
 
+// parseFlags parses args, which may only be flags. Go's flag package stops
+// at the first argument that isn't a flag and ignores the flags after it, so
+// `run --once false --dry-run` would otherwise run live, without --dry-run.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		err := fmt.Errorf("unexpected argument %q (boolean flags take =value, e.g. --once=false)", fs.Arg(0))
+		fmt.Fprintln(fs.Output(), err)
+		fs.Usage()
+		return err
+	}
+	return nil
+}
+
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("oracle "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)

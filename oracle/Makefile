@@ -4,7 +4,7 @@
 GO  ?= go
 BIN ?= bin/oracle
 
-.PHONY: build build-linux test vet fmt fmt-check check ts-config abi golden golden-check fuzz fork-diff
+.PHONY: build build-linux test vet fmt fmt-check check ts-config dotenv-cases abi golden golden-check fuzz fork-diff
 
 build:
 	$(GO) build -o $(BIN) ./cmd/oracle
@@ -36,6 +36,11 @@ check: fmt-check vet test golden-check
 # Regenerate the TS config dump that the Go preset test compares against.
 ts-config:
 	npx tsx scripts/dump-ts-config.ts > internal/config/testdata/ts-config.json
+
+# Regenerate the real dotenv's parse of tricky .env files, which the Go .env
+# parser is tested against.
+dotenv-cases:
+	npx tsx scripts/dump-dotenv-cases.ts > internal/config/testdata/dotenv-cases.json
 
 # Regenerate the contract ABIs embedded in internal/contracts from the Foundry
 # build (out/ is gitignored, so the extracted ABIs are committed). After a

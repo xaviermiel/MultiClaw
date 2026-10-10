@@ -9,6 +9,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/url"
 	"os"
@@ -18,7 +19,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/joho/godotenv"
 	"github.com/robfig/cron/v3"
 )
 
@@ -35,6 +35,10 @@ const (
 	historicalLookbackMultiplier = 30 // days of history scanned for acquired tokens
 	secondsPerDay                = 86400
 	pollIntervalBlockMultiplier  = 2
+
+	maxPollIntervalMs     = 24 * 60 * 60 * 1000 // a day
+	maxBlockRange         = 1_000_000_000
+	maxConfirmationBlocks = 100_000
 )
 
 // CronParser accepts both 5-field and 6-field (leading seconds) expressions,
@@ -93,18 +97,26 @@ const (
 	ModeAnalyze
 )
 
-// LoadEnvFile loads KEY=VALUE pairs from path into the process environment
-// without overriding variables that are already set (dotenv semantics).
-// A missing file is ignored unless required is true.
+// LoadEnvFile loads the variables of the env file at path, parsed as dotenv
+// parses it (see parseDotenv), into the process environment, without
+// overriding variables that are already set, even to "" (as dotenv). A
+// missing file is ignored unless required is true; an unreadable one is an
+// error (dotenv ignored it).
 func LoadEnvFile(path string, required bool) error {
-	if _, err := os.Stat(path); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) && !required {
 			return nil
 		}
 		return fmt.Errorf("env file %s: %w", path, err)
 	}
-	if err := godotenv.Load(path); err != nil {
-		return fmt.Errorf("env file %s: %w", path, err)
+	for key, value := range parseDotenv(string(data)) {
+		if _, set := os.LookupEnv(key); set {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("env file %s: cannot set %s", path, key)
+		}
 	}
 	return nil
 }
@@ -166,18 +178,20 @@ func Load(getenv func(string) string) (*Config, error) {
 	// historical acquired-token scan (derived from the default lookback, not
 	// from BLOCKS_TO_LOOK_BACK, as in the TS), polling at 2x block time.
 	defaultLookBack := secondsPerDay / chain.BlockTimeSeconds
-	pollMs := parseInt(env, "POLL_INTERVAL_MS", chain.BlockTimeSeconds*pollIntervalBlockMultiplier*1000, 1, fail)
+	// The maximums are far beyond any use, but keep the block and time
+	// arithmetic from overflowing (a negative poll interval, a slice bound).
+	pollMs := parseInt(env, "POLL_INTERVAL_MS", chain.BlockTimeSeconds*pollIntervalBlockMultiplier*1000, 1, maxPollIntervalMs, fail)
 	c.PollInterval = time.Duration(pollMs) * time.Millisecond
-	c.BlocksToLookBack = parseInt(env, "BLOCKS_TO_LOOK_BACK", defaultLookBack, 0, fail)
-	c.ConfirmationBlocks = parseInt(env, "CONFIRMATION_BLOCKS", chain.ConfirmationBlocks, 0, fail)
-	c.MaxBlocksPerQuery = parseInt(env, "MAX_BLOCKS_PER_QUERY", DefaultMaxBlocksPerQuery, 1, fail)
-	c.MaxHistoricalBlocks = parseInt(env, "MAX_HISTORICAL_BLOCKS", defaultLookBack*historicalLookbackMultiplier, 0, fail)
-	c.GasLimit = uint64(parseInt(env, "GAS_LIMIT", DefaultGasLimit, 1, fail))
+	c.BlocksToLookBack = parseInt(env, "BLOCKS_TO_LOOK_BACK", defaultLookBack, 0, maxBlockRange, fail)
+	c.ConfirmationBlocks = parseInt(env, "CONFIRMATION_BLOCKS", chain.ConfirmationBlocks, 0, maxConfirmationBlocks, fail)
+	c.MaxBlocksPerQuery = parseInt(env, "MAX_BLOCKS_PER_QUERY", DefaultMaxBlocksPerQuery, 1, maxBlockRange, fail)
+	c.MaxHistoricalBlocks = parseInt(env, "MAX_HISTORICAL_BLOCKS", defaultLookBack*historicalLookbackMultiplier, 0, maxBlockRange, fail)
+	c.GasLimit = uint64(parseInt(env, "GAS_LIMIT", DefaultGasLimit, 1, math.MaxInt64, fail))
 
-	c.SafeValueChangeThresholdBps = big.NewInt(parseInt(env, "SAFE_VALUE_CHANGE_THRESHOLD_BPS", DefaultValueChangeBps, 0, fail))
-	c.SafeValueMaxStalenessSeconds = parseInt(env, "SAFE_VALUE_MAX_STALENESS_SECONDS", DefaultMaxStalenessSeconds, 0, fail)
-	c.AllowanceIncreaseThresholdBps = big.NewInt(parseInt(env, "ALLOWANCE_INCREASE_THRESHOLD_BPS", DefaultAllowanceIncreaseBps, 0, fail))
-	c.SpendingOracleMaxStalenessSeconds = parseInt(env, "SPENDING_ORACLE_MAX_STALENESS_SECONDS", DefaultMaxStalenessSeconds, 0, fail)
+	c.SafeValueChangeThresholdBps = big.NewInt(parseInt(env, "SAFE_VALUE_CHANGE_THRESHOLD_BPS", DefaultValueChangeBps, 0, math.MaxInt64, fail))
+	c.SafeValueMaxStalenessSeconds = parseInt(env, "SAFE_VALUE_MAX_STALENESS_SECONDS", DefaultMaxStalenessSeconds, 0, math.MaxInt64, fail)
+	c.AllowanceIncreaseThresholdBps = big.NewInt(parseInt(env, "ALLOWANCE_INCREASE_THRESHOLD_BPS", DefaultAllowanceIncreaseBps, 0, math.MaxInt64, fail))
+	c.SpendingOracleMaxStalenessSeconds = parseInt(env, "SPENDING_ORACLE_MAX_STALENESS_SECONDS", DefaultMaxStalenessSeconds, 0, math.MaxInt64, fail)
 
 	if v := env("DRY_RUN"); v != "" {
 		dry, err := strconv.ParseBool(v)
@@ -281,14 +295,18 @@ func orDefault(v, def string) string {
 	return v
 }
 
-func parseInt(env func(string) string, key string, def, min int64, fail func(error)) int64 {
+func parseInt(env func(string) string, key string, def, min, max int64, fail func(error)) int64 {
 	raw := env(key)
 	if raw == "" {
 		return def
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || v < min {
-		fail(fmt.Errorf("%s: expected an integer >= %d, got %q", key, min, raw))
+	if err != nil || v < min || v > max {
+		if max == math.MaxInt64 {
+			fail(fmt.Errorf("%s: expected an integer >= %d, got %q", key, min, raw))
+		} else {
+			fail(fmt.Errorf("%s: expected an integer from %d to %d, got %q", key, min, max, raw))
+		}
 		return def
 	}
 	return v
@@ -309,9 +327,11 @@ func parseOptionalAddress(env func(string) string, key string, fail func(error))
 
 // ParseAddress parses a 0x-prefixed hex address with viem's strict rules:
 // all-lowercase is accepted, anything else must carry a valid EIP-55 checksum.
+// A malformed value isn't quoted in the error: it may be a key pasted in the
+// wrong variable.
 func ParseAddress(s string) (common.Address, error) {
 	if len(s) != 42 || !strings.HasPrefix(s, "0x") || !common.IsHexAddress(s) {
-		return common.Address{}, fmt.Errorf("invalid address %q", s)
+		return common.Address{}, fmt.Errorf("invalid address: want 0x and 40 hex digits, got %d characters", len(s))
 	}
 	if s[2:] != strings.ToLower(s[2:]) {
 		if mixed, err := common.NewMixedcaseAddressFromString(s); err != nil || !mixed.ValidChecksum() {

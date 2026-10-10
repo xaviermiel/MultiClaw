@@ -1,0 +1,251 @@
+{
+  "dotenv": "16.6.1",
+  "cases": [
+    {
+      "name": "basic",
+      "input": "A=1\nB=two\n",
+      "parsed": {
+        "A": "1",
+        "B": "two"
+      }
+    },
+    {
+      "name": "no final newline",
+      "input": "A=1",
+      "parsed": {
+        "A": "1"
+      }
+    },
+    {
+      "name": "spaces around the equals sign",
+      "input": "A = 1\nB=  spaced out  \nC\t=\ttabs\t\n",
+      "parsed": {
+        "A": "1",
+        "B": "spaced out",
+        "C": "tabs"
+      }
+    },
+    {
+      "name": "export prefix",
+      "input": "export A=1\nexport  B=2\n",
+      "parsed": {
+        "A": "1",
+        "B": "2"
+      }
+    },
+    {
+      "name": "colon syntax",
+      "input": "A: 1\nB:2\n",
+      "parsed": {
+        "A": "1"
+      }
+    },
+    {
+      "name": "comments",
+      "input": "# a comment\nA=1 # trailing comment\nB=2#no space\nC=http://host/path#fragment\n  # indented comment\n",
+      "parsed": {
+        "A": "1",
+        "B": "2",
+        "C": "http://host/path"
+      }
+    },
+    {
+      "name": "hash inside quotes",
+      "input": "A=\"1 # not a comment\"\nB='2 # nor this'\nC=`3 # nor this`\n",
+      "parsed": {
+        "A": "1 # not a comment",
+        "B": "2 # nor this",
+        "C": "3 # nor this"
+      }
+    },
+    {
+      "name": "quotes",
+      "input": "A='single'\nB=\"double\"\nC=`backtick`\nD=  'padded'  \nE=\"x\" # comment\n",
+      "parsed": {
+        "A": "single",
+        "B": "double",
+        "C": "backtick",
+        "D": "padded",
+        "E": "x"
+      }
+    },
+    {
+      "name": "escaped quotes",
+      "input": "A=\"a\\\"b\"\nB='a\\'b'\n",
+      "parsed": {
+        "A": "a\\\"b",
+        "B": "a\\'b"
+      }
+    },
+    {
+      "name": "newline escapes",
+      "input": "A=\"l1\\nl2\\rl3\"\nB='l1\\nl2'\nC=l1\\nl2\nD=\"unclosed\\n\n",
+      "parsed": {
+        "A": "l1\nl2\rl3",
+        "B": "l1\\nl2",
+        "C": "l1\\nl2",
+        "D": "\"unclosed\n"
+      }
+    },
+    {
+      "name": "multi-line values",
+      "input": "A=\"line 1\nline 2\"\nB='line 1\nline 2'\nC=after\n",
+      "parsed": {
+        "A": "line 1\nline 2",
+        "B": "line 1\nline 2",
+        "C": "after"
+      }
+    },
+    {
+      "name": "quote opened on one line, closed on another",
+      "input": "A='abc\nB=def'\nC=ghi\n",
+      "parsed": {
+        "A": "abc\nB=def",
+        "C": "ghi"
+      }
+    },
+    {
+      "name": "unclosed quotes",
+      "input": "A=\"abc\nB='def\nC=`ghi\n",
+      "parsed": {
+        "A": "\"abc",
+        "B": "'def",
+        "C": "`ghi"
+      }
+    },
+    {
+      "name": "empty values",
+      "input": "A=\nB=\"\"\nC=''\nD=   \nE=``\n",
+      "parsed": {
+        "A": "",
+        "B": "",
+        "C": "",
+        "D": "",
+        "E": ""
+      }
+    },
+    {
+      "name": "lines dotenv skips",
+      "input": "some note without equals\nA=1\n=nokey\n   \nA B=2\nC=3\n",
+      "parsed": {
+        "A": "1",
+        "C": "3"
+      }
+    },
+    {
+      "name": "keys with dots and dashes",
+      "input": "MY-NOTE=1\nmy.key=2\n_UNDER=3\n",
+      "parsed": {
+        "MY-NOTE": "1",
+        "my.key": "2",
+        "_UNDER": "3"
+      }
+    },
+    {
+      "name": "byte order mark",
+      "input": "﻿A=1\nB=2\n",
+      "parsed": {
+        "A": "1",
+        "B": "2"
+      }
+    },
+    {
+      "name": "no-break space before a key",
+      "input": " A=1\n",
+      "parsed": {
+        "A": "1"
+      }
+    },
+    {
+      "name": "CRLF and CR line endings",
+      "input": "A=1\r\nB=2\r\nC=3\rD=4\r\n",
+      "parsed": {
+        "A": "1",
+        "B": "2",
+        "C": "3",
+        "D": "4"
+      }
+    },
+    {
+      "name": "dollar signs are kept",
+      "input": "A=abc$def\nB=${A}\nC=\"$HOME\"\n",
+      "parsed": {
+        "A": "abc$def",
+        "B": "${A}",
+        "C": "$HOME"
+      }
+    },
+    {
+      "name": "equals signs in values",
+      "input": "A=b=c\nB==d\n",
+      "parsed": {
+        "A": "b=c",
+        "B": "=d"
+      }
+    },
+    {
+      "name": "backslashes",
+      "input": "A=\"C:\\\\path\\\\to\"\nB=C:\\path\nC='C:\\path'\n",
+      "parsed": {
+        "A": "C:\\\\path\\\\to",
+        "B": "C:\\path",
+        "C": "C:\\path"
+      }
+    },
+    {
+      "name": "later keys win",
+      "input": "A=1\nA=2\n",
+      "parsed": {
+        "A": "2"
+      }
+    },
+    {
+      "name": "values with spaces",
+      "input": "A=1 2 3\nB=  a  b  \n",
+      "parsed": {
+        "A": "1 2 3",
+        "B": "a  b"
+      }
+    },
+    {
+      "name": "a private key",
+      "input": "PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80\n",
+      "parsed": {
+        "PRIVATE_KEY": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      }
+    },
+    {
+      "name": "cron expressions",
+      "input": "SAFE_VALUE_CRON=\"0 */10 * * * *\"\nSPENDING_ORACLE_CRON=*/5 * * * *\n",
+      "parsed": {
+        "SAFE_VALUE_CRON": "0 */10 * * * *",
+        "SPENDING_ORACLE_CRON": "*/5 * * * *"
+      }
+    },
+    {
+      "name": "unicode",
+      "input": "A=héllo wörld\nB=\"日本語\"\n",
+      "parsed": {
+        "A": "héllo wörld",
+        "B": "日本語"
+      }
+    },
+    {
+      "name": "blank lines between",
+      "input": "\n\nA=1\n\n\nB=2\n\n",
+      "parsed": {
+        "A": "1",
+        "B": "2"
+      }
+    },
+    {
+      "name": "unusual whitespace",
+      "input": "A=x﻿\nB=y\nC=　z　\n",
+      "parsed": {
+        "A": "x",
+        "B": "y",
+        "C": "z"
+      }
+    }
+  ]
+}

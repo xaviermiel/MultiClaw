@@ -224,7 +224,7 @@ The go/no-go for removing the TS oracle: the Go oracle runs next to the live TS 
    scripts/shadow-compare.sh ts.log go.log
    ```
 
-   For every cron cycle both logged, it compares the Safe values and whether to write them, each subaccount's `Allowance:` line, and each `batchUpdate` decision and reasons. Cycles are matched by their start time, so the startup runs are not compared. Expect a few differences, where the TS oracle's own transactions changed the chain between the two oracles' reads, or failed because its two services sent with the same nonce (the Go oracle shares one sender).
+   For every cron cycle both logged, it compares the Safe values and whether to write them, each subaccount's `Allowance:` line, and each `batchUpdate` decision and reasons; a decision only one oracle logged in such a cycle is a difference too. Cycles are matched by their start time, so the startup runs are not compared. Expect a few differences, where the TS oracle's own transactions changed the chain between the two oracles' reads, or failed because its two services sent with the same nonce (the Go oracle shares one sender).
 
 ## Differences from the TS Oracle
 
@@ -239,7 +239,9 @@ The values the Go oracle writes on-chain are the TS oracle's, except where the T
 - **Reorgs** deeper than one block are rewound in one poll.
 - **Decimals**: powers of 10 are exact, and price feeds with more than 18 decimals work.
 - **Revert reasons** are decoded by name (module and parser errors).
-- **Startup checks**: malformed variables are errors (the TS read them as NaN), the RPC endpoints must serve `CHAIN`, and a registry that lists no module without `MODULE_ADDRESS` means no modules.
+- **Startup checks**: malformed or out-of-range variables are errors (the TS read `"100abc"` as 100 and junk as NaN), the RPC endpoints must serve `CHAIN`, and a registry that lists no module without `MODULE_ADDRESS` means no modules. A command argument that isn't a flag is an error, so a flag after it can't be silently dropped.
+- **`.env` files** are parsed like dotenv 16, the TS loader: lines it skips are skipped, `$VAR` is not expanded, and the file's content never appears in an error. An unreadable file is an error (the TS ignored it).
+- **Cron expressions** are parsed by robfig/cron, not node-cron: a day of week of 7 (Sunday for node-cron) and 7-field expressions are rejected at startup, `@hourly`-style descriptors are accepted, and when both the day of month and the day of week are set a run happens on either (node-cron: on both). The default schedules are unaffected.
 - **Process**: clean shutdown on SIGINT/SIGTERM; cron runs never overlap, and a schedule that never fires (e.g. February 30) runs only at startup; the first refresh runs before polling starts; a failure or panic in one subaccount or module doesn't stop the others (a poll that can't read a module's events is retried whole, as in the TS); transactions already sent are awaited even when a run fails, except at shutdown.
 - **Access policies**: the oracle serves only the modules its registry access policy covers (all of them unless restricted); the TS served every module naming it.
 - **`analyze-tx`** replaces `src/analyze-failed-tx.ts`: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`.
