@@ -3,7 +3,7 @@
 // The pure core (this file, fifo.go, state.go) rebuilds a subaccount's
 // rolling-window spending and acquired balances from ProtocolExecution and
 // TransferExecuted events. It is a 1:1 port of buildSubAccountState and its
-// FIFO helpers in oracle/src/spending-oracle.ts, including their quirks:
+// FIFO helpers in the TS oracle's spending-oracle.ts, including their quirks:
 // every value it produces can end up on-chain via batchUpdate.
 //
 // Amounts are *big.Int and are treated as immutable (see package bn): stored

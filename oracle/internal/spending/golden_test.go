@@ -2,11 +2,12 @@ package spending
 
 // Golden parity with the TS implementation: scripts/golden/gen.ts ran every
 // case in testdata/golden through the real buildSubAccountState and recorded
-// the state it produced (the script header documents the format). The Go
-// port must produce the identical state, or panic where the TS threw.
+// the state it produced. The Go port must produce the identical state, or
+// panic where the TS threw.
 //
-// `make golden` regenerates the vectors; `make golden-check` verifies that
-// the committed ones are what the current TS produces.
+// The script went with the TS oracle (its header, in the git history,
+// documents the format), so the vectors are fixed: a deliberate change to the
+// accounting updates the "want" of the cases it changes.
 
 import (
 	"bytes"
@@ -227,8 +228,8 @@ func decodeGoldenInput(g *goldenAddresses, c *goldenCase) (*goldenInput, error) 
 	return in, nil
 }
 
-// renderState lays a state out like the vectors' "want" (see gen.ts),
-// naming addresses with ref.
+// renderState lays a state out like the vectors' "want", naming addresses
+// with ref.
 func renderState(s *SubAccountState, ref func(common.Address) any) map[string]any {
 	spending := []any{}
 	for _, r := range s.SpendingRecords {
@@ -306,7 +307,7 @@ func TestGoldenParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(paths) == 0 {
-		t.Fatal("no golden vectors in testdata/golden (make golden)")
+		t.Fatal("no golden vectors in testdata/golden")
 	}
 	for _, path := range paths {
 		raw, err := os.ReadFile(path)

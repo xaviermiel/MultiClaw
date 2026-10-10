@@ -1,5 +1,5 @@
-// Package analyze explains why a transaction failed: the Go port of
-// oracle/src/analyze-failed-tx.ts, run as `oracle analyze-tx <hash>`.
+// Package analyze explains why a transaction failed: the Go port of the TS
+// oracle's analyze-failed-tx.ts script, run as `oracle analyze-tx <hash>`.
 //
 // It decodes the call (module functions with the module's full ABI, and the
 // protocol call inside executeOnProtocol), replays it to get the revert data

@@ -1,10 +1,7 @@
-# Go oracle. The TypeScript oracle in src/ remains the deployed implementation
-# until the Go port has completed its shadow run.
-
 GO  ?= go
 BIN ?= bin/oracle
 
-.PHONY: build build-linux test vet fmt fmt-check check ts-config dotenv-cases abi golden golden-check fuzz fork-diff
+.PHONY: build build-linux test vet fmt fmt-check check abi fuzz
 
 build:
 	$(GO) build -o $(BIN) ./cmd/oracle
@@ -29,18 +26,8 @@ fmt:
 fmt-check:
 	@out="$$(gofmt -l cmd internal)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
-# Everything a commit must pass: Go checks plus the TS suite that still ships.
-check: fmt-check vet test golden-check
-	npx vitest run
-
-# Regenerate the TS config dump that the Go preset test compares against.
-ts-config:
-	npx tsx scripts/dump-ts-config.ts > internal/config/testdata/ts-config.json
-
-# Regenerate the real dotenv's parse of tricky .env files, which the Go .env
-# parser is tested against.
-dotenv-cases:
-	npx tsx scripts/dump-dotenv-cases.ts > internal/config/testdata/dotenv-cases.json
+# Everything a commit must pass.
+check: fmt-check vet test
 
 # Regenerate the contract ABIs embedded in internal/contracts from the Foundry
 # build (out/ is gitignored, so the extracted ABIs are committed). After a
@@ -58,25 +45,8 @@ abi:
 	jq -s '[.[].abi[] | select(.type == "error")] | unique_by([.name, [.inputs[].type]])' \
 		$(foreach p,$(PARSERS),$(REPO_ROOT)/out/$(p).sol/$(p).json) > $(ABI_OUT)/ParserErrors.json
 
-# Golden parity vectors: scenarios run through the real TS buildSubAccountState,
-# replayed against the Go port by TestGoldenParity.
-GOLDEN_DIR := internal/spending/testdata/golden
-
-golden:
-	npx tsx scripts/golden/gen.ts $(GOLDEN_DIR)
-
-# Fails when the committed vectors are not what the current TS produces.
-golden-check:
-	npx tsx scripts/golden/gen.ts --check $(GOLDEN_DIR)
-
 # Coverage-guided fuzzing of the spending state machine's invariants.
 FUZZTIME ?= 2m
 
 fuzz:
 	$(GO) test -run='^$$' -fuzz=FuzzBuildSubAccountState -fuzztime=$(FUZZTIME) ./internal/spending
-
-# TS vs Go on an anvil fork: both oracles run once against the same state and
-# must send the same transactions. Needs FORK_URL and REGISTRY_ADDRESS (or
-# MODULE_ADDRESS); see scripts/fork-diff.sh.
-fork-diff: build
-	scripts/fork-diff.sh $(BIN)

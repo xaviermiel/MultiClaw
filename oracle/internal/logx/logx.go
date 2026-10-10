@@ -1,9 +1,7 @@
-// Package logx writes log lines in the same format as the TypeScript oracle:
+// Package logx writes log lines in the format of the former TypeScript
+// oracle:
 //
 //	[SpendingOracle 2026-04-16T16:40:58.509Z] message
-//
-// Keeping the format identical lets the Go and TS oracles' logs be diffed
-// during the shadow-run period.
 package logx
 
 import (

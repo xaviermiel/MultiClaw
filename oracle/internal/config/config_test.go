@@ -15,8 +15,9 @@ func envMap(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
-// tsChainDump mirrors one entry of testdata/ts-config.json, produced by
-// scripts/dump-ts-config.ts from the real TypeScript config.ts.
+// tsChainDump mirrors one entry of testdata/ts-config.json, the TypeScript
+// oracle's config.ts resolved per chain (dumped before the TS oracle was
+// removed). The presets must still match it: a preset change updates it.
 type tsChainDump struct {
 	ChainID             uint64   `json:"chainId"`
 	RPCURLs             []string `json:"rpcUrls"`

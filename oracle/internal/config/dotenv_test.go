@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// testdata/dotenv-cases.json is the real dotenv's parse of tricky files
-// (make dotenv-cases).
+// testdata/dotenv-cases.json is the real dotenv's parse of tricky files,
+// dumped with the TS oracle's dotenv 16.6.1 before its removal.
 func TestParseDotenvMatchesDotenv(t *testing.T) {
 	data, err := os.ReadFile("testdata/dotenv-cases.json")
 	if err != nil {

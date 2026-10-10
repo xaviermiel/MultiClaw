@@ -1,5 +1,5 @@
 // Package spendingoracle is the Go port of the TS spending oracle service
-// (oracle/src/spending-oracle.ts): it watches the modules' events, rebuilds
+// (its spending-oracle.ts): it watches the modules' events, rebuilds
 // each affected subaccount's spending and acquired balances with package
 // spending, and pushes the result on-chain with batchUpdate.
 package spendingoracle

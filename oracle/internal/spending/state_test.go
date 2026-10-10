@@ -1,7 +1,7 @@
 package spending
 
-// Port of oracle/src/spending-oracle.test.ts (55 cases). Subtest names are
-// the TS describe/it names. NOW is fixed (the TS used the wall clock; no
+// Port of the TS oracle's spending-oracle.test.ts (55 cases). Subtest names
+// are the TS describe/it names. NOW is fixed (the TS used the wall clock; no
 // assertion depends on absolute time).
 
 import (

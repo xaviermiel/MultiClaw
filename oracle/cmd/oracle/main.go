@@ -1,4 +1,5 @@
-// Command oracle runs the MultiClaw off-chain oracle (Go port of oracle/src).
+// Command oracle runs the MultiClaw off-chain oracle (the Go port of the
+// former TypeScript oracle).
 //
 // Usage:
 //

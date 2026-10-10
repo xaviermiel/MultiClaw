@@ -2,7 +2,7 @@
 
 Off-chain oracle infrastructure for the MultiClaw DeFi module. Replaces the previous Chainlink CRE (Computation Runtime Environment) implementation with a self-hosted service.
 
-The oracle is written in Go (`cmd/oracle`, `internal/`). The TypeScript oracle in `src/` is the previous implementation: it stays the deployed one until the Go oracle has completed its shadow run (see [Verifying the Go oracle](#verifying-the-go-oracle-against-the-ts-oracle)), and will then be removed. Both read the same `.env`.
+The oracle is written in Go (`cmd/oracle`, `internal/`). It replaced a TypeScript implementation, removed after the port: it reads the same `.env`, and [Changes from the TS oracle](#changes-from-the-ts-oracle) lists what differs for operators migrating from it.
 
 ## Architecture
 
@@ -88,12 +88,12 @@ cast send $REGISTRY_ADDRESS "setApprovedModules(address,address[],bool)" $ORACLE
 cast send $REGISTRY_ADDRESS "setOracleRestricted(address,bool)" $ORACLE true --account manager
 ```
 
-The oracle reads the modules it serves with `getModulesServedBy` at every run, so changes need no restart. A registry deployed before access policies has no policy: every active module is served. The TS oracle ignores policies.
+The oracle reads the modules it serves with `getModulesServedBy` at every run, so changes need no restart. A registry deployed before access policies has no policy: every active module is served.
 
 ### Commands
 
 ```bash
-bin/oracle run          # both oracles (what `npm start` runs)
+bin/oracle run          # both oracles
 bin/oracle safe-value   # the Safe value oracle only
 bin/oracle spending     # the spending oracle only
 bin/oracle config       # print and check the configuration
@@ -106,7 +106,7 @@ bin/oracle analyze-tx   # explain why a transaction failed (below)
 | `--once`          | one Safe value check and/or one spending refresh, then exit                          |
 | `--dry-run`       | simulate every transaction instead of sending it (same as `DRY_RUN=true`, see below) |
 
-The oracle logs to stdout, in the TS oracle's format (`[SpendingOracle 2026-10-09T16:58:00.012Z] ...`), and stops cleanly on SIGINT or SIGTERM. It keeps no state on disk: after a restart it rebuilds everything from the chain, and its first refresh pushes an update for every subaccount.
+The oracle logs to stdout (`[SpendingOracle 2026-10-09T16:58:00.012Z] ...`, the TS oracle's format), and stops cleanly on SIGINT or SIGTERM. It keeps no state on disk: after a restart it rebuilds everything from the chain, and its first refresh pushes an update for every subaccount.
 
 ### Dry run
 
@@ -163,13 +163,10 @@ systemd reads the env file itself (as root, so it can stay `0600 root`), with it
 ## Development
 
 ```bash
-make check       # gofmt, go vet, go test, golden-check, and the TS tests (vitest)
+make check       # gofmt, go vet, go test
 make test        # go test ./...
 make fuzz        # fuzz the spending state machine (FUZZTIME=2m)
-make golden      # regenerate the golden vectors from the TS buildSubAccountState
 make abi         # re-extract the contract ABIs after a contract change (runs forge build)
-make ts-config   # regenerate the TS config dump the chain preset test compares against
-make fork-diff   # TS vs Go on an anvil fork (below)
 ```
 
 | Path                              | Contents                                                                           |
@@ -185,52 +182,23 @@ make fork-diff   # TS vs Go on an anvil fork (below)
 | `internal/discovery`              | module discovery and the `authorizedOracle` check                                  |
 | `internal/analyze`                | the `analyze-tx` command: call decoding, replays, error help, module state         |
 | `internal/bn`, `logx`, `schedule` | big-number helpers, logging, cron loops                                            |
-| `scripts/`                        | golden vector generator, TS config dump, fork-diff and shadow-run tools            |
 | `deploy/`                         | systemd unit                                                                       |
 
-## Verifying the Go Oracle against the TS Oracle
+### Test data from the TS oracle
 
-The Go oracle computes exactly what the TS one does: its state machine is checked against the real TS `buildSubAccountState` with golden vectors (`make golden-check`). Two tools compare the whole oracles.
+Three test data sets were generated from the TS oracle before its removal (their generators are in the git history, under `scripts/`):
 
-### Fork differential test
+- `internal/spending/testdata/golden`: 481 scenarios run through the TS `buildSubAccountState`, with the state it produced, which the Go state machine must produce too. A deliberate change to the accounting changes some of them: update their `want` by hand.
+- `internal/config/testdata/ts-config.json`: the TS oracle's configuration per chain, which the chain presets must still match: a preset change updates it too.
+- `internal/config/testdata/dotenv-cases.json`: dotenv 16's parse of tricky `.env` files, which the Go `.env` parser must match.
 
-```bash
-FORK_URL=https://base-sepolia.g.alchemy.com/v2/KEY REGISTRY_ADDRESS=0x... make fork-diff
-```
+The whole oracles were also compared on anvil forks of Base Sepolia: run once from the same state, the TS and the Go oracle sent byte-identical transactions.
 
-[`scripts/fork-diff.sh`](./scripts/fork-diff.sh) starts an anvil fork of `FORK_URL` and makes a throwaway key the authorized oracle of every module (on the fork only). It then runs the TS oracle once (a Safe value check, then a spending refresh), reverts the fork, and runs `oracle run --once`. The transactions both sent must be identical, byte for byte:
+## Changes from the TS Oracle
 
-```
-TS sent 4 transaction(s), Go sent 4.
-IDENTICAL: same transactions, byte for byte (/tmp/fork-diff.k3Jx9Q/go.decoded)
-```
+For operators of the TS oracle (`npm start`): the Go oracle reads the same `.env`, and writes the same values on-chain, except where the TS failed to read something (LINK and AAVE on Base) or computed a power of ten inexactly (tokens or feeds with more than 22 decimals; no preset has any). It differs in how it operates:
 
-The TS reads each subaccount's events in a single `eth_getLogs` over 2 × `BLOCKS_TO_LOOK_BACK` blocks. On the public `sepolia.base.org`, run it with `BLOCKS_TO_LOOK_BACK=100 MAX_BLOCKS_PER_QUERY=200`. On Base mainnet, `updateSafeValue` differs for Safes holding LINK or AAVE (see the differences below).
-
-### Shadow run
-
-The go/no-go for removing the TS oracle: the Go oracle runs next to the live TS oracle, in dry-run mode as the same oracle, for a few days.
-
-1. Keep the TS oracle running (`npm start`), with its output saved to a file.
-2. On the same chain, with the same settings and cron schedules, start the Go oracle without the key:
-
-   ```bash
-   PRIVATE_KEY= DRY_RUN=true ORACLE_ADDRESS=0x<TS oracle address> bin/oracle run > go.log
-   ```
-
-3. Compare their decisions:
-
-   ```bash
-   scripts/shadow-compare.sh ts.log go.log
-   ```
-
-   For every cron cycle both logged, it compares the Safe values and whether to write them, each subaccount's `Allowance:` line, and each `batchUpdate` decision and reasons; a decision only one oracle logged in such a cycle is a difference too. Cycles are matched by their start time, so the startup runs are not compared. Expect a few differences, where the TS oracle's own transactions changed the chain between the two oracles' reads, or failed because its two services sent with the same nonce (the Go oracle shares one sender).
-
-## Differences from the TS Oracle
-
-The values the Go oracle writes on-chain are the TS oracle's, except where the TS failed to read something (LINK and AAVE on Base) or computed a power of ten inexactly (tokens or feeds with more than 22 decimals; no preset has any). It differs in how it operates:
-
-- **Base mainnet LINK/USD and AAVE/USD feeds.** The TS has both addresses with an invalid checksum, which viem rejects, so it valued LINK and AAVE at $0. The Go oracle prices them.
+- **Base mainnet LINK/USD and AAVE/USD feeds.** The TS had both addresses with an invalid checksum, which viem rejects, so it valued LINK and AAVE at $0. The Go oracle prices them.
 - **One transaction sender** for both services: consecutive nonces, resynced when the node rejects one, and from the latest block when a transaction isn't mined within 2 minutes, so that a transaction the node dropped doesn't hold back the ones after it. The TS read the nonce before every send, and its services could collide.
 - **EIP-1559 fees** capped at 2 × base fee + tip (viem: 1.2 × base fee + tip). The tip is `eth_maxPriorityFeePerGas`, or as in viem the gas price minus the base fee when the node lacks it. The gas limit is still `GAS_LIMIT`.
 - **RPC fallback** moves to the next endpoint on every failed attempt. Reverts don't count as endpoint failures. The Safe value oracle uses the fallbacks too.
@@ -244,7 +212,7 @@ The values the Go oracle writes on-chain are the TS oracle's, except where the T
 - **Cron expressions** are parsed by robfig/cron, not node-cron: a day of week of 7 (Sunday for node-cron) and 7-field expressions are rejected at startup, `@hourly`-style descriptors are accepted, and when both the day of month and the day of week are set a run happens on either (node-cron: on both). The default schedules are unaffected.
 - **Process**: clean shutdown on SIGINT/SIGTERM; cron runs never overlap, and a schedule that never fires (e.g. February 30) runs only at startup; the first refresh runs before polling starts; a failure or panic in one subaccount or module doesn't stop the others (a poll that can't read a module's events is retried whole, as in the TS); transactions already sent are awaited even when a run fails, except at shutdown.
 - **Access policies**: the oracle serves only the modules its registry access policy covers (all of them unless restricted); the TS served every module naming it.
-- **`analyze-tx`** replaces `src/analyze-failed-tx.ts`: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`. It reads `CHAIN` (the script always used Base Sepolia); prints amounts exactly (the script rounded them, as 1.50K) and unknown errors by selector and length, without their raw data; treats a mined transaction without a receipt as an error (the script reported it as pending); and exits with status 1 when interrupted, with no report.
+- **`analyze-tx`** replaces the TS `analyze-failed-tx.ts` script: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`. It reads `CHAIN` (the script always used Base Sepolia); prints amounts exactly (the script rounded them, as 1.50K) and unknown errors by selector and length, without their raw data; treats a mined transaction without a receipt as an error (the script reported it as pending); and exits with status 1 when interrupted, with no report.
 - **Dry-run mode** and `ORACLE_ADDRESS` are new. `WINDOW_DURATION_SECONDS` is ignored, with a warning, as the TS ignored it: the window comes from each subaccount's on-chain limits.
 - **The RPC URL** is redacted in the startup banner and in error messages (the TS printed it with its API key in both).
 
@@ -258,7 +226,7 @@ The values the Go oracle writes on-chain are the TS oracle's, except where the T
 
 ## Token Configuration
 
-Tokens for Safe value calculation are configured per chain in `internal/config/chains.go` (`src/config.ts` for the TS oracle; a test checks they match). Supported token types:
+Tokens for Safe value calculation are configured per chain in `internal/config/chains.go`. Supported token types:
 
 | Type            | Valuation Method                                      |
 | --------------- | ----------------------------------------------------- |
@@ -285,15 +253,3 @@ Recommended alerts:
 | RPC endpoint down        | Same as process crash, unless a fallback endpoint answers                              | Switch RPC URL, restart                               |
 | Oracle wallet out of gas | Oracle can't update chain                                                              | Fund the wallet                                       |
 | Oracle key compromised   | Max damage per window: per-account spending cap + `maxOracleAcquiredBps` (default 20%) | Rotate oracle via `setAuthorizedOracle`, pause module |
-
-## Legacy TypeScript Oracle
-
-Until the shadow run is done, the TS oracle remains the deployed one. It needs Node.js 18+ and reads the same `.env`, except `DRY_RUN` and `ORACLE_ADDRESS`.
-
-```bash
-npm install
-npm start                 # both oracles (src/index.ts)
-npm run safe-value        # the Safe value oracle only
-npm run spending-oracle   # the spending oracle only
-npx vitest run            # its tests (make check runs them too)
-```

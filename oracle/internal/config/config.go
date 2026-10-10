@@ -1,9 +1,10 @@
 // Package config loads the oracle configuration from environment variables.
 //
-// Variable names and defaults match the TypeScript oracle (oracle/src/config.ts
-// plus the thresholds read in safe-value.ts and spending-oracle.ts). As in the
-// TS, an empty value counts as unset. Unlike the TS, malformed values are
-// rejected at startup instead of becoming NaN.
+// Variable names and defaults are the former TypeScript oracle's (its
+// config.ts plus the thresholds read in safe-value.ts and spending-oracle.ts),
+// so its .env files work unchanged. As in the TS, an empty value counts as
+// unset. Unlike the TS, malformed values are rejected at startup instead of
+// becoming NaN.
 package config
 
 import (

@@ -1,7 +1,7 @@
 package spending
 
-// Port of oracle/src/spending-oracle-edge.test.ts (26 cases). Subtest names
-// are the TS describe/it names.
+// Port of the TS oracle's spending-oracle-edge.test.ts (26 cases). Subtest
+// names are the TS describe/it names.
 
 import (
 	"math/big"

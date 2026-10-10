@@ -1,6 +1,6 @@
-// Package safevalue is the Go port of the TS Safe value oracle
-// (oracle/src/safe-value.ts): it values each module's Safe in USD and writes
-// the value on-chain when it moved or went stale.
+// Package safevalue is the Go port of the TS Safe value oracle (its
+// safe-value.ts): it values each module's Safe in USD and writes the value
+// on-chain when it moved or went stale.
 package safevalue
 
 import (
