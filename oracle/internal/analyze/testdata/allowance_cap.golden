@@ -1,0 +1,40 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  60000 of 500000
+
+2. CALL
+  Function:                    batchUpdate(address,uint256,uint256,address[],uint256[],uint256[])
+    subAccount:                0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+    expectedAllowanceVersion:  55
+    newAllowance:              40000000000000000000 (40 USD)
+    tokens:                    []
+    expectedTokenVersions:     []
+    balances:                  []
+
+3. REPLAY
+  debug_traceTransaction:  reverted: ExceedsAllowanceCap
+
+4. ERROR
+  Error:        ExceedsAllowanceCap
+    requested:  40 USD
+    maximum:    25 USD
+  Meaning:      The oracle tried to set an allowance above the subaccount's maximum (maxSpendingBps of the Safe value, or maxSpendingUSD).
+  Solution:     The Safe value or the limits the oracle used are out of date: update the Safe value, or check the subaccount's limits.
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Authorized oracle:   0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E (the sender)
+  Safe value:          500 USD
+  Safe value updated:  2025-10-09T23:34:35Z (1m30s before the block)
+  Max Safe value age:  1h0m0s
+  Subaccount limits:   25 USD per 24h0m0s
+
+══════════════════════════════════════════════════════════════════════

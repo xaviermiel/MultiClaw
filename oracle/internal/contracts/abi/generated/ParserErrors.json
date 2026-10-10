@@ -1,0 +1,22 @@
+[
+  {
+    "type": "error",
+    "name": "InvalidCalldata",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidPath",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedSelector",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedV4ExactOutMultiHop",
+    "inputs": []
+  }
+]

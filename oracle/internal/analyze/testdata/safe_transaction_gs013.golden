@@ -1,0 +1,27 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x2222222222222222222222222222222222222222
+  To:        0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  70000 of 500000
+
+2. CALL
+  Unknown function, selector 0x6a761202 (68 bytes of input).
+
+3. REPLAY
+  debug_traceTransaction:  reverted: "GS013"
+
+4. ERROR
+  Error:             "GS013"
+  Meaning:           The call of the Safe transaction failed (with safeTxGas and gasPrice 0, the Safe then reverts).
+  Solution:          See the underlying error: why the called contract rejected the call.
+  Underlying error:  InvalidLimitConfiguration in 0xbB2470CB800358Fa38a4849C20453563a1e34c00
+    meaning:         A limit is out of bounds: maxSpendingBps above 10000 or a window under 1 hour (setSubAccountLimits), maxOracleAge or maxSafeValueAge under 10 minutes, or maxPriceFeedAge under 1 hour.
+    solution:        Use values within those bounds.
+
+══════════════════════════════════════════════════════════════════════

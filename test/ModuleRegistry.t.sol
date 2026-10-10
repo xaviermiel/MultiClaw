@@ -19,6 +19,7 @@ contract ModuleRegistryTest is Test {
     address public safe1;
     address public safe2;
     address public oracle;
+    address public deployer;
 
     event ModuleRegistered(address indexed module, address indexed safe, address indexed oracle);
     event ModuleDeactivated(address indexed module);
@@ -26,6 +27,10 @@ contract ModuleRegistryTest is Test {
     event ModuleRemoved(address indexed module);
     event FactoryAuthorized(address indexed factory);
     event FactoryDeauthorized(address indexed factory);
+    event OracleManagerSet(address indexed oracle, address indexed manager);
+    event OracleRestrictionSet(address indexed oracle, bool restricted);
+    event OracleDeployerTrustSet(address indexed oracle, address indexed deployer, bool trusted);
+    event OracleModuleApprovalSet(address indexed oracle, address indexed module, bool approved);
 
     function setUp() public {
         owner = address(this);
@@ -35,6 +40,7 @@ contract ModuleRegistryTest is Test {
         safe1 = makeAddr("safe1");
         safe2 = makeAddr("safe2");
         oracle = makeAddr("oracle");
+        deployer = makeAddr("deployer");
 
         registry = new ModuleRegistry(owner);
     }
@@ -134,15 +140,23 @@ contract ModuleRegistryTest is Test {
         emit ModuleRegistered(module1, safe1, oracle);
 
         vm.prank(factory);
-        registry.registerModuleFromFactory(module1, safe1, oracle);
+        registry.registerModuleFromFactory(module1, safe1, oracle, deployer);
 
         assertTrue(registry.isRegistered(module1));
+        assertEq(registry.moduleDeployer(module1), deployer);
+        assertEq(registry.getDeployerModules(deployer).length, 1);
+        assertEq(registry.getDeployerModules(deployer)[0], module1);
     }
 
     function testRegisterModuleFromFactoryRevertsIfUnauthorized() public {
         vm.prank(factory);
         vm.expectRevert(ModuleRegistry.OnlyAuthorizedFactory.selector);
-        registry.registerModuleFromFactory(module1, safe1, oracle);
+        registry.registerModuleFromFactory(module1, safe1, oracle, deployer);
+    }
+
+    function testRegisterModuleRecordsNoDeployer() public {
+        registry.registerModule(module1, safe1, oracle);
+        assertEq(registry.moduleDeployer(module1), address(0));
     }
 
     // ============ Module Management Tests ============
@@ -367,5 +381,241 @@ contract ModuleRegistryTest is Test {
 
         registry.removeModule(module1);
         assertEq(registry.getTotalModuleCount(), 0); // Removed via swap-and-pop
+    }
+
+    // ============ Oracle Access Policy Tests ============
+
+    function _one(address a) internal pure returns (address[] memory list) {
+        list = new address[](1);
+        list[0] = a;
+    }
+
+    function _two(address a, address b) internal pure returns (address[] memory list) {
+        list = new address[](2);
+        list[0] = a;
+        list[1] = b;
+    }
+
+    /// @dev module1 is deployed by `deployer`, module2 by a stranger (both through the factory),
+    ///      module3 is registered by the owner (no deployer)
+    function _registerPolicyModules() internal returns (address module3) {
+        module3 = makeAddr("module3");
+        registry.authorizeFactory(factory);
+        vm.startPrank(factory);
+        registry.registerModuleFromFactory(module1, safe1, oracle, deployer);
+        registry.registerModuleFromFactory(module2, safe2, oracle, makeAddr("stranger"));
+        vm.stopPrank();
+        registry.registerModule(module3, makeAddr("safe3"), oracle);
+    }
+
+    function _restrict(address oracle_) internal {
+        vm.prank(oracle_);
+        registry.setOracleRestricted(oracle_, true);
+    }
+
+    function testOraclesAreOpenByDefault() public {
+        address module3 = _registerPolicyModules();
+
+        assertFalse(registry.oracleRestricted(oracle));
+        assertTrue(registry.isServedBy(module1, oracle));
+        assertTrue(registry.isServedBy(module2, oracle));
+        assertTrue(registry.isServedBy(module3, oracle));
+        assertEq(registry.getModulesServedBy(oracle), registry.getActiveModules());
+        // Not registered: not served
+        assertFalse(registry.isServedBy(makeAddr("unknown"), oracle));
+    }
+
+    function testRestrictedOracleServesApprovedModulesAndTrustedDeployers() public {
+        address module3 = _registerPolicyModules();
+        _restrict(oracle);
+        vm.prank(oracle);
+        registry.setTrustedDeployers(oracle, _one(deployer), true);
+
+        assertTrue(registry.isServedBy(module1, oracle));
+        assertFalse(registry.isServedBy(module2, oracle)); // a stranger's
+        assertFalse(registry.isServedBy(module3, oracle)); // no deployer
+        assertEq(registry.getModulesServedBy(oracle), _one(module1));
+
+        // An approved module is served whoever deployed it; approved ones are listed first
+        vm.prank(oracle);
+        registry.setApprovedModules(oracle, _one(module3), true);
+        assertTrue(registry.isServedBy(module3, oracle));
+        assertEq(registry.getModulesServedBy(oracle), _two(module3, module1));
+
+        // A trusted deployer's new module is served without another transaction
+        address module4 = makeAddr("module4");
+        vm.prank(factory);
+        registry.registerModuleFromFactory(module4, makeAddr("safe4"), oracle, deployer);
+        assertTrue(registry.isServedBy(module4, oracle));
+        address[] memory served = registry.getModulesServedBy(oracle);
+        assertEq(served.length, 3);
+        assertEq(served[2], module4);
+
+        // Other oracles keep their own (default) policy
+        address otherOracle = makeAddr("otherOracle");
+        assertTrue(registry.isServedBy(module2, otherOracle));
+        assertEq(registry.getModulesServedBy(otherOracle), registry.getActiveModules());
+    }
+
+    function testServedModulesAreListedOnce() public {
+        _registerPolicyModules();
+        _restrict(oracle);
+        vm.startPrank(oracle);
+        registry.setTrustedDeployers(oracle, _one(deployer), true);
+        registry.setApprovedModules(oracle, _one(module1), true); // also deployed by `deployer`
+        vm.stopPrank();
+        assertEq(registry.getModulesServedBy(oracle), _one(module1));
+    }
+
+    function testInactiveAndRemovedModulesAreNotServed() public {
+        address module3 = _registerPolicyModules();
+
+        // Open
+        registry.deactivateModule(module2);
+        assertFalse(registry.isServedBy(module2, oracle));
+
+        // Restricted
+        _restrict(oracle);
+        vm.startPrank(oracle);
+        registry.setTrustedDeployers(oracle, _one(deployer), true);
+        registry.setApprovedModules(oracle, _two(module2, module3), true);
+        vm.stopPrank();
+        assertEq(registry.getModulesServedBy(oracle), _two(module3, module1));
+
+        registry.deactivateModule(module1);
+        assertFalse(registry.isServedBy(module1, oracle));
+        assertEq(registry.getModulesServedBy(oracle), _one(module3));
+        registry.reactivateModule(module1);
+        assertTrue(registry.isServedBy(module1, oracle));
+
+        // A removed module loses its deployer: registered again by the owner, it is not served
+        // through that deployer any more
+        registry.removeModule(module1);
+        registry.removeModule(module3);
+        assertFalse(registry.isServedBy(module1, oracle));
+        assertEq(registry.getModulesServedBy(oracle).length, 0);
+        registry.registerModule(module1, safe1, oracle);
+        assertEq(registry.moduleDeployer(module1), address(0));
+        assertFalse(registry.isServedBy(module1, oracle));
+        assertEq(registry.getModulesServedBy(oracle).length, 0);
+    }
+
+    function testModulesCanBeApprovedBeforeTheyAreRegistered() public {
+        _restrict(oracle);
+        vm.prank(oracle);
+        registry.setApprovedModules(oracle, _one(module1), true);
+        assertFalse(registry.isServedBy(module1, oracle));
+        assertEq(registry.getModulesServedBy(oracle).length, 0);
+
+        registry.registerModule(module1, safe1, oracle);
+        assertTrue(registry.isServedBy(module1, oracle));
+        assertEq(registry.getModulesServedBy(oracle), _one(module1));
+    }
+
+    function testTrustAndApprovalCanBeWithdrawn() public {
+        address module3 = _registerPolicyModules();
+        _restrict(oracle);
+        vm.startPrank(oracle);
+        registry.setTrustedDeployers(oracle, _one(deployer), true);
+        registry.setApprovedModules(oracle, _one(module3), true);
+        assertEq(registry.getTrustedDeployers(oracle), _one(deployer));
+        assertEq(registry.getApprovedModules(oracle), _one(module3));
+        assertTrue(registry.isTrustedDeployer(oracle, deployer));
+        assertTrue(registry.isApprovedModule(oracle, module3));
+        assertFalse(registry.isTrustedDeployer(makeAddr("otherOracle"), deployer));
+
+        registry.setTrustedDeployers(oracle, _one(deployer), false);
+        registry.setApprovedModules(oracle, _one(module3), false);
+        vm.stopPrank();
+        assertFalse(registry.isServedBy(module1, oracle));
+        assertFalse(registry.isServedBy(module3, oracle));
+        assertEq(registry.getTrustedDeployers(oracle).length, 0);
+        assertEq(registry.getApprovedModules(oracle).length, 0);
+        assertFalse(registry.isTrustedDeployer(oracle, deployer));
+        assertFalse(registry.isApprovedModule(oracle, module3));
+        assertEq(registry.getModulesServedBy(oracle).length, 0);
+
+        // Opening the oracle again serves every active module
+        vm.prank(oracle);
+        registry.setOracleRestricted(oracle, false);
+        assertEq(registry.getModulesServedBy(oracle), registry.getActiveModules());
+    }
+
+    function testOnlyTheOracleOrItsManagerSetsItsPolicy() public {
+        address manager = makeAddr("manager");
+        address stranger = makeAddr("stranger");
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ModuleRegistry.NotOracleManager.selector, oracle, stranger));
+        registry.setOracleRestricted(oracle, true);
+        // Not even the registry owner
+        vm.expectRevert(abi.encodeWithSelector(ModuleRegistry.NotOracleManager.selector, oracle, owner));
+        registry.setOracleRestricted(oracle, true);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ModuleRegistry.NotOracleManager.selector, oracle, stranger));
+        registry.setTrustedDeployers(oracle, _one(stranger), true);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ModuleRegistry.NotOracleManager.selector, oracle, stranger));
+        registry.setApprovedModules(oracle, _one(module1), true);
+        // Nobody has a policy for address(0), the oracle of oracleless modules
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ModuleRegistry.NotOracleManager.selector, address(0), stranger));
+        registry.setOracleRestricted(address(0), true);
+
+        // The oracle designates a manager, which sets the policy
+        vm.expectEmit(true, true, false, false);
+        emit OracleManagerSet(oracle, manager);
+        vm.prank(oracle);
+        registry.setOracleManager(manager);
+        assertEq(registry.oracleManager(oracle), manager);
+        vm.startPrank(manager);
+        registry.setOracleRestricted(oracle, true);
+        registry.setTrustedDeployers(oracle, _one(deployer), true);
+        registry.setApprovedModules(oracle, _one(module1), true);
+        vm.stopPrank();
+        assertTrue(registry.oracleRestricted(oracle));
+
+        // The oracle still can
+        vm.prank(oracle);
+        registry.setOracleRestricted(oracle, false);
+        assertFalse(registry.oracleRestricted(oracle));
+
+        // A manager manages only its oracle's policy
+        address otherOracle = makeAddr("otherOracle");
+        vm.prank(manager);
+        vm.expectRevert(abi.encodeWithSelector(ModuleRegistry.NotOracleManager.selector, otherOracle, manager));
+        registry.setOracleRestricted(otherOracle, true);
+
+        // A removed manager can't any more
+        vm.prank(oracle);
+        registry.setOracleManager(address(0));
+        vm.prank(manager);
+        vm.expectRevert(abi.encodeWithSelector(ModuleRegistry.NotOracleManager.selector, oracle, manager));
+        registry.setOracleRestricted(oracle, true);
+    }
+
+    function testPolicyChangesEmitEvents() public {
+        vm.startPrank(oracle);
+        vm.expectEmit(true, false, false, true);
+        emit OracleRestrictionSet(oracle, true);
+        registry.setOracleRestricted(oracle, true);
+
+        vm.expectEmit(true, true, false, true);
+        emit OracleDeployerTrustSet(oracle, deployer, true);
+        registry.setTrustedDeployers(oracle, _one(deployer), true);
+
+        vm.expectEmit(true, true, false, true);
+        emit OracleModuleApprovalSet(oracle, module1, false);
+        registry.setApprovedModules(oracle, _one(module1), false);
+        vm.stopPrank();
+    }
+
+    function testPolicyRejectsZeroAddresses() public {
+        vm.startPrank(oracle);
+        vm.expectRevert(ModuleRegistry.InvalidAddress.selector);
+        registry.setTrustedDeployers(oracle, _two(deployer, address(0)), true);
+        vm.expectRevert(ModuleRegistry.InvalidAddress.selector);
+        registry.setApprovedModules(oracle, _one(address(0)), true);
+        vm.stopPrank();
     }
 }

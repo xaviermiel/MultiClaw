@@ -1,9 +1,3 @@
-# Dependencies
-node_modules/
-
-# Coverage reports
-coverage/
-
 # Environment variables
 .env
 
@@ -11,5 +5,5 @@ coverage/
 logs.txt
 *.log
 
-# Build outputs
-dist/
+# Build output
+bin/

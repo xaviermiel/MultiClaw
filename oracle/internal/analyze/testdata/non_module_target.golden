@@ -1,0 +1,28 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  30000 of 500000
+
+2. CALL
+  Function:     transferOwnership(address)
+    _newOwner:  0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+
+3. REPLAY
+  debug_traceTransaction:  reverted: Unauthorized
+
+4. ERROR
+  Error:     Unauthorized
+  Meaning:   An error with the name of one of the module's (or its parsers') errors. The analyzer explains these only in the module calls it decodes: in another contract the same name can mean something else.
+  Solution:  See the source of the contract that raised it.
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  The target does not answer as a DeFiInteractorModule: avatar on 0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b: unpack: abi: attempting to unmarshal an empty string while arguments are expected
+
+══════════════════════════════════════════════════════════════════════

@@ -1,0 +1,32 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  500000 of 500000 (all of it)
+
+2. CALL
+  Function:     transferToken(address,address,uint256)
+    token:      USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+    recipient:  0x1111111111111111111111111111111111111111
+    amount:     10 USDC
+
+3. REPLAY
+  debug_traceTransaction:  reverted: out of gas
+
+4. ERROR
+  Error:     out of gas
+  Meaning:   The transaction ran out of gas.
+  Solution:  Send it again with a higher gas limit (GAS_LIMIT for oracle transactions).
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Spending allowance:  20 USD
+  Last oracle update:  2025-10-09T23:26:05Z (10m0s before the block)
+
+══════════════════════════════════════════════════════════════════════

@@ -1,0 +1,39 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  40000 of 500000
+
+2. CALL
+  Function:  executeOnProtocolWithValue(address,bytes,uint256)
+    target:  USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+    data:    0x095ea7b3… (68 bytes)
+    value:   1000000000000000000 (1 ETH)
+  The call the Safe makes:
+    Target:     USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+    Value:      none: the module sends no ETH with approve calls (the 1 ETH passed is ignored)
+    Function:   approve(address,uint256)
+      spender:  0x1111111111111111111111111111111111111111
+      amount:   500 USDC
+
+3. REPLAY
+  debug_traceTransaction:  reverted: SpenderNotAllowed
+
+4. ERROR
+  Error:     SpenderNotAllowed
+  Meaning:   The spender of the approve is not whitelisted for this subaccount.
+  Solution:  Whitelist the spender with setAllowedAddresses before approving it.
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:                 0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Spending allowance:   20 USD
+  Last oracle update:   2025-10-09T23:26:05Z (10m0s before the block)
+  Spender whitelisted:  no
+
+══════════════════════════════════════════════════════════════════════

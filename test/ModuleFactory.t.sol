@@ -158,6 +158,15 @@ contract ModuleFactoryTest is Test {
         assertTrue(info.isActive);
     }
 
+    function testDeployModuleRecordsTheDeployer() public {
+        // Recorded for the oracles' access policies: whoever calls the factory
+        address deployer = makeAddr("deployer");
+        vm.prank(deployer);
+        address module = factory.deployModule(address(safe1), oracle);
+        assertEq(registry.moduleDeployer(module), deployer);
+        assertEq(registry.getDeployerModules(deployer)[0], module);
+    }
+
     function testDeployModuleWithoutAutoRegister() public {
         factory.setAutoRegister(false);
 

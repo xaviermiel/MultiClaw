@@ -1,0 +1,37 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  40310 of 500000
+
+2. CALL
+  Function:  executeOnProtocol(address,bytes)
+    target:  0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4
+    data:    0xdeadbeef… (44 bytes)
+  The call the Safe makes:
+    Target:    0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4
+    Function:  unknown, selector 0xdeadbeef
+    word 0:    0x0000000000000000000000000000000000000000000000000000000000000007
+    word 1:    0x0000000000000000
+
+3. REPLAY
+  debug_traceTransaction:  reverted: UnknownSelector
+
+4. ERROR
+  Error:       UnknownSelector
+    selector:  0xdeadbeef
+  Meaning:     The module has no operation type registered for this function selector.
+  Solution:    Register it with registerSelector(selector, opType), or call a supported function.
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Spending allowance:  20 USD
+  Last oracle update:  2025-10-09T23:26:05Z (10m0s before the block)
+
+══════════════════════════════════════════════════════════════════════

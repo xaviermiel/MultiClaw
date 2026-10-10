@@ -19,7 +19,8 @@ interface IModuleRegistry {
     /// @param module The deployed module address
     /// @param safe The Safe address this module serves
     /// @param oracle The authorized oracle address
-    function registerModuleFromFactory(address module, address safe, address oracle) external;
+    /// @param deployer The account that called the factory (recorded for oracle access policies)
+    function registerModuleFromFactory(address module, address safe, address oracle, address deployer) external;
 
     /// @notice Deactivate a module (soft delete)
     /// @param module The module address to deactivate
@@ -73,4 +74,16 @@ interface IModuleRegistry {
     /// @param module The module address
     /// @return info The module information
     function moduleInfo(address module) external view returns (ModuleInfo memory info);
+
+    /// @notice Whether an oracle's access policy covers a module (registered, active, and the
+    ///         oracle is open, approved it, or trusts its deployer)
+    /// @param module The module address
+    /// @param oracle The oracle address
+    /// @return served Whether the oracle serves the module
+    function isServedBy(address module, address oracle) external view returns (bool served);
+
+    /// @notice The active modules an oracle serves under its access policy
+    /// @param oracle The oracle address
+    /// @return modules The modules, without duplicates
+    function getModulesServedBy(address oracle) external view returns (address[] memory modules);
 }
