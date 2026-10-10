@@ -7,12 +7,14 @@ type help struct {
 }
 
 // errorHelp explains every custom error of the module and its parsers (a
-// test keeps it complete) and the OpenZeppelin token errors.
+// test keeps it complete) and the OpenZeppelin token errors. The module's
+// and the parsers' explanations are only shown for errors raised in a module
+// call (see fitHelp).
 var errorHelp = map[string]help{
 	// Permissions and routing.
 	"Unauthorized": {
-		"The sender lacks the role this call needs: DEFI_EXECUTE_ROLE for protocol operations, DEFI_REPAY_ROLE for repayments, DEFI_TRANSFER_ROLE for transferToken.",
-		"Grant the role to the subaccount (grantRole), or send from a subaccount that has it.",
+		"The sender may not call this function: owner functions need the module's owner, subaccount functions a role (DEFI_EXECUTE_ROLE for protocol operations, DEFI_REPAY_ROLE for repayments, DEFI_TRANSFER_ROLE for transferToken).",
+		"Send it from the owner, or grant the subaccount the role it needs (grantRole).",
 	},
 	"AddressNotAllowed": {
 		"The protocol address is not whitelisted for this subaccount.",
@@ -31,7 +33,7 @@ var errorHelp = map[string]help{
 		"Register it with registerSelector(selector, opType), or call a supported function.",
 	},
 	"NoParserRegistered": {
-		"No calldata parser is registered for this protocol, so the module cannot tell what the call spends.",
+		"No calldata parser is registered for this protocol: the module needs one to check the call's recipient and to read the tokens it spends or receives.",
 		"Register one with registerParser(protocol, parser).",
 	},
 	"InvalidRecipient": {
@@ -39,8 +41,8 @@ var errorHelp = map[string]help{
 		"Make the Safe the recipient (or onBehalfOf) of the protocol call.",
 	},
 	"EnforcedPause": {
-		"The module is paused.",
-		"The owner must call unpause().",
+		"The module is paused: protocol operations and transfers are blocked.",
+		"The owner can resume them with unpause().",
 	},
 	"ExpectedPause": {
 		"unpause() was called while the module was not paused.",
@@ -95,7 +97,7 @@ var errorHelp = map[string]help{
 		"See the underlying error: insufficient balance, slippage, an expired deadline...",
 	},
 	"ModuleTransactionFailed": {
-		"The Safe refused to execute the module's transaction.",
+		"Declared by the module's base contract, but current modules never raise it (a Safe that refuses the module's transaction reverts with \"GS104\").",
 		"Check that the module is enabled on the Safe.",
 	},
 
@@ -115,8 +117,8 @@ var errorHelp = map[string]help{
 
 	// Prices.
 	"NoPriceFeedSet": {
-		"The module has no Chainlink price feed for a token the operation spends.",
-		"The owner must set one with setTokenPriceFeed(token, feed).",
+		"The module has no Chainlink price feed for a token it must value: one the operation spends, or one whose acquired balance the oracle raises (batchUpdate).",
+		"The owner must set one with setTokenPriceFeed(token, feed) (for ETH: setTokenPriceFeeds with the zero address).",
 	},
 	"InvalidPrice": {
 		"The token's Chainlink feed returned a price of 0 or less.",
@@ -220,6 +222,10 @@ var reasonHelp = map[string]help{
 		"The spender's allowance is below the amount it tried to take.",
 		"Approve the protocol for at least this amount first.",
 	},
+	"ERC20: transfer amount exceeds allowance": { // USDC
+		"The spender's allowance is below the amount it tried to take.",
+		"Approve the protocol for at least this amount first.",
+	},
 	"ERC20: transfer amount exceeds balance": {
 		"The sender holds fewer tokens than the transfer needs.",
 		"Check the sender's balance of the token (the Safe's, for a call the module makes).",
@@ -240,6 +246,15 @@ var reasonHelp = map[string]help{
 	"Transaction too old": {
 		"The swap's deadline had passed when it was mined.",
 		"Use a later deadline.",
+	},
+	// Safe.
+	"GS104": {
+		"The Safe refused the module's transaction: the module is not enabled on it.",
+		"Enable the module on the Safe (enableModule, as a Safe transaction).",
+	},
+	"GS013": {
+		"The call of the Safe transaction failed (with safeTxGas and gasPrice 0, the Safe then reverts).",
+		"See the underlying error: why the called contract rejected the call.",
 	},
 }
 
@@ -269,5 +284,51 @@ var (
 	unknownHelp = help{
 		"The error is not one the analyzer knows.",
 		"Look up the selector (e.g. on a 4byte directory) or in the reverting contract's source.",
+	}
+	shortDataHelp = help{
+		"The revert data is shorter than an error selector: the contract reverted with raw bytes.",
+		"See the source of the contract that reverted.",
+	}
+	noDataHelp = help{
+		"The call reverted without saying why: a require or revert without a reason, a function the contract does not have, or ETH sent to a contract that does not accept it.",
+		"Check the function and its arguments against the contract that reverted.",
+	}
+	evmHelp = help{
+		"The EVM stopped the call: the contract did not revert.",
+		"An invalid opcode is usually an assert of an old contract or an opcode the chain does not support; see the trace for the call that failed.",
+	}
+	insufficientETHHelp = help{
+		"The call sends more ETH than its sender holds (for a call the module makes, the Safe).",
+		"Fund the Safe with ETH, or send less.",
+	}
+	// foreignErrorHelp is for an error named like one of the module's or
+	// its parsers', raised elsewhere.
+	foreignErrorHelp = help{
+		"An error with the name of one of the module's (or its parsers') errors. The analyzer explains these only in the module calls it decodes: in another contract the same name can mean something else.",
+		"See the source of the contract that raised it.",
+	}
+	roleHelp = help{
+		"The sender lacks the role this call needs: DEFI_EXECUTE_ROLE for protocol operations, DEFI_REPAY_ROLE for repayments (DEFI_EXECUTE_ROLE does not cover them), DEFI_TRANSFER_ROLE for transferToken.",
+		"Have the owner grant the role to the subaccount (grantRole), or send from a subaccount that has it.",
+	}
+	ownerHelp = help{
+		"Only the module's owner may call this function, and the sender is not the owner.",
+		"Send it from the owner (below): for a module whose owner is its Safe, as a Safe transaction.",
+	}
+	alreadyPausedHelp = help{
+		"pause() was called while the module was already paused.",
+		"Nothing to do: the module is paused. unpause() resumes it.",
+	}
+	plainETHHelp = help{
+		"The transaction sent ETH without calling a function, and the target refused it: a contract without a receive or fallback function, such as a DeFiInteractorModule.",
+		"To fund a module's Safe, send the ETH to the Safe itself.",
+	}
+	ethRefusedHelp = help{
+		"The recipient refused the ETH: a contract without a receive or fallback function that accepts it.",
+		"Send the ETH to an address that accepts it.",
+	}
+	legacyFunctionHelp = help{
+		"Current modules do not have this function of older modules, and revert without data when it is called.",
+		"Use the current function: executeOnProtocolWithValue(target, data, value), setSubAccountLimits(subAccount, maxSpendingBps, maxSpendingUSD, windowDuration).",
 	}
 )

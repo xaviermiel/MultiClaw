@@ -1,0 +1,28 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  45000 of 500000
+
+2. CALL
+  Target:        0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b
+  Function:      supply(address,uint256,address,uint16)
+    asset:       USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+    amount:      100 USDC
+    onBehalfOf:  0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+
+3. REPLAY
+  debug_traceTransaction:  reverted: UnsupportedSelector
+
+4. ERROR
+  Error:     UnsupportedSelector
+  Meaning:   An error with the name of one of the module's (or its parsers') errors. The analyzer explains these only in the module calls it decodes: in another contract the same name can mean something else.
+  Solution:  See the source of the contract that raised it.
+
+══════════════════════════════════════════════════════════════════════

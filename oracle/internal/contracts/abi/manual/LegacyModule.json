@@ -1,3 +1,5 @@
 [
-  { "type": "function", "name": "absoluteMaxSpendingBps", "stateMutability": "view", "inputs": [], "outputs": [{ "name": "", "type": "uint256" }] }
+  { "type": "function", "name": "absoluteMaxSpendingBps", "stateMutability": "view", "inputs": [], "outputs": [{ "name": "", "type": "uint256" }] },
+  { "type": "function", "name": "executeOnProtocolWithValue", "stateMutability": "payable", "inputs": [{ "name": "target", "type": "address" }, { "name": "data", "type": "bytes" }], "outputs": [{ "name": "", "type": "bytes" }] },
+  { "type": "function", "name": "setSubAccountLimits", "stateMutability": "nonpayable", "inputs": [{ "name": "subAccount", "type": "address" }, { "name": "maxSpendingBps", "type": "uint256" }, { "name": "windowDuration", "type": "uint256" }], "outputs": [] }
 ]

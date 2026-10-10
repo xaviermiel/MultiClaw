@@ -4,34 +4,25 @@
 
 1. TRANSACTION
   From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
-  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  To:        mvUSDC (0x5555555555555555555555555555555555555555)
   Value:     0 ETH
   Block:     47910262 (2025-10-09T23:36:05Z)
   Status:    FAILED
-  Gas used:  61204 of 500000
+  Gas used:  52000 of 500000
 
 2. CALL
-  Function:  executeOnProtocol(address,bytes)
-    target:  USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
-    data:    0x095ea7b3… (68 bytes)
-  The call the Safe makes:
-    Target:     USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
-    Function:   approve(address,uint256)
-      spender:  0x1111111111111111111111111111111111111111
-      amount:   500 USDC
+  Unknown function, selector 0x6e553f65 (68 bytes of input).
 
 3. REPLAY
   debug_traceTransaction:      unavailable: the method debug_traceTransaction does not exist/is not available
-  eth_call at block 47910261:  the node returned the call's own input: it lacks the state of that block
-  Tenderly:                    not asked (--no-tenderly)
+  eth_call at block 47910261:  reverted: ERC20InsufficientAllowance
 
 4. ERROR
-  No revert data. Possible causes: the node keeps no history and Tenderly could not help,
-  the transaction ran out of gas, or it depended on state that changed within its block.
-
-5. MODULE STATE AT BLOCK 47910261 (before the transaction)
-  Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
-  Spending allowance:  20 USD
-  Last oracle update:  2025-10-09T23:26:05Z (10m0s before the block)
+  Error:        ERC20InsufficientAllowance
+    spender:    0x5555555555555555555555555555555555555555
+    allowance:  0 (in the smallest unit of the token that raised it)
+    needed:     100000000 (in the smallest unit of the token that raised it)
+  Meaning:      The spender's allowance is below the amount it tried to take.
+  Solution:     Approve the protocol for at least this amount first.
 
 ══════════════════════════════════════════════════════════════════════

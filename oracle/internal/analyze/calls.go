@@ -18,7 +18,10 @@ import (
 // amounts with their decimals.
 func (a *Analyzer) innerFields(ctx context.Context, an *analysis, c *innerCall) []field {
 	fields := []field{{"Target", a.label(ctx, c.target)}}
-	if c.value != nil && c.value.Sign() > 0 {
+	switch {
+	case c.ignoredValue != nil:
+		fields = append(fields, field{"Value", fmt.Sprintf("none: the module sends no ETH with %s calls (the %s ETH passed is ignored)", c.method.RawName, bn.FormatUnits(c.ignoredValue, 18))})
+	case c.value != nil && c.value.Sign() > 0:
 		fields = append(fields, field{"Value", bn.FormatUnits(c.value, 18) + " ETH"})
 	}
 	if len(c.data) == 0 {
@@ -97,16 +100,20 @@ func (a *Analyzer) innerFields(ctx context.Context, an *analysis, c *innerCall) 
 		if d := tuple[*big.Int](p, "deadline"); d != nil {
 			arg("deadline", an.deadline(d))
 		}
-		first, last := common.Address{}, common.Address{}
-		if ok {
-			first, last = tokens[0], tokens[len(tokens)-1]
+		// The amounts of the path's first and last tokens (unknown when the
+		// path is malformed).
+		amount := func(end int, v *big.Int) string {
+			if !ok {
+				return v.String()
+			}
+			return a.amount(ctx, tokens[end*(len(tokens)-1)], v)
 		}
 		if c.method.RawName == "exactInput" {
-			arg("amountIn", a.amount(ctx, first, tuple[*big.Int](p, "amountIn")))
-			arg("amountOutMinimum", a.amount(ctx, last, tuple[*big.Int](p, "amountOutMinimum")))
+			arg("amountIn", amount(0, tuple[*big.Int](p, "amountIn")))
+			arg("amountOutMinimum", amount(1, tuple[*big.Int](p, "amountOutMinimum")))
 		} else {
-			arg("amountOut", a.amount(ctx, last, tuple[*big.Int](p, "amountOut")))
-			arg("amountInMaximum", a.amount(ctx, first, tuple[*big.Int](p, "amountInMaximum")))
+			arg("amountOut", amount(1, tuple[*big.Int](p, "amountOut")))
+			arg("amountInMaximum", amount(0, tuple[*big.Int](p, "amountInMaximum")))
 		}
 	}
 	return fields
@@ -131,13 +138,13 @@ func (a *Analyzer) route(ctx context.Context, tokens []common.Address, fees []*b
 // deadline shows a swap deadline, and whether it had passed when the
 // transaction was mined.
 func (an *analysis) deadline(d *big.Int) string {
-	if !d.IsInt64() {
+	if !d.IsInt64() || d.Int64() > maxTime {
 		return d.String()
 	}
 	t := time.Unix(d.Int64(), 0).UTC()
 	s := t.Format(time.RFC3339)
 	if !an.time.IsZero() && t.Before(an.time) {
-		s += fmt.Sprintf(" (passed %s before the block)", an.time.Sub(t))
+		s += fmt.Sprintf(" (passed %s before the block)", duration(an.time.Unix()-d.Int64()))
 	}
 	return s
 }

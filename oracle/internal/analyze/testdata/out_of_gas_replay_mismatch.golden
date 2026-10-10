@@ -1,0 +1,33 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  95521 of 500000
+
+2. CALL
+  Function:     transferToken(address,address,uint256)
+    token:      USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+    recipient:  0x1111111111111111111111111111111111111111
+    amount:     10 USDC
+
+3. REPLAY
+  debug_traceTransaction:      unavailable: the method debug_traceTransaction does not exist/is not available
+  eth_call at block 47910261:  runs out of gas, but the transaction used only 95521 of its 500000: the call does not run as the transaction did
+  Tenderly:                    not asked (--no-tenderly)
+
+4. ERROR
+  No revert data. Possible causes: the node keeps no history and Tenderly could not help,
+  or the failure depended on what changed within the transaction's block.
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Spending allowance:  20 USD
+  Last oracle update:  2025-10-09T23:26:05Z (10m0s before the block)
+
+══════════════════════════════════════════════════════════════════════

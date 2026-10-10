@@ -29,6 +29,11 @@ type fakeRPC struct {
 	balance *big.Int
 	// canned answers the methods it has (with null for a nil value).
 	canned map[string]any
+	// noHistory fails eth_calls at past blocks, like a node without archive
+	// state.
+	noHistory bool
+	// onRequest, when set, sees each request's method first.
+	onRequest func(method string)
 
 	mu      sync.Mutex
 	methods []string
@@ -75,6 +80,9 @@ func (f *fakeRPC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.methods = append(f.methods, req.Method)
 	f.mu.Unlock()
+	if f.onRequest != nil {
+		f.onRequest(req.Method)
+	}
 
 	result, rpcErr := f.answer(r.Context(), req)
 	resp := map[string]any{"jsonrpc": "2.0", "id": req.ID}
@@ -123,6 +131,8 @@ func (f *fakeRPC) answer(ctx context.Context, req rpcRequest) (any, *rpcErrorBod
 		var arg struct {
 			From  common.Address  `json:"from"`
 			To    *common.Address `json:"to"`
+			Gas   hexutil.Uint64  `json:"gas"`
+			Value *hexutil.Big    `json:"value"`
 			Data  hexutil.Bytes   `json:"data"`
 			Input hexutil.Bytes   `json:"input"`
 		}
@@ -142,7 +152,10 @@ func (f *fakeRPC) answer(ctx context.Context, req rpcRequest) (any, *rpcErrorBod
 			}
 			block = new(big.Int).SetUint64(n)
 		}
-		out, err := f.CallContract(ctx, ethereum.CallMsg{From: arg.From, To: arg.To, Data: data}, block)
+		if f.noHistory && block != nil {
+			return nil, &rpcErrorBody{Code: -32000, Message: "missing trie node 6c0c5a2e (path ) state is not available"}
+		}
+		out, err := f.CallContract(ctx, ethereum.CallMsg{From: arg.From, To: arg.To, Gas: uint64(arg.Gas), Value: (*big.Int)(arg.Value), Data: data}, block)
 		if err != nil {
 			var de rpc.DataError
 			if errors.As(err, &de) {

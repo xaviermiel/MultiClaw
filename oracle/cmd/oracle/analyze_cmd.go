@@ -17,7 +17,8 @@ import (
 )
 
 // runAnalyzeTx explains why a transaction failed (port of
-// analyze-failed-tx.ts). It only needs CHAIN and an RPC endpoint.
+// analyze-failed-tx.ts). It only reads CHAIN and the RPC endpoints: other
+// variables, even malformed, don't matter.
 func runAnalyzeTx(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("analyze-tx", stderr)
 	envFile := envFileFlag(fs)
@@ -55,10 +56,7 @@ func runAnalyzeTx(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "Configuration error:", err)
 		return 1
 	}
-	cfg, err := config.FromEnv()
-	if err == nil {
-		err = cfg.Validate(config.ModeAnalyze)
-	}
+	cfg, err := config.EndpointFromEnv()
 	if err != nil {
 		fmt.Fprintln(stderr, "Configuration error:", err)
 		return 1
@@ -66,16 +64,25 @@ func runAnalyzeTx(args []string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	client, err := dial(ctx, cfg, logx.Discard)
-	if err != nil {
-		fmt.Fprintln(stderr, "Startup error:", err)
-		return 1
-	}
-	defer client.Close()
+	return analyzeTx(ctx, cfg, hash, analyze.Options{Tenderly: !*noTenderly}, stdout, stderr)
+}
 
-	a := analyze.New(client, cfg.Chain, analyze.Options{Tenderly: !*noTenderly})
-	if err := a.Analyze(ctx, hash, stdout); err != nil {
-		fmt.Fprintln(stderr, "Analysis failed:", err)
+// analyzeTx writes the report on transaction hash to stdout, or nothing when
+// ctx ends first (an interrupt), which is a failure.
+func analyzeTx(ctx context.Context, cfg *config.Config, hash common.Hash, opts analyze.Options, stdout, stderr io.Writer) int {
+	failed := "Startup error:"
+	client, err := dial(ctx, cfg, logx.Discard)
+	if err == nil {
+		defer client.Close()
+		failed = "Analysis failed:"
+		err = analyze.New(client, cfg.Chain, opts).Analyze(ctx, hash, stdout)
+	}
+	switch {
+	case ctx.Err() != nil:
+		fmt.Fprintln(stderr, "Interrupted: no report")
+		return 1
+	case err != nil:
+		fmt.Fprintln(stderr, failed, err)
 		return 1
 	}
 	return 0

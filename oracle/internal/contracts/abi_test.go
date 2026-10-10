@@ -39,6 +39,9 @@ func TestABIDriftGuardMethods(t *testing.T) {
 		{&RegistryABI, "getActiveModules", "getActiveModules()", "address[]"},
 		{&RegistryABI, "getModulesServedBy", "getModulesServedBy(address)", "address[]"},
 		{&LegacyModuleABI, "absoluteMaxSpendingBps", "absoluteMaxSpendingBps()", "uint256"},
+		// Decoded by analyze-tx: the versions of modules deployed before March 19, 2026.
+		{&LegacyModuleABI, "executeOnProtocolWithValue", "executeOnProtocolWithValue(address,bytes)", "bytes"},
+		{&LegacyModuleABI, "setSubAccountLimits", "setSubAccountLimits(address,uint256,uint256)", ""},
 		{&ERC20ABI, "balanceOf", "balanceOf(address)", "uint256"},
 		{&ERC20ABI, "decimals", "decimals()", "uint8"},
 		{&ERC20ABI, "symbol", "symbol()", "string"},

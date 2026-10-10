@@ -6,8 +6,9 @@
 // registry and parser errors). abi/manual/ holds minimal hand-written ABIs for
 // external contracts (ERC20, Chainlink, ERC4626, Uniswap V2 pairs), for the
 // protocol calls and token errors the transaction analyzer decodes, and for
-// the legacy absoluteMaxSpendingBps() getter that only old module deployments
-// have.
+// the functions only old module deployments have: the absoluteMaxSpendingBps()
+// getter, and the earlier executeOnProtocolWithValue and setSubAccountLimits
+// the analyzer decodes.
 package contracts
 
 import (

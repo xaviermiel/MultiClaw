@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 )
 
 // section is a numbered part of the report.
@@ -13,7 +14,21 @@ type section struct {
 	fields []field
 }
 
-var flatten = strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
+// printable makes text that may come from the chain (token symbols, revert
+// reasons, node errors) safe to print on one line: tabs and line breaks
+// become spaces, other control characters (terminal escapes), text
+// direction overrides and invalid UTF-8 become U+FFFD.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r):
+			return unicode.ReplacementChar
+		}
+		return r
+	}, s)
+}
 
 // render writes the report: a header, then each section with its fields
 // aligned.
@@ -24,7 +39,7 @@ func render(w io.Writer, an *analysis) error {
 	for i, s := range an.sections {
 		fmt.Fprintf(tw, "\n%d. %s\n", i+1, s.title)
 		for _, f := range s.fields {
-			f.value = flatten.Replace(f.value) // values may come from the chain
+			f.key, f.value = printable(f.key), printable(f.value)
 			if f.key == "" {
 				// No tab: does not take part in the alignment.
 				fmt.Fprintf(tw, "  %s\n", f.value)

@@ -1,0 +1,29 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x2222222222222222222222222222222222222222
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  26000 of 500000
+
+2. CALL
+  Function:  pause()
+
+3. REPLAY
+  debug_traceTransaction:  reverted: EnforcedPause
+
+4. ERROR
+  Error:     EnforcedPause
+  Meaning:   pause() was called while the module was already paused.
+  Solution:  Nothing to do: the module is paused. unpause() resumes it.
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:    0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Owner:   0x2222222222222222222222222222222222222222 (the sender)
+  Paused:  yes
+
+══════════════════════════════════════════════════════════════════════

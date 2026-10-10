@@ -125,13 +125,13 @@ bin/oracle analyze-tx 0x<tx hash>                 # reads CHAIN and RPC_URL from
 bin/oracle analyze-tx --no-tenderly 0x<tx hash>
 ```
 
-It explains any failed transaction, and module calls in detail (subaccount operations and oracle updates):
+It explains any failed transaction, and module calls in detail (subaccount operations, oracle updates, owner functions):
 
-- **The call**: the module function with its arguments, and the protocol call it makes the Safe execute (ERC20, Aave V3, Uniswap V3 swaps), with token symbols and amounts.
-- **The error**: replayed with `debug_traceTransaction`, else `eth_call` at the block before (which misses the effect of the transactions before it in its block), else Tenderly's public trace API (which receives the transaction hash; `--no-tenderly` turns it off). Module, parser and token errors are decoded by name, with what they mean and what to do. For `TransactionFailed`, it also finds the protocol's own error.
-- **The module state behind it**, at the block before the transaction (or now, when the node keeps no history): allowance, last oracle update, roles, whitelists, acquired balances, prices, window totals.
+- **The call**: the module function with its arguments, and the protocol call it makes the Safe execute (ERC20, Aave V3, Uniswap V3 swaps), with token symbols and amounts. Calls of modules deployed before March 19, 2026 (the payable `executeOnProtocolWithValue(target, data)`, the 3-argument `setSubAccountLimits`) are decoded too.
+- **The error**: replayed with `debug_traceTransaction`, else `eth_call` at the block before (which misses the effect of the transactions before it in its block), else Tenderly's public trace API (which receives the transaction hash; `--no-tenderly` turns it off). Module, parser and token errors are decoded by name, with what they mean and what to do; the module's and the parsers' explanations are only given for errors a module raised, since another contract's error of the same name can mean something else. For `TransactionFailed` (and `GS013`, a Safe transaction whose call failed), it also finds the error of the call that failed, in the trace or by replaying that call. A token error's amounts use the decimals of the token that raised it when the trace shows which one did.
+- **The module state behind it**, at the block before the transaction (or now, when the node cannot read that block): allowance, last oracle update, roles or owner, whitelists, acquired balances, prices, window totals (for oracleless modules, what is left of the window's cap).
 
-It only needs `CHAIN` and an RPC endpoint; a node with the `debug` API gives the most precise answers.
+It reads only `CHAIN`, `RPC_URL` and `RPC_FALLBACK_URLS` (other variables, even malformed, are ignored); a node with the `debug` API gives the most precise answers. Interrupted, it prints no report and exits with status 1.
 
 ### Deploy with systemd
 
@@ -244,7 +244,7 @@ The values the Go oracle writes on-chain are the TS oracle's, except where the T
 - **Cron expressions** are parsed by robfig/cron, not node-cron: a day of week of 7 (Sunday for node-cron) and 7-field expressions are rejected at startup, `@hourly`-style descriptors are accepted, and when both the day of month and the day of week are set a run happens on either (node-cron: on both). The default schedules are unaffected.
 - **Process**: clean shutdown on SIGINT/SIGTERM; cron runs never overlap, and a schedule that never fires (e.g. February 30) runs only at startup; the first refresh runs before polling starts; a failure or panic in one subaccount or module doesn't stop the others (a poll that can't read a module's events is retried whole, as in the TS); transactions already sent are awaited even when a run fails, except at shutdown.
 - **Access policies**: the oracle serves only the modules its registry access policy covers (all of them unless restricted); the TS served every module naming it.
-- **`analyze-tx`** replaces `src/analyze-failed-tx.ts`: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`.
+- **`analyze-tx`** replaces `src/analyze-failed-tx.ts`: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`. It reads `CHAIN` (the script always used Base Sepolia); prints amounts exactly (the script rounded them, as 1.50K) and unknown errors by selector and length, without their raw data; treats a mined transaction without a receipt as an error (the script reported it as pending); and exits with status 1 when interrupted, with no report.
 - **Dry-run mode** and `ORACLE_ADDRESS` are new. `WINDOW_DURATION_SECONDS` is ignored, with a warning, as the TS ignored it: the window comes from each subaccount's on-chain limits.
 - **The RPC URL** is redacted in the startup banner and in error messages (the TS printed it with its API key in both).
 

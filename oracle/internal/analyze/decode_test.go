@@ -91,7 +91,8 @@ func TestDecodeRevert(t *testing.T) {
 		{"unknown error", []byte{0xde, 0xad, 0xbe, 0xef, 1}, "unknown error 0xdeadbeef (5 bytes)", nil, unknownHelp},
 		{"known selector, malformed arguments", packError(t, m, "InvalidRecipient", other, safe)[:40],
 			"unknown error " + hexutil.Encode(packError(t, m, "InvalidRecipient", other, safe)[:4]) + " (40 bytes)", nil, unknownHelp},
-		{"no data", nil, "reverted without data", nil, unknownHelp},
+		{"short data", []byte{0x12, 0x34}, "unknown error 0x1234", nil, shortDataHelp},
+		{"no data", nil, "reverted without data", nil, noDataHelp},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -229,5 +230,44 @@ func TestWords(t *testing.T) {
 	}
 	if got := words(make([]byte, 4+40)); len(got) != 2 || len(got[1].value) != 2+16 {
 		t.Fatalf("a partial last word: %v", got)
+	}
+}
+
+// Calls of the older modules' functions are decoded too (their views are
+// not: a transaction calling one is not an analysis of a module call).
+func TestDecodeModuleCall(t *testing.T) {
+	target := common.HexToAddress("0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4")
+	current, err := contracts.ModuleABI.Pack("executeOnProtocolWithValue", target, []byte{1}, big.NewInt(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := contracts.LegacyModuleABI.Pack("executeOnProtocolWithValue", target, []byte{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := contracts.LegacyModuleABI.Pack("absoluteMaxSpendingBps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		input  []byte
+		sig    string
+		legacy bool
+	}{
+		{current, "executeOnProtocolWithValue(address,bytes,uint256)", false},
+		{old, "executeOnProtocolWithValue(address,bytes)", true},
+		{view, "", false},
+	} {
+		m, _, legacy, _ := decodeModuleCall(tc.input)
+		sig := ""
+		if m != nil {
+			sig = m.Sig
+		}
+		if sig != tc.sig || legacy != tc.legacy {
+			t.Errorf("%x: %q legacy=%v, want %q legacy=%v", tc.input[:4], sig, legacy, tc.sig, tc.legacy)
+		}
+	}
+	if m, _, _, _ := decodeModuleCall(old); !m.IsPayable() {
+		t.Error("the legacy executeOnProtocolWithValue was payable")
 	}
 }

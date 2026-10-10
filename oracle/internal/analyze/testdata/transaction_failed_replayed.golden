@@ -24,7 +24,7 @@
   Error:             TransactionFailed
   Meaning:           The protocol call the Safe made reverted.
   Solution:          See the underlying error: insufficient balance, slippage, an expired deadline...
-  Underlying error:  "ERC20: transfer amount exceeds balance" in USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+  Underlying error:  "ERC20: transfer amount exceeds balance", from the call to USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
     meaning:         The sender holds fewer tokens than the transfer needs.
     solution:        Check the sender's balance of the token (the Safe's, for a call the module makes).
 

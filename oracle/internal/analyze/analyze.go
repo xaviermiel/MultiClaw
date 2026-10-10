@@ -94,21 +94,29 @@ type analysis struct {
 	hash    common.Hash
 	tx      rpcTx
 	value   *big.Int
-	block   uint64 // 0 while pending
+	pending bool
+	block   uint64
 	time    time.Time
 	failed  bool
 	gasUsed uint64
 
-	// method and args decode the input as a module function call.
+	// method and args decode the input as a module function call, of an
+	// older module when legacy is set.
 	method *abi.Method
 	args   []any
+	legacy bool
 	// inner is the call the module has the Safe make (executeOnProtocol,
 	// transferToken).
 	inner *innerCall
+	// module is the target, when the transaction calls a module function.
+	module moduleTarget
 
-	revert     *revertInfo
+	revert *revertInfo
+	// revertAt is the contract that raised revert, when a trace shows it.
+	revertAt   common.Address
 	underlying *revertInfo
-	// underlyingAt is the contract that raised underlying.
+	// underlyingAt is the contract that raised underlying, when a trace
+	// shows it.
 	underlyingAt common.Address
 	// underlyingNote explains a missing underlying error.
 	underlyingNote string
@@ -116,8 +124,9 @@ type analysis struct {
 	sections []section
 }
 
-// Analyze explains transaction hash and writes the report to w. It fails only
-// when the transaction cannot be read.
+// Analyze explains transaction hash and writes the report to w. It fails
+// when the transaction cannot be read, or when ctx ends first (with no
+// report).
 func (a *Analyzer) Analyze(ctx context.Context, hash common.Hash, w io.Writer) error {
 	an := &analysis{hash: hash}
 	var tx *rpcTx
@@ -137,7 +146,7 @@ func (a *Analyzer) Analyze(ctx context.Context, hash common.Hash, w io.Writer) e
 	a.call(ctx, an)
 
 	switch {
-	case an.block == 0:
+	case an.pending:
 		an.add("RESULT", field{"", "The transaction is still pending."})
 	case !an.failed:
 		an.add("RESULT", field{"", "The transaction succeeded: there is no error to analyze."})
@@ -145,8 +154,14 @@ func (a *Analyzer) Analyze(ctx context.Context, hash common.Hash, w io.Writer) e
 		a.nonPayable(an)
 	default:
 		a.replay(ctx, an)
+		if an.method != nil {
+			a.locate(ctx, an)
+		}
 		a.explain(ctx, an)
 		a.state(ctx, an)
+	}
+	if err := ctx.Err(); err != nil {
+		return err // reads failed for it: the report would be wrong
 	}
 	return render(w, an)
 }
@@ -164,6 +179,7 @@ func (a *Analyzer) transaction(ctx context.Context, an *analysis) error {
 		{"Value", bn.FormatUnits(an.value, 18) + " ETH"},
 	}
 	if tx.BlockNumber == nil {
+		an.pending = true
 		an.add("TRANSACTION", append(fields, field{"Status", "pending"})...)
 		return nil
 	}
@@ -197,11 +213,15 @@ func (a *Analyzer) transaction(ctx context.Context, an *analysis) error {
 // Safe execute), else a protocol call made directly.
 func (a *Analyzer) call(ctx context.Context, an *analysis) {
 	input := []byte(an.tx.Input)
+	if an.tx.To == nil {
+		an.add("CALL", field{"", fmt.Sprintf("Contract creation (%d bytes of code).", len(input))})
+		return
+	}
 	if len(input) < 4 {
 		an.add("CALL", field{"", fmt.Sprintf("No function call (%d bytes of input).", len(input))})
 		return
 	}
-	m, args, err := decodeCall(&contracts.ModuleABI, input)
+	m, args, legacy, err := decodeModuleCall(input)
 	if err != nil {
 		if m != nil {
 			an.add("CALL", field{"Function", m.Sig}, field{"", err.Error()})
@@ -216,8 +236,11 @@ func (a *Analyzer) call(ctx context.Context, an *analysis) {
 		an.add("CALL", a.innerFields(ctx, an, c)...)
 		return
 	}
-	an.method, an.args = m, args
+	an.method, an.args, an.legacy = m, args, legacy
 	fields := []field{{"Function", m.Sig}}
+	if legacy {
+		fields[0].value += " (of modules deployed before March 19, 2026)"
+	}
 	for i, in := range m.Inputs {
 		fields = append(fields, field{"  " + in.Name, a.formatArg(ctx, in.Name, args[i])})
 	}
@@ -225,7 +248,15 @@ func (a *Analyzer) call(ctx context.Context, an *analysis) {
 	case "executeOnProtocol":
 		an.inner = newInnerCall(args[0].(common.Address), args[1].([]byte), new(big.Int))
 	case "executeOnProtocolWithValue":
-		an.inner = newInnerCall(args[0].(common.Address), args[1].([]byte), args[2].(*big.Int))
+		value := an.value // the legacy function was payable
+		if !legacy {
+			value = args[2].(*big.Int)
+		}
+		an.inner = newInnerCall(args[0].(common.Address), args[1].([]byte), value)
+		// The module makes approvals and repayments without ETH.
+		if c := an.inner; c.method != nil && (c.method.RawName == "approve" || c.method.RawName == "repay") && value.Sign() > 0 {
+			c.ignoredValue, c.value = value, new(big.Int)
+		}
 	case "transferToken":
 		token, recipient, amount := args[0].(common.Address), args[1].(common.Address), args[2].(*big.Int)
 		fields[len(fields)-1].value = a.amount(ctx, token, amount)
@@ -243,6 +274,18 @@ func (a *Analyzer) call(ctx context.Context, an *analysis) {
 		}
 	}
 	an.add("CALL", fields...)
+}
+
+// decodeModuleCall decodes input as a call of a module function: of the
+// current ABI, else of an older module's (legacy).
+func decodeModuleCall(input []byte) (m *abi.Method, args []any, legacy bool, err error) {
+	m, args, err = decodeCall(&contracts.ModuleABI, input)
+	if m == nil {
+		if lm, largs, lerr := decodeCall(&contracts.LegacyModuleABI, input); lm != nil && !lm.IsConstant() {
+			return lm, largs, true, lerr
+		}
+	}
+	return m, args, false, err
 }
 
 // nonPayable reports ETH sent to a module function: none of them is payable,
@@ -276,7 +319,8 @@ func (an *analysis) to() *common.Address {
 	return an.tx.To
 }
 
-// before is the block before the transaction's.
+// before is the block before the transaction's (block 0 for one of the
+// genesis block).
 func (an *analysis) before() *big.Int {
-	return new(big.Int).SetUint64(an.block - 1)
+	return new(big.Int).SetUint64(max(an.block, 1) - 1)
 }

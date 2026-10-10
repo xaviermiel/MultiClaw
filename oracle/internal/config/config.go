@@ -93,8 +93,6 @@ const (
 	ModeInspect Mode = iota
 	// ModeService is for the long-running oracles (run, safe-value, spending).
 	ModeService
-	// ModeAnalyze only needs an RPC endpoint (analyze-tx).
-	ModeAnalyze
 )
 
 // LoadEnvFile loads the variables of the env file at path, parsed as dotenv
@@ -124,12 +122,28 @@ func LoadEnvFile(path string, required bool) error {
 // FromEnv resolves the configuration from the process environment.
 func FromEnv() (*Config, error) { return Load(os.Getenv) }
 
-// Load resolves the configuration using getenv.
-func Load(getenv func(string) string) (*Config, error) {
-	env := func(key string) string { return strings.TrimSpace(getenv(key)) }
-	var errs []error
-	fail := func(err error) { errs = append(errs, err) }
+// EndpointFromEnv resolves only the chain and its RPC endpoints (CHAIN,
+// RPC_URL, RPC_FALLBACK_URLS) from the process environment, for commands
+// that need nothing else.
+func EndpointFromEnv() (*Config, error) { return LoadEndpoint(os.Getenv) }
 
+// LoadEndpoint resolves the chain and its RPC endpoints using getenv,
+// ignoring every other variable.
+func LoadEndpoint(getenv func(string) string) (*Config, error) {
+	var errs []error
+	c, err := loadEndpoint(func(key string) string { return strings.TrimSpace(getenv(key)) }, func(err error) { errs = append(errs, err) })
+	if err != nil {
+		return nil, err
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return c, nil
+}
+
+// loadEndpoint reads CHAIN, RPC_URL and RPC_FALLBACK_URLS. An unknown chain
+// is an error; invalid URLs are reported through fail.
+func loadEndpoint(env func(string) string, fail func(error)) (*Config, error) {
 	c := &Config{}
 	c.ChainName = env("CHAIN")
 	if c.ChainName == "" {
@@ -157,6 +171,20 @@ func Load(getenv func(string) string) (*Config, error) {
 			fail(err)
 		}
 	}
+	return c, nil
+}
+
+// Load resolves the configuration using getenv.
+func Load(getenv func(string) string) (*Config, error) {
+	env := func(key string) string { return strings.TrimSpace(getenv(key)) }
+	var errs []error
+	fail := func(err error) { errs = append(errs, err) }
+
+	c, err := loadEndpoint(env, fail)
+	if err != nil {
+		return nil, err
+	}
+	chain := c.Chain
 
 	c.PrivateKey = strings.TrimPrefix(strings.TrimPrefix(env("PRIVATE_KEY"), "0x"), "0X")
 	c.OracleAddress = parseOptionalAddress(env, "ORACLE_ADDRESS", fail)
@@ -215,7 +243,7 @@ func Load(getenv func(string) string) (*Config, error) {
 // Validate checks the requirements for mode.
 func (c *Config) Validate(mode Mode) error {
 	switch mode {
-	case ModeInspect, ModeAnalyze:
+	case ModeInspect:
 		return nil
 	case ModeService:
 	default:

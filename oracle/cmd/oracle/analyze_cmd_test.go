@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"math/big"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 
+	"github.com/xaviermiel/MultiClaw/oracle/internal/analyze"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/config"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/contracts"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/contracts/contractstest"
@@ -38,6 +41,22 @@ func TestAnalyzeTxArguments(t *testing.T) {
 	}
 }
 
+// failedTransfer is the node's answers for a transferToken by testSub that
+// failed in block 16.
+func failedTransfer(t *testing.T) map[string]any {
+	t.Helper()
+	input, err := contracts.ModuleABI.Pack("transferToken", testSafe, testSub, big.NewInt(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{
+		"eth_getTransactionByHash": map[string]any{
+			"from": testSub, "to": testModule, "value": "0x0", "gas": "0x7a120", "input": hexutil.Bytes(input), "blockNumber": "0x10",
+		},
+		"eth_getTransactionReceipt": map[string]any{"status": "0x0", "gasUsed": "0xb5b4"},
+	}
+}
+
 // TestAnalyzeTxReport analyzes a transferToken that reverted with
 // StaleOracleData, with the flags after the hash.
 func TestAnalyzeTxReport(t *testing.T) {
@@ -45,19 +64,10 @@ func TestAnalyzeTxReport(t *testing.T) {
 	chain, _ := config.ChainByName("base-sepolia")
 	node := newFakeRPC(t, chain.ID)
 	m := &contracts.ModuleABI
-	input, err := m.Pack("transferToken", testSafe, testSub, big.NewInt(5))
-	if err != nil {
-		t.Fatal(err)
-	}
 	stale := m.Errors["StaleOracleData"].ID
-	node.canned = map[string]any{
-		"eth_getTransactionByHash": map[string]any{
-			"from": testSub, "to": testModule, "value": "0x0", "gas": "0x7a120", "input": hexutil.Bytes(input), "blockNumber": "0x10",
-		},
-		"eth_getTransactionReceipt": map[string]any{"status": "0x0", "gasUsed": "0xb5b4"},
-		"debug_traceTransaction": map[string]any{
-			"type": "CALL", "to": testModule, "error": "execution reverted", "output": hexutil.Bytes(stale[:4]),
-		},
+	node.canned = failedTransfer(t)
+	node.canned["debug_traceTransaction"] = map[string]any{
+		"type": "CALL", "to": testModule, "error": "execution reverted", "output": hexutil.Bytes(stale[:4]),
 	}
 	node.Return(testModule, m, "avatar", testSafe).
 		Return(testModule, m, "getSpendingAllowance", big.NewInt(0)).
@@ -105,5 +115,111 @@ func TestAnalyzeTxFailures(t *testing.T) {
 	if code := dispatch([]string{"analyze-tx", "--env-file", analyzeEnv(t, otherChain), testTxHash}, &out, &errOut); code != 1 ||
 		!strings.Contains(errOut.String(), "serves chain 1, not the configured chain 84532") {
 		t.Errorf("chain mismatch: code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+// analyze-tx reads only CHAIN and the RPC endpoints: other variables, even
+// malformed, don't stop it.
+func TestAnalyzeTxIgnoresOtherVariables(t *testing.T) {
+	clearOracleEnv(t)
+	chain, _ := config.ChainByName("base-sepolia")
+	node := newFakeRPC(t, chain.ID)
+	node.canned = failedTransfer(t)
+	node.canned["debug_traceTransaction"] = map[string]any{"type": "CALL", "to": testModule, "error": "execution reverted"}
+	env := writeEnvFile(t, "CHAIN=base-sepolia\nRPC_URL="+node.URL+"\nGAS_LIMIT=lots\nSAFE_VALUE_CRON=hourly\nMODULE_ADDRESS=0x1234\nDRY_RUN=maybe\n")
+	var out, errOut bytes.Buffer
+	if code := dispatch([]string{"analyze-tx", "--env-file", env, testTxHash}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	wantOutput(t, out.String(), "debug_traceTransaction:  reverted: reverted without data")
+
+	// Its own variables are still checked.
+	clearOracleEnv(t)
+	errOut.Reset()
+	env = writeEnvFile(t, "CHAIN=base-sepolia\nRPC_URL=ftp://node\n")
+	if code := dispatch([]string{"analyze-tx", "--env-file", env, testTxHash}, &out, &errOut); code != 1 ||
+		!strings.Contains(errOut.String(), "Configuration error: invalid RPC URL") {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+// A node without the debug API or archive state, and --no-tenderly: the
+// report says so, asks no one else, and reads the module state now.
+func TestAnalyzeTxWithoutTraceOrHistory(t *testing.T) {
+	clearOracleEnv(t)
+	chain, _ := config.ChainByName("base-sepolia")
+	node := newFakeRPC(t, chain.ID) // answers debug_traceTransaction with "method not found"
+	node.canned = failedTransfer(t)
+	node.noHistory = true
+	node.Return(testModule, &contracts.ModuleABI, "avatar", testSafe)
+
+	var out, errOut bytes.Buffer
+	if code := dispatch([]string{"analyze-tx", "--no-tenderly", "--env-file", analyzeEnv(t, node), testTxHash}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	wantOutput(t, out.String(),
+		"debug_traceTransaction:  unavailable: the method debug_traceTransaction does not exist",
+		"eth_call at block 15:    unavailable: missing trie node",
+		"Tenderly:                not asked (--no-tenderly)",
+		"No revert data.",
+		"MODULE STATE NOW (the block before the transaction could not be read)",
+		"Safe:                "+testSafe.Hex(),
+	)
+}
+
+// An interrupt makes analyze-tx fail without a report: what it read after
+// it would be errors.
+func TestAnalyzeTxInterrupted(t *testing.T) {
+	clearOracleEnv(t)
+	chain, _ := config.ChainByName("base-sepolia")
+	node := newFakeRPC(t, chain.ID)
+	node.canned = failedTransfer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node.onRequest = func(method string) {
+		if method == "debug_traceTransaction" {
+			cancel()
+		}
+	}
+	cfg, err := config.LoadEndpoint(func(key string) string {
+		return map[string]string{"CHAIN": "base-sepolia", "RPC_URL": node.URL}[key]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := analyzeTx(ctx, cfg, common.HexToHash(testTxHash), analyze.Options{}, &out, &errOut); code != 1 ||
+		out.Len() != 0 || errOut.String() != "Interrupted: no report\n" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+// The replay at the block before is the transaction's call: same sender,
+// gas and value (here to the payable function of older modules).
+func TestAnalyzeTxReplaysTheTransaction(t *testing.T) {
+	clearOracleEnv(t)
+	chain, _ := config.ChainByName("base-sepolia")
+	node := newFakeRPC(t, chain.ID)
+	node.canned = failedTransfer(t)
+	input, err := contracts.LegacyModuleABI.Pack("executeOnProtocolWithValue", testSafe, []byte{0xde, 0xad, 0xbe, 0xef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := node.canned["eth_getTransactionByHash"].(map[string]any)
+	tx["value"], tx["input"] = "0x2a", hexutil.Bytes(input)
+	node.canned["debug_traceTransaction"] = map[string]any{"type": "CALL", "to": testModule} // no revert in it
+	node.Revert(testModule, &contracts.LegacyModuleABI, "executeOnProtocolWithValue", nil)
+
+	var out, errOut bytes.Buffer
+	if code := dispatch([]string{"analyze-tx", "--no-tenderly", "--env-file", analyzeEnv(t, node), testTxHash}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	i := slices.IndexFunc(node.Calls(), func(c contractstest.Call) bool { return c.Method == "executeOnProtocolWithValue" })
+	if i < 0 {
+		t.Fatalf("no replay: %v", node.Calls())
+	}
+	c := node.Calls()[i]
+	if c.From != testSub || c.Gas != 0x7a120 || c.Value == nil || c.Value.Int64() != 42 || c.Block == nil || c.Block.Uint64() != 15 {
+		t.Fatalf("replayed from %s with gas %d, value %v, at block %v", c.From.Hex(), c.Gas, c.Value, c.Block)
 	}
 }

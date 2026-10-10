@@ -22,12 +22,12 @@
 
 3. REPLAY
   debug_traceTransaction:      unavailable: the method debug_traceTransaction does not exist/is not available
-  eth_call at block 47910261:  succeeds: the failure depended on the transactions before it in its block
+  eth_call at block 47910261:  succeeds: the failure came from its block (an earlier transaction in it, or its later time: a passed deadline or maximum age)
   Tenderly:                    not asked (--no-tenderly)
 
 4. ERROR
   No revert data. Possible causes: the node keeps no history and Tenderly could not help,
-  the transaction ran out of gas, or it depended on state that changed within its block.
+  or the failure depended on what changed within the transaction's block.
   It used all of its gas (500000): it most likely ran out of gas.
 
 5. MODULE STATE AT BLOCK 47910261 (before the transaction)

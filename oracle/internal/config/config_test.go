@@ -337,10 +337,34 @@ func TestValidateServiceMode(t *testing.T) {
 			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
 				t.Fatalf("err = %v, want containing %q", err, c.wantErr)
 			}
-			if err := cfg.Validate(ModeAnalyze); err != nil {
-				t.Fatalf("analyze mode should not require keys: %v", err)
-			}
 		})
+	}
+}
+
+// LoadEndpoint reads only CHAIN and the RPC endpoints (for analyze-tx):
+// other variables, even malformed, are ignored.
+func TestLoadEndpoint(t *testing.T) {
+	env := map[string]string{
+		"CHAIN": "base", "RPC_URL": "https://node.example/key", "RPC_FALLBACK_URLS": " https://b.example ,",
+		"GAS_LIMIT": "lots", "SAFE_VALUE_CRON": "hourly", "MODULE_ADDRESS": "0x1234", "DRY_RUN": "maybe",
+	}
+	c, err := LoadEndpoint(envMap(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ChainName != "base" || c.Chain.ID != 8453 || strings.Join(c.RPCURLs, " ") != "https://node.example/key https://b.example" {
+		t.Fatalf("%+v", c)
+	}
+	if _, err := Load(envMap(env)); err == nil {
+		t.Fatal("Load accepted the malformed variables")
+	}
+	if c, err := LoadEndpoint(envMap(nil)); err != nil || c.ChainName != DefaultChain || c.PrimaryRPCURL() != c.Chain.DefaultRPCURL {
+		t.Fatalf("defaults: %+v, %v", c, err)
+	}
+	for _, bad := range []map[string]string{{"CHAIN": "nowhere"}, {"RPC_URL": "ftp://node"}, {"RPC_FALLBACK_URLS": "node:8545"}} {
+		if _, err := LoadEndpoint(envMap(bad)); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
 	}
 }
 

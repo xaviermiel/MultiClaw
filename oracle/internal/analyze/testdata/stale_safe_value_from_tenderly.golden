@@ -29,7 +29,8 @@
   Meaning:   The Safe value stored in the module is older than maxSafeValueAge, or was never set.
   Solution:  The Safe value oracle must call updateSafeValue: check that it is running and is this module's authorized oracle.
 
-5. MODULE STATE NOW (the node has no state for the block before the transaction)
+5. MODULE STATE NOW (the block before the transaction could not be read)
+  Block 47910261:      unreadable: missing trie node 6c0c5a2e (path ) state is not available
   Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
   Authorized oracle:   0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E (the sender)
   Safe value:          584 USD

@@ -1,0 +1,41 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  23000 of 500000
+
+2. CALL
+  Function:  executeOnProtocolWithValue(address,bytes) (of modules deployed before March 19, 2026)
+    target:  0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4
+    data:    0x414bf389… (260 bytes)
+  The call the Safe makes:
+    Target:              0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4
+    Function:            exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
+      tokenIn:           USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+      tokenOut:          WETH (0x4200000000000000000000000000000000000006)
+      fee:               0.05%
+      recipient:         0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+      deadline:          2025-10-09T23:46:05Z
+      amountIn:          100 USDC
+      amountOutMinimum:  0.025 WETH
+
+3. REPLAY
+  debug_traceTransaction:  reverted: reverted without data
+
+4. ERROR
+  Error:     reverted without data
+  Meaning:   Current modules do not have this function of older modules, and revert without data when it is called.
+  Solution:  Use the current function: executeOnProtocolWithValue(target, data, value), setSubAccountLimits(subAccount, maxSpendingBps, maxSpendingUSD, windowDuration).
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:                0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Spending allowance:  20 USD
+  Last oracle update:  2025-10-09T23:26:05Z (10m0s before the block)
+
+══════════════════════════════════════════════════════════════════════

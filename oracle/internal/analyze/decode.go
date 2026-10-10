@@ -22,8 +22,10 @@ type field struct{ key, value string }
 // revertInfo is decoded revert data.
 type revertInfo struct {
 	// name is the error's name ("Error" for Error(string), "Panic" for
-	// Panic(uint256)), or "" when the analyzer does not know it.
-	name string
+	// Panic(uint256), the EVM's message for a failure that is not a revert),
+	// or "" when the analyzer does not know it.
+	name   string
+	source errorSource
 	// detail is Error's reason, or what Panic's code means.
 	detail string
 	// args are a custom error's arguments, and values their decoded values.
@@ -32,6 +34,21 @@ type revertInfo struct {
 	data   []byte
 	help   help
 }
+
+// errorSource is what kind of error a revert is, which decides whose
+// explanation applies.
+type errorSource int
+
+const (
+	unknownError errorSource = iota // an unknown selector, or malformed data
+	noData                          // a revert without data
+	reasonError                     // Error(string)
+	panicError                      // Panic(uint256)
+	moduleError                     // an error of the module's ABI
+	parserError                     // an error of a parser's
+	tokenError                      // an OpenZeppelin token error
+	evmFailure                      // not a revert: out of gas, an invalid opcode...
+)
 
 var (
 	errorStringSelector = [4]byte{0x08, 0xc3, 0x79, 0xa0} // Error(string)
@@ -62,7 +79,12 @@ var usdErrorArgs = map[string]bool{
 // or parser error, or an OpenZeppelin token error.
 func decodeRevert(data []byte) *revertInfo {
 	r := &revertInfo{data: data, help: unknownHelp}
+	if len(data) == 0 {
+		r.source, r.help = noData, noDataHelp
+		return r
+	}
 	if len(data) < 4 {
+		r.help = shortDataHelp
 		return r
 	}
 	sel := [4]byte(data[:4])
@@ -73,7 +95,7 @@ func decodeRevert(data []byte) *revertInfo {
 			return r
 		}
 		reason := vals[0].(string)
-		r.name, r.detail = "Error", reason
+		r.name, r.source, r.detail = "Error", reasonError, reason
 		r.help = help{"The contract reverted with this reason.", "The reason comes from the contract that reverted."}
 		if h, ok := reasonHelp[reason]; ok {
 			r.help = h
@@ -89,11 +111,17 @@ func decodeRevert(data []byte) *revertInfo {
 		if m, ok := panicCodes[code.Uint64()]; ok && code.IsUint64() {
 			meaning = m
 		}
-		r.name, r.detail, r.help = "Panic", fmt.Sprintf("0x%x (%s)", code, meaning), panicHelp
+		r.name, r.source, r.detail, r.help = "Panic", panicError, fmt.Sprintf("0x%x (%s)", code, meaning), panicHelp
 		return r
 	}
+	source := tokenError
 	e, ok := contracts.LookupError(sel)
-	if !ok {
+	if ok {
+		source = parserError
+		if m, isModule := contracts.ModuleABI.Errors[e.Name]; isModule && m.ID == e.ID {
+			source = moduleError
+		}
+	} else {
 		e, ok = commonErrors[sel]
 	}
 	if !ok {
@@ -103,13 +131,26 @@ func decodeRevert(data []byte) *revertInfo {
 	if err != nil {
 		return r
 	}
-	r.name, r.help, r.values = e.Name, errorHelp[e.Name], vals
+	r.name, r.source, r.help, r.values = e.Name, source, errorHelp[e.Name], vals
 	for i, in := range e.Inputs {
 		v := formatPlain(vals[i])
 		if x, ok := vals[i].(*big.Int); ok && usdErrorArgs[e.Name] {
 			v = usd(x)
 		}
 		r.args = append(r.args, field{in.Name, v})
+	}
+	return r
+}
+
+// evmError is a failure the EVM raised instead of a revert: out of gas, an
+// invalid opcode, ETH the caller does not have...
+func evmError(msg string) *revertInfo {
+	r := &revertInfo{name: msg, source: evmFailure, help: evmHelp}
+	switch {
+	case strings.Contains(msg, "out of gas"):
+		r.help = outOfGasHelp
+	case strings.Contains(msg, "insufficient balance"):
+		r.help = insufficientETHHelp
 	}
 	return r
 }
@@ -152,6 +193,9 @@ type innerCall struct {
 	target common.Address
 	data   []byte
 	value  *big.Int
+	// ignoredValue is the value passed for a call the module makes without
+	// ETH (approve, repay).
+	ignoredValue *big.Int
 	// method and args decode data with ProtocolCallsABI (nil method when it
 	// does not know the selector).
 	method *abi.Method
@@ -295,8 +339,11 @@ func (a *Analyzer) formatArg(ctx context.Context, name string, v any) string {
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *big.Int:
-		if usdArgs[name] {
+		switch {
+		case usdArgs[name]:
 			return x.String() + " (" + usd(x) + ")"
+		case name == "value": // executeOnProtocolWithValue's
+			return x.String() + " (" + bn.FormatUnits(x, 18) + " ETH)"
 		}
 	}
 	return formatPlain(v)

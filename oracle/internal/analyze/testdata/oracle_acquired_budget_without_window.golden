@@ -1,0 +1,41 @@
+══════════════════════════════════════════════════════════════════════
+  TRANSACTION ANALYSIS 0xa07ffb16ae3415a94903ae57faacca5b533555b269d0afe492410ef92153a54f
+══════════════════════════════════════════════════════════════════════
+
+1. TRANSACTION
+  From:      0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E
+  To:        0xbB2470CB800358Fa38a4849C20453563a1e34c00
+  Value:     0 ETH
+  Block:     47910262 (2025-10-09T23:36:05Z)
+  Status:    FAILED
+  Gas used:  155988 of 500000
+
+2. CALL
+  Function:                    batchUpdate(address,uint256,uint256,address[],uint256[],uint256[])
+    subAccount:                0x4573A0C9428e56B0d4EEfcb43DCd99299BBD2e6c
+    expectedAllowanceVersion:  55
+    newAllowance:              20000000000000000000 (20 USD)
+    tokens:                    [USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e)]
+    expectedTokenVersions:     [0]
+    balances:                  [100000000]
+
+3. REPLAY
+  debug_traceTransaction:  reverted: ExceedsOracleAcquiredBudget
+
+4. ERROR
+  Error:         ExceedsOracleAcquiredBudget
+    cumulative:  100 USD
+    maximum:     80 USD
+  Meaning:       The acquired balances the oracle granted in this window exceed maxOracleAcquiredBps of the Safe value.
+  Solution:      Wait for the window to end. If it keeps happening, check the oracle for a compromise.
+
+5. MODULE STATE AT BLOCK 47910261 (before the transaction)
+  Safe:                        0x6E7692fFE42ca2A3FA2b08611AA7e79A2AaA8e8C
+  Authorized oracle:           0x763072E0FDa74Eecab3e60BF5BC5b8A46866be7E (the sender)
+  Grant window start:          2025-10-09T23:36:05Z (0s before the block)
+  Granted in the window:       0 USD
+  Window Safe value:           0 USD: no spending window yet, so the budget is based on the Safe value
+  Safe value:                  400 USD
+  Max oracle acquired budget:  2000 bps (20%)
+
+══════════════════════════════════════════════════════════════════════
