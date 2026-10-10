@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IModuleRegistry} from "./interfaces/IModuleRegistry.sol";
 
 /**
@@ -9,8 +10,16 @@ import {IModuleRegistry} from "./interfaces/IModuleRegistry.sol";
  * @notice Central registry for all deployed DeFiInteractorModules
  * @dev Registration is open to authorized factories (permissionless deployment via factories).
  *      Admin functions (deactivate, remove, authorize/deauthorize factories) remain owner-only.
+ *
+ *      Since deployment is permissionless, anyone can deploy a module naming any oracle. Each
+ *      oracle therefore has an access policy here, which it (or a manager it designates) sets:
+ *      open (the default) serves every active module, restricted serves only the modules it
+ *      approved and those deployed by deployers it trusts. The policy tells oracles which modules
+ *      to serve (getModulesServedBy); modules don't enforce it.
  */
 contract ModuleRegistry is IModuleRegistry, Ownable {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     // ============ State Variables ============
 
     /// @notice All registered module addresses (compact array, swap-and-pop on removal)
@@ -34,6 +43,25 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
     /// @notice Cached count of active modules (avoids O(n) iteration)
     uint256 private _activeModuleCount;
 
+    /// @notice Module => the account that deployed it through an authorized factory
+    ///         (address(0) for modules registered by the owner)
+    mapping(address => address) public moduleDeployer;
+
+    /// @notice Deployer => modules it deployed through an authorized factory
+    mapping(address => address[]) private _deployerModules;
+
+    /// @notice Oracle => account that may set its access policy besides the oracle itself
+    mapping(address => address) public oracleManager;
+
+    /// @notice Oracle => whether it serves only the modules it approved and those of the deployers it trusts
+    mapping(address => bool) public oracleRestricted;
+
+    /// @notice Oracle => deployers whose modules it serves when restricted
+    mapping(address => EnumerableSet.AddressSet) private _trustedDeployers;
+
+    /// @notice Oracle => modules it serves when restricted
+    mapping(address => EnumerableSet.AddressSet) private _approvedModules;
+
     // ============ Events ============
 
     event ModuleRegistered(address indexed module, address indexed safe, address indexed oracle);
@@ -42,6 +70,10 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
     event ModuleRemoved(address indexed module);
     event FactoryAuthorized(address indexed factory);
     event FactoryDeauthorized(address indexed factory);
+    event OracleManagerSet(address indexed oracle, address indexed manager);
+    event OracleRestrictionSet(address indexed oracle, bool restricted);
+    event OracleDeployerTrustSet(address indexed oracle, address indexed deployer, bool trusted);
+    event OracleModuleApprovalSet(address indexed oracle, address indexed module, bool approved);
 
     // ============ Errors ============
 
@@ -50,6 +82,17 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
     error SafeAlreadyHasModule(address safe, address existingModule);
     error InvalidAddress();
     error OnlyAuthorizedFactory();
+    error NotOracleManager(address oracle, address caller);
+
+    // ============ Modifiers ============
+
+    /// @dev Only the oracle itself or the manager it designated may set its policy
+    modifier onlyOracleOrManager(address oracle) {
+        if (msg.sender != oracle && msg.sender != oracleManager[oracle]) {
+            revert NotOracleManager(oracle, msg.sender);
+        }
+        _;
+    }
 
     // ============ Constructor ============
 
@@ -84,24 +127,29 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
 
     /**
      * @notice Register a new module (owner only)
+     * @dev The module has no recorded deployer: restricted oracles serve it only if they approve it.
      * @param module The module address
      * @param safe The Safe address this module serves
      * @param oracle The authorized oracle address
      */
     function registerModule(address module, address safe, address oracle) external onlyOwner {
-        _registerModule(module, safe, oracle);
+        _registerModule(module, safe, oracle, address(0));
     }
 
     /**
      * @notice Register a module from an authorized factory
-     * @dev Called by ModuleFactory after CREATE2 deployment
+     * @dev Called by the factories after deployment
      * @param module The deployed module address
      * @param safe The Safe address this module serves
      * @param oracle The authorized oracle address
+     * @param deployer The account that called the factory (recorded for oracle access policies)
      */
-    function registerModuleFromFactory(address module, address safe, address oracle) external override {
+    function registerModuleFromFactory(address module, address safe, address oracle, address deployer)
+        external
+        override
+    {
         if (!authorizedFactories[msg.sender]) revert OnlyAuthorizedFactory();
-        _registerModule(module, safe, oracle);
+        _registerModule(module, safe, oracle, deployer);
     }
 
     /**
@@ -109,8 +157,9 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      * @param module The module address
      * @param safe The Safe address
      * @param oracle The oracle address
+     * @param deployer The account that deployed the module through a factory (address(0) if none)
      */
-    function _registerModule(address module, address safe, address oracle) internal {
+    function _registerModule(address module, address safe, address oracle, address deployer) internal {
         // oracle can be address(0) for oracleless modules
         if (module == address(0) || safe == address(0)) {
             revert InvalidAddress();
@@ -130,6 +179,10 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
         safeToModule[safe] = module;
         _isRegistered[module] = true;
         _activeModuleCount++;
+        if (deployer != address(0)) {
+            moduleDeployer[module] = deployer;
+            _deployerModules[deployer].push(module);
+        }
 
         emit ModuleRegistered(module, safe, oracle);
     }
@@ -191,9 +244,80 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
         address safe = _moduleInfo[module].safeAddress;
         delete safeToModule[safe];
         delete _moduleInfo[module];
+        // Its _deployerModules entry stays; it is skipped once the module has no deployer
+        delete moduleDeployer[module];
         _isRegistered[module] = false;
 
         emit ModuleRemoved(module);
+    }
+
+    // ============ Oracle Access Policies ============
+
+    /**
+     * @notice Let `manager` set the calling oracle's access policy, so that the oracle's own key
+     *         needn't (address(0) removes the manager; the oracle can always set it itself)
+     * @param manager The account that may manage the policy of msg.sender
+     */
+    function setOracleManager(address manager) external {
+        oracleManager[msg.sender] = manager;
+        emit OracleManagerSet(msg.sender, manager);
+    }
+
+    /**
+     * @notice Restrict an oracle to the modules it approved and those deployed by deployers it
+     *         trusts, or open it to every active module (the default)
+     * @param oracle The oracle whose policy is set
+     * @param restricted Whether the oracle is restricted
+     */
+    function setOracleRestricted(address oracle, bool restricted) external onlyOracleOrManager(oracle) {
+        oracleRestricted[oracle] = restricted;
+        emit OracleRestrictionSet(oracle, restricted);
+    }
+
+    /**
+     * @notice Trust (or stop trusting) deployers: a restricted oracle serves the modules they
+     *         deploy through an authorized factory, including future ones
+     * @param oracle The oracle whose policy is set
+     * @param deployers The deployer accounts
+     * @param trusted Whether to trust them
+     */
+    function setTrustedDeployers(address oracle, address[] calldata deployers, bool trusted)
+        external
+        onlyOracleOrManager(oracle)
+    {
+        EnumerableSet.AddressSet storage set = _trustedDeployers[oracle];
+        for (uint256 i = 0; i < deployers.length; i++) {
+            if (deployers[i] == address(0)) revert InvalidAddress();
+            if (trusted) {
+                set.add(deployers[i]);
+            } else {
+                set.remove(deployers[i]);
+            }
+            emit OracleDeployerTrustSet(oracle, deployers[i], trusted);
+        }
+    }
+
+    /**
+     * @notice Approve (or stop approving) modules: a restricted oracle serves them while they are
+     *         active. A module can be approved before it is registered (at its predicted address).
+     * @param oracle The oracle whose policy is set
+     * @param modules The module addresses
+     * @param approved Whether to approve them
+     */
+    function setApprovedModules(address oracle, address[] calldata modules, bool approved)
+        external
+        onlyOracleOrManager(oracle)
+    {
+        EnumerableSet.AddressSet storage set = _approvedModules[oracle];
+        for (uint256 i = 0; i < modules.length; i++) {
+            if (modules[i] == address(0)) revert InvalidAddress();
+            if (approved) {
+                set.add(modules[i]);
+            } else {
+                set.remove(modules[i]);
+            }
+            emit OracleModuleApprovalSet(oracle, modules[i], approved);
+        }
     }
 
     // ============ View Functions ============
@@ -203,7 +327,7 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      * @return modules Array of active module addresses
      * @dev Array is compact (swap-and-pop on removal), only deactivated entries need filtering
      */
-    function getActiveModules() external view override returns (address[] memory) {
+    function getActiveModules() public view override returns (address[] memory) {
         uint256 count = _activeModuleCount;
         uint256 length = _allModules.length;
 
@@ -298,5 +422,116 @@ contract ModuleRegistry is IModuleRegistry, Ownable {
      */
     function moduleInfo(address module) external view override returns (ModuleInfo memory) {
         return _moduleInfo[module];
+    }
+
+    // ============ Oracle Access Policy Views ============
+
+    /**
+     * @notice Whether an oracle's access policy covers a module: the module is registered and
+     *         active, and the oracle is open, approved it, or trusts its deployer
+     * @dev Whether the module names this oracle is up to the module (its authorizedOracle).
+     * @param module The module address
+     * @param oracle The oracle address
+     * @return served Whether the oracle serves the module
+     */
+    function isServedBy(address module, address oracle) external view override returns (bool) {
+        if (!_isActive(module)) return false;
+        if (!oracleRestricted[oracle] || _approvedModules[oracle].contains(module)) return true;
+        address deployer = moduleDeployer[module];
+        return deployer != address(0) && _trustedDeployers[oracle].contains(deployer);
+    }
+
+    /**
+     * @notice The active modules an oracle serves: every active module while it is open; when
+     *         restricted, the active modules it approved, then those of the deployers it trusts
+     * @dev When restricted, the cost grows with the oracle's own modules, not the registry's size.
+     * @param oracle The oracle address
+     * @return modules The modules, without duplicates
+     */
+    function getModulesServedBy(address oracle) external view override returns (address[] memory modules) {
+        if (!oracleRestricted[oracle]) return getActiveModules();
+
+        EnumerableSet.AddressSet storage approved = _approvedModules[oracle];
+        EnumerableSet.AddressSet storage deployers = _trustedDeployers[oracle];
+        uint256 maxCount = approved.length();
+        for (uint256 i = 0; i < deployers.length(); i++) {
+            maxCount += _deployerModules[deployers.at(i)].length;
+        }
+
+        modules = new address[](maxCount);
+        uint256 count = 0;
+        for (uint256 i = 0; i < approved.length(); i++) {
+            address module = approved.at(i);
+            if (_isActive(module)) modules[count++] = module;
+        }
+        for (uint256 i = 0; i < deployers.length(); i++) {
+            address deployer = deployers.at(i);
+            address[] storage deployed = _deployerModules[deployer];
+            for (uint256 j = 0; j < deployed.length; j++) {
+                address module = deployed[j];
+                // Skip removed modules (no deployer any more) and approved ones (already listed)
+                if (_isActive(module) && moduleDeployer[module] == deployer && !approved.contains(module)) {
+                    modules[count++] = module;
+                }
+            }
+        }
+        // Shrink the array to the modules found
+        assembly ("memory-safe") {
+            mstore(modules, count)
+        }
+    }
+
+    /**
+     * @notice Whether an oracle trusts a deployer, e.g. to check before deploying a vault that a
+     *         restricted oracle will serve it
+     * @param oracle The oracle address
+     * @param deployer The deployer account
+     * @return trusted Whether the oracle trusts the deployer
+     */
+    function isTrustedDeployer(address oracle, address deployer) external view returns (bool) {
+        return _trustedDeployers[oracle].contains(deployer);
+    }
+
+    /**
+     * @notice Whether an oracle approved a module
+     * @param oracle The oracle address
+     * @param module The module address
+     * @return approved Whether the oracle approved the module
+     */
+    function isApprovedModule(address oracle, address module) external view returns (bool) {
+        return _approvedModules[oracle].contains(module);
+    }
+
+    /**
+     * @notice The deployers an oracle trusts
+     * @param oracle The oracle address
+     * @return deployers The trusted deployers
+     */
+    function getTrustedDeployers(address oracle) external view returns (address[] memory) {
+        return _trustedDeployers[oracle].values();
+    }
+
+    /**
+     * @notice The modules an oracle approved (registered or not, active or not)
+     * @param oracle The oracle address
+     * @return modules The approved modules
+     */
+    function getApprovedModules(address oracle) external view returns (address[] memory) {
+        return _approvedModules[oracle].values();
+    }
+
+    /**
+     * @notice The modules an account deployed through an authorized factory (removed ones
+     *         included, though their moduleDeployer is cleared)
+     * @param deployer The deployer account
+     * @return modules The modules
+     */
+    function getDeployerModules(address deployer) external view returns (address[] memory) {
+        return _deployerModules[deployer];
+    }
+
+    /// @dev Whether a module is registered and not deactivated
+    function _isActive(address module) internal view returns (bool) {
+        return _isRegistered[module] && _moduleInfo[module].isActive;
     }
 }

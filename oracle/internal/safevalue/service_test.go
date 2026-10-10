@@ -268,3 +268,32 @@ func TestShutdownDuringTheValuationWritesNothing(t *testing.T) {
 		t.Fatalf("sent %d; logs %q", len(sender.sent), l.lines)
 	}
 }
+
+func TestOnlyTheModulesOfTheOraclesAccessPolicyAreValued(t *testing.T) {
+	stranger := addr(0x40e)
+	c := serviceChain(e(5, 18), big.NewInt(0), 0)
+	c.Return(stranger, &contracts.ModuleABI, "authorizedOracle", oracle)
+	registry := addr(0x5e9)
+	c.Return(registry, &contracts.RegistryABI, "getActiveModules", []common.Address{stranger, module})
+	// The oracle restricted itself: the stranger's module, which names it too, isn't served.
+	c.On(registry, &contracts.RegistryABI, "getModulesServedBy", func(args []any) ([]any, error) {
+		if args[0].(common.Address) != oracle {
+			t.Errorf("policy of %s read, want the oracle's", args[0])
+		}
+		return []any{[]common.Address{module}}, nil
+	})
+
+	sender := newFakeSender()
+	l := &logs{}
+	s := newTestService(c, sender, l)
+	s.registry = ptr(registry)
+	s.RunOnce(context.Background())
+	if !l.has("Found 1 active modules in registry served by this oracle") || len(sender.sent) != 1 || sender.sent[0].To != module {
+		t.Fatalf("sent %+v; logs %q", sender.sent, l.lines)
+	}
+	for _, call := range c.Calls() {
+		if call.To == stranger {
+			t.Fatalf("read the stranger's module: %+v", call)
+		}
+	}
+}

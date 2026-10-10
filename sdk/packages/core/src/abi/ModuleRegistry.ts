@@ -125,6 +125,44 @@ export const ModuleRegistryAbi = [
   },
   {
     type: "function",
+    name: "getApprovedModules",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getDeployerModules",
+    inputs: [
+      {
+        name: "deployer",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "getModuleForSafe",
     inputs: [
       {
@@ -144,6 +182,25 @@ export const ModuleRegistryAbi = [
   },
   {
     type: "function",
+    name: "getModulesServedBy",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "modules",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "getTotalModuleCount",
     inputs: [],
     outputs: [
@@ -151,6 +208,49 @@ export const ModuleRegistryAbi = [
         name: "",
         type: "uint256",
         internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getTrustedDeployers",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address[]",
+        internalType: "address[]",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "isApprovedModule",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
       },
     ],
     stateMutability: "view",
@@ -170,6 +270,73 @@ export const ModuleRegistryAbi = [
         name: "",
         type: "bool",
         internalType: "bool",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "isServedBy",
+    inputs: [
+      {
+        name: "module",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "isTrustedDeployer",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "deployer",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "moduleDeployer",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
       },
     ],
     stateMutability: "view",
@@ -211,6 +378,44 @@ export const ModuleRegistryAbi = [
             internalType: "bool",
           },
         ],
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "oracleManager",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "oracleRestricted",
+    inputs: [
+      {
+        name: "",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "bool",
+        internalType: "bool",
       },
     ],
     stateMutability: "view",
@@ -283,6 +488,11 @@ export const ModuleRegistryAbi = [
         type: "address",
         internalType: "address",
       },
+      {
+        name: "deployer",
+        type: "address",
+        internalType: "address",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -325,6 +535,83 @@ export const ModuleRegistryAbi = [
       },
     ],
     stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "setApprovedModules",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "modules",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "approved",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setOracleManager",
+    inputs: [
+      {
+        name: "manager",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setOracleRestricted",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "restricted",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setTrustedDeployers",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "deployers",
+        type: "address[]",
+        internalType: "address[]",
+      },
+      {
+        name: "trusted",
+        type: "bool",
+        internalType: "bool",
+      },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
   },
   {
     type: "function",
@@ -431,6 +718,94 @@ export const ModuleRegistryAbi = [
   },
   {
     type: "event",
+    name: "OracleDeployerTrustSet",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "deployer",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "trusted",
+        type: "bool",
+        indexed: false,
+        internalType: "bool",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "OracleManagerSet",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "manager",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "OracleModuleApprovalSet",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "module",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "approved",
+        type: "bool",
+        indexed: false,
+        internalType: "bool",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "OracleRestrictionSet",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "restricted",
+        type: "bool",
+        indexed: false,
+        internalType: "bool",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
     name: "OwnershipTransferred",
     inputs: [
       {
@@ -470,6 +845,22 @@ export const ModuleRegistryAbi = [
     inputs: [
       {
         name: "module",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+  },
+  {
+    type: "error",
+    name: "NotOracleManager",
+    inputs: [
+      {
+        name: "oracle",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "caller",
         type: "address",
         internalType: "address",
       },

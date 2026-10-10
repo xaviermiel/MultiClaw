@@ -58,7 +58,7 @@ func NewService(cfg *config.Config, chain ChainReader, sender ethx.Sender, logf 
 // RunOnce checks every module this oracle is authorized for (one cron run).
 func (s *Service) RunOnce(ctx context.Context) {
 	s.logf("=== Safe Value Monitor: Starting check ===")
-	modules, err := discovery.ActiveModules(ctx, s.chain, s.registry, s.module, s.logf)
+	modules, err := discovery.ActiveModules(ctx, s.chain, s.registry, s.module, s.sender.Address(), s.logf)
 	if err != nil {
 		s.logf("Error in safe value update: %v", err)
 		return

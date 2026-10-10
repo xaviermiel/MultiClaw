@@ -10,22 +10,35 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/xaviermiel/MultiClaw/oracle/internal/contracts"
+	"github.com/xaviermiel/MultiClaw/oracle/internal/ethx"
 	"github.com/xaviermiel/MultiClaw/oracle/internal/logx"
 )
 
-// ActiveModules returns the modules to serve: the registry's active modules,
-// or the configured module when there is no registry. As in the TS, an empty
-// or unreadable registry falls back to the configured module. Without one,
-// an empty registry yields no modules and a failed read is an error (the TS
-// carried on with an undefined module address).
-func ActiveModules(ctx context.Context, c contracts.Caller, registry, module *common.Address, logf logx.Logf) ([]common.Address, error) {
+// ActiveModules returns the modules to serve: the registry's active modules
+// that the oracle's access policy covers (all of them unless the oracle
+// restricted itself to the modules it approved and those of deployers it
+// trusts), or the configured module when there is no registry. A registry
+// deployed before access policies lacks getModulesServedBy, and every active
+// module is served, as in the TS. As in the TS, an empty or unreadable
+// registry falls back to the configured module. Without one, an empty
+// registry yields no modules and a failed read is an error (the TS carried on
+// with an undefined module address).
+func ActiveModules(ctx context.Context, c contracts.Caller, registry, module *common.Address, oracle common.Address, logf logx.Logf) ([]common.Address, error) {
 	if registry == nil {
 		if module == nil {
 			return nil, errors.New("neither REGISTRY_ADDRESS nor MODULE_ADDRESS is set")
 		}
 		return []common.Address{*module}, nil
 	}
-	modules, err := contracts.NewRegistry(*registry, c).GetActiveModules(ctx)
+	reg := contracts.NewRegistry(*registry, c)
+	modules, err := reg.ModulesServedBy(ctx, oracle)
+	policies := err == nil
+	if _, hasData := contracts.RevertData(err); ethx.IsExecutionError(err) && !hasData {
+		// A revert without data is how a registry without access policies
+		// answers. Any other failure is an error: a restricted oracle must
+		// not end up serving every module.
+		modules, err = reg.GetActiveModules(ctx)
+	}
 	switch {
 	case err != nil && module != nil:
 		logf("Error querying registry, falling back to single module: %v", err)
@@ -39,7 +52,11 @@ func ActiveModules(ctx context.Context, c contracts.Caller, registry, module *co
 		logf("Registry returned no active modules")
 		return nil, nil
 	}
-	logf("Found %d active modules in registry", len(modules))
+	if policies {
+		logf("Found %d active modules in registry served by this oracle", len(modules))
+	} else {
+		logf("Found %d active modules in registry", len(modules))
+	}
 	return modules, nil
 }
 

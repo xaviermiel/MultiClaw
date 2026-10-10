@@ -882,3 +882,32 @@ func TestHistoricalTokensInterruptedDuringTheLastChunk(t *testing.T) {
 		t.Fatal("kept an incomplete history")
 	}
 }
+
+func TestRefreshServesOnlyTheModulesOfTheOraclesAccessPolicy(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	stranger := common.HexToAddress("0x4d0D0000000000000000000000000000000000e4")
+	reg := registry
+	env.svc.cfg.ModuleAddress, env.svc.cfg.RegistryAddress = nil, &reg
+	env.chain.Return(registry, &contracts.RegistryABI, "getActiveModules", []common.Address{stranger, module})
+	// The oracle restricted itself: the stranger's module, which names it too, isn't served.
+	env.chain.On(registry, &contracts.RegistryABI, "getModulesServedBy", func(args []any) ([]any, error) {
+		if args[0].(common.Address) != oracle {
+			t.Errorf("policy of %s read, want the oracle's", args[0])
+		}
+		return []any{[]common.Address{module}}, nil
+	})
+	env.chain.Return(stranger, &contracts.ModuleABI, "authorizedOracle", oracle)
+	env.module.roles[contracts.DefiExecuteRole] = []common.Address{subA}
+
+	env.svc.Refresh(ctx)
+	env.wantLogs("Found 1 active modules in registry served by this oracle", "Processing 1 module(s)")
+	for _, c := range env.chain.Calls() {
+		if c.To == stranger {
+			t.Fatalf("read the stranger's module: %+v", c)
+		}
+	}
+	if got := env.sender.subAccounts(); !slices.Equal(got, []common.Address{subA}) {
+		t.Fatalf("processed %v; logs:\n%s", got, env.logs)
+	}
+}

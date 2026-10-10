@@ -333,7 +333,7 @@ contract AgentVaultFactory is Ownable {
     /// @notice Register the module in ModuleRegistry (for oracle multi-module discovery)
     function _registerModule(address module, address safe, address oracle) internal {
         if (address(registry) != address(0)) {
-            registry.registerModuleFromFactory(module, safe, oracle);
+            registry.registerModuleFromFactory(module, safe, oracle, msg.sender);
         }
     }
 

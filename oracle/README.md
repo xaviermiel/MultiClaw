@@ -70,10 +70,25 @@ cp .env.example .env
 [`.env.example`](./.env.example) documents every variable and its default. The oracle needs:
 
 - `PRIVATE_KEY`: the key of the address set as the modules' `authorizedOracle`
-- `REGISTRY_ADDRESS` (the ModuleRegistry, for every module it lists) or `MODULE_ADDRESS` (a single module)
+- `REGISTRY_ADDRESS` (the ModuleRegistry, for the modules it lists) or `MODULE_ADDRESS` (a single module)
 - `CHAIN` (`sepolia`, `base` or `base-sepolia`; default `sepolia`) and an `RPC_URL` for it
 
 `bin/oracle config` prints the resolved configuration, with RPC URLs and the key redacted, and checks it.
+
+### Choose which modules it serves
+
+Anyone can deploy a module naming your oracle, and the oracle serves every module that names it. To serve only your own vaults, restrict the oracle in the registry. It then serves only the modules it approved and those deployed through a factory by deployers it trusts, including their future vaults:
+
+```bash
+# Once, signed by the oracle key: let a cold wallet manage the policy
+cast send $REGISTRY_ADDRESS "setOracleManager(address)" $MANAGER --account oracle
+# Signed by the manager (a keystore account here; --ledger works too)
+cast send $REGISTRY_ADDRESS "setTrustedDeployers(address,address[],bool)" $ORACLE "[$YOUR_DEPLOYER]" true --account manager
+cast send $REGISTRY_ADDRESS "setApprovedModules(address,address[],bool)" $ORACLE "[$SOME_MODULE]" true --account manager
+cast send $REGISTRY_ADDRESS "setOracleRestricted(address,bool)" $ORACLE true --account manager
+```
+
+The oracle reads the modules it serves with `getModulesServedBy` at every run, so changes need no restart. A registry deployed before access policies has no policy: every active module is served. The TS oracle ignores policies.
 
 ### Commands
 
@@ -226,6 +241,7 @@ The values the Go oracle writes on-chain are the TS oracle's, except where the T
 - **Revert reasons** are decoded by name (module and parser errors).
 - **Startup checks**: malformed variables are errors (the TS read them as NaN), the RPC endpoints must serve `CHAIN`, and a registry that lists no module without `MODULE_ADDRESS` means no modules.
 - **Process**: clean shutdown on SIGINT/SIGTERM; cron runs never overlap, and a schedule that never fires (e.g. February 30) runs only at startup; the first refresh runs before polling starts; a failure or panic in one subaccount or module doesn't stop the others (a poll that can't read a module's events is retried whole, as in the TS); transactions already sent are awaited even when a run fails, except at shutdown.
+- **Access policies**: the oracle serves only the modules its registry access policy covers (all of them unless restricted); the TS served every module naming it.
 - **`analyze-tx`** replaces `src/analyze-failed-tx.ts`: it decodes calls with the module's current ABI (the script's copy had drifted), follows the trace to the protocol error, and needs no `MODULE_ADDRESS`.
 - **Dry-run mode** and `ORACLE_ADDRESS` are new. `WINDOW_DURATION_SECONDS` is ignored, with a warning, as the TS ignored it: the window comes from each subaccount's on-chain limits.
 - **The RPC URL** is redacted in the startup banner and in error messages (the TS printed it with its API key in both).

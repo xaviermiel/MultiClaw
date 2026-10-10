@@ -378,6 +378,7 @@ contract AgentVaultFactoryTest is Test {
         assertEq(address(m.protocolParsers(protocol1)), parser1);
         assertEq(uint8(m.selectorType(bytes4(0x12345678))), 1);
         assertEq(address(m.tokenPriceFeeds(protocol1)), address(priceFeed));
+        assertEq(registry.moduleDeployer(module), address(this));
     }
 
     function testDeployFromPresetRevertsOnInvalidPreset() public {
@@ -540,6 +541,8 @@ contract AgentVaultFactoryTest is Test {
         DeFiInteractorModule m = DeFiInteractorModule(module);
         assertEq(m.owner(), address(safe1));
         assertTrue(registry.isRegistered(module));
+        // The deployer is recorded for the oracles' access policies
+        assertEq(registry.moduleDeployer(module), anyone);
     }
 
     function testDeployVaultRevertsIfSafeAlreadyHasModule() public {

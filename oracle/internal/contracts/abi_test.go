@@ -37,6 +37,7 @@ func TestABIDriftGuardMethods(t *testing.T) {
 		{&ModuleABI, "DEFI_TRANSFER_ROLE", "DEFI_TRANSFER_ROLE()", "uint16"},
 		{&ModuleABI, "DEFI_REPAY_ROLE", "DEFI_REPAY_ROLE()", "uint16"},
 		{&RegistryABI, "getActiveModules", "getActiveModules()", "address[]"},
+		{&RegistryABI, "getModulesServedBy", "getModulesServedBy(address)", "address[]"},
 		{&LegacyModuleABI, "absoluteMaxSpendingBps", "absoluteMaxSpendingBps()", "uint256"},
 		{&ERC20ABI, "balanceOf", "balanceOf(address)", "uint256"},
 		{&ERC20ABI, "decimals", "decimals()", "uint8"},

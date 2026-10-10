@@ -169,6 +169,13 @@ func (r Registry) GetActiveModules(ctx context.Context) ([]common.Address, error
 	return one[[]common.Address](r.call(ctx, "getActiveModules"))
 }
 
+// ModulesServedBy calls getModulesServedBy(oracle): the active modules the
+// oracle's access policy covers (registries deployed before access policies
+// lack it).
+func (r Registry) ModulesServedBy(ctx context.Context, oracle common.Address) ([]common.Address, error) {
+	return one[[]common.Address](r.call(ctx, "getModulesServedBy", oracle))
+}
+
 // ============ ERC20 ============
 
 // ERC20 wraps balanceOf/decimals/symbol.

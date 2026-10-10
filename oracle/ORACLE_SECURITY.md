@@ -180,6 +180,17 @@ Updates that are skipped still refresh `lastOracleUpdate` (the oracle is alive) 
 
 ---
 
+### Module Spam: Oracle Access Policies
+
+Not a key compromise, but a cost on the oracle: deployment is permissionless and the deployer chooses the oracle, so anyone can deploy many modules naming an oracle (with 1 wei in each Safe and many subaccounts). The oracle would pay gas for their Safe value and batch updates, and spend cycle time and RPC quota on them, which can delay the modules it is meant to serve past `maxOracleAge`.
+
+Each oracle therefore has an access policy in `ModuleRegistry`, set by the oracle or a manager it designates (`setOracleManager`):
+
+- **Open** (the default): it serves every active module.
+- **Restricted** (`setOracleRestricted`): it serves only the modules it approved (`setApprovedModules`) and those deployed through a factory by deployers it trusts (`setTrustedDeployers`), including their future vaults. The factories record the deployer as the account that called them, which nobody else can claim.
+
+The Go oracle reads its modules with `getModulesServedBy(oracle)`, so it never reads a module outside its policy. The policy is not enforced by modules: it decides which modules an honest oracle serves, not what a leaked key can sign.
+
 ## 3. Combined Protection Summary
 
 | Attack Vector                        | Protection                                          | Enforced By                            |
@@ -190,6 +201,7 @@ Updates that are skipped still refresh `lastOracleUpdate` (the oracle is alive) 
 | Acquired balance reset (withdrawals) | Cumulative oracle budget per window                 | Contract (`updateAcquiredBalance`)     |
 | Allowance inflation                  | Per-account `maxSpendingBps` / `maxSpendingUSD` cap | Contract (`_enforceAllowanceCap`)      |
 | Stale oracle overwrites              | Monotonic version counters                          | Contract (all oracle update functions) |
+| Modules deployed to make the oracle work for them | Oracle access policy (restricted: approved modules and trusted deployers) | `ModuleRegistry` policy, read by the oracle |
 
 **Oracle role after mitigations:**
 

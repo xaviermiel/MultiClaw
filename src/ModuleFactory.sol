@@ -191,7 +191,7 @@ contract ModuleFactory is Ownable {
 
         // Auto-register if enabled
         if (autoRegister) {
-            registry.registerModuleFromFactory(module, safe, oracle);
+            registry.registerModuleFromFactory(module, safe, oracle, msg.sender);
         }
 
         return module;

@@ -163,7 +163,7 @@ func (s *Service) poll(ctx context.Context, pending *[]pendingTx) (uint64, error
 	s.logf("Polling blocks %d to %d (%d blocks, %d confirmation depth)",
 		from, current, current-s.lastProcessedBlock, confirmations)
 
-	modules, err := discovery.ActiveModules(ctx, s.chain, s.cfg.RegistryAddress, s.cfg.ModuleAddress, s.logf)
+	modules, err := discovery.ActiveModules(ctx, s.chain, s.cfg.RegistryAddress, s.cfg.ModuleAddress, s.sender.Address(), s.logf)
 	if err != nil {
 		return 0, err
 	}
@@ -220,7 +220,7 @@ func (s *Service) Refresh(ctx context.Context) {
 }
 
 func (s *Service) refresh(ctx context.Context, pending *[]pendingTx) error {
-	modules, err := discovery.ActiveModules(ctx, s.chain, s.cfg.RegistryAddress, s.cfg.ModuleAddress, s.logf)
+	modules, err := discovery.ActiveModules(ctx, s.chain, s.cfg.RegistryAddress, s.cfg.ModuleAddress, s.sender.Address(), s.logf)
 	if err != nil {
 		return err
 	}
