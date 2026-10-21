@@ -50,7 +50,7 @@ The oracle wallet has constrained on-chain power, bounded by cumulative counters
 
 ### Build
 
-Requires Go 1.25 or later.
+Requires Go 1.25 or later. `go.mod` pins the go1.27.3 toolchain, which Go downloads automatically (`GOTOOLCHAIN=auto`, the default): it blocks the compromised eMudhra intermediates, which Go's verifier would otherwise trust because it does not check revocation.
 
 ```bash
 cd oracle
